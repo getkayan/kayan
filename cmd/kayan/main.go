@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/getkayan/kayan/internal/api"
-	"github.com/getkayan/kayan/internal/config"
-	"github.com/getkayan/kayan/internal/flow"
-	"github.com/getkayan/kayan/internal/logger"
-	"github.com/getkayan/kayan/internal/persistence"
-	"github.com/getkayan/kayan/internal/session"
+	"github.com/getkayan/kayan/api"
+	"github.com/getkayan/kayan/config"
+	"github.com/getkayan/kayan/flow"
+	"github.com/getkayan/kayan/logger"
+	"github.com/getkayan/kayan/persistence"
+	"github.com/getkayan/kayan/session"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"go.uber.org/zap"
@@ -30,28 +31,33 @@ func main() {
 	)
 
 	// Initialize Repository
-	repo, err := persistence.NewStorage(cfg.DBType, cfg.DSN, nil)
+	repo, err := persistence.NewStorage[uuid.UUID](cfg.DBType, cfg.DSN, nil)
 	if err != nil {
 		logger.Log.Fatal("failed to initialize repository", zap.Error(err))
 	}
 
 	// Initialize Managers
-	regManager := flow.NewRegistrationManager(repo)
-	logManager := flow.NewLoginManager(repo)
-	sessionManager := session.NewManager(repo)
-	oidcManager, err := flow.NewOIDCManager(repo, cfg.OIDCProviders)
+	regManager := flow.NewRegistrationManager[uuid.UUID](repo)
+	logManager := flow.NewLoginManager[uuid.UUID](repo)
+	sessionManager := session.NewManager[uuid.UUID](repo)
+	oidcManager, err := flow.NewOIDCManager[uuid.UUID](repo, cfg.OIDCProviders)
 	if err != nil {
 		logger.Log.Error("failed to initialize OIDC manager", zap.Error(err))
 	}
 
 	// Register Strategies
 	hasher := flow.NewBcryptHasher(14)
-	pwStrategy := flow.NewPasswordStrategy(repo, hasher)
+	pwStrategy := flow.NewPasswordStrategy[uuid.UUID](repo, hasher, "email")
+
+	// Set ID generator for UUIDs
+	pwStrategy.SetIDGenerator(uuid.New)
+
 	regManager.RegisterStrategy(pwStrategy)
 	logManager.RegisterStrategy(pwStrategy)
 
 	// Initialize Handler
-	h := api.NewHandler(regManager, logManager, sessionManager, oidcManager)
+	h := api.NewHandler[uuid.UUID](regManager, logManager, sessionManager, oidcManager)
+	h.SetIDGenerator(uuid.New)
 
 	// Setup Echo
 	e := echo.New()
