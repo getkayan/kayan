@@ -18,11 +18,11 @@ import (
 // =============================================================================
 
 type User struct {
-	*identity.Identity[uuid.UUID]
+	*identity.Identity
 }
 
-func WrapUser(i *identity.Identity[uuid.UUID]) *User {
-	return &User{Identity: i}
+func WrapUser(i any) *User {
+	return &User{Identity: i.(*identity.Identity)}
 }
 
 // GetEmail handles extraction from the dynamic JSON Traits field
@@ -36,7 +36,7 @@ func (u *User) GetFullName() string {
 }
 
 func (u *User) getTraitString(key string) string {
-	var traits map[string]interface{}
+	var traits map[string]any
 	if err := json.Unmarshal(u.Traits, &traits); err != nil {
 		return ""
 	}
@@ -48,18 +48,19 @@ func (u *User) getTraitString(key string) string {
 
 func main() {
 	// 1. Setup Kayan
-	storage, err := persistence.NewStorage[uuid.UUID]("sqlite", "kayan_auth_wrapper.db", nil)
+	storage, err := persistence.NewStorage("sqlite", "kayan_auth_wrapper.db", nil)
 	if err != nil {
 		log.Fatalf("failed to initialize storage: %v", err)
 	}
-	regManager := flow.NewRegistrationManager[uuid.UUID](storage)
-	loginManager := flow.NewLoginManager[uuid.UUID](storage)
+	factory := func() any { return &identity.Identity{} }
+	regManager := flow.NewRegistrationManager(storage, factory)
+	loginManager := flow.NewLoginManager(storage)
 
 	hasher := flow.NewBcryptHasher(14)
-	pwStrategy := flow.NewPasswordStrategy[uuid.UUID](storage, hasher, "email")
+	pwStrategy := flow.NewPasswordStrategy(storage, hasher, "email", factory)
 
 	// Configure ID generation for UUIDs
-	pwStrategy.SetIDGenerator(uuid.New)
+	pwStrategy.SetIDGenerator(func() any { return uuid.New() })
 
 	regManager.RegisterStrategy(pwStrategy)
 	loginManager.RegisterStrategy(pwStrategy)
@@ -69,7 +70,7 @@ func main() {
 	fmt.Println("Registering user...")
 	traits := identity.JSON(`{"email": "typed@example.com", "full_name": "Typed User"}`)
 	ident, _ := regManager.Submit(context.Background(), "password", traits, "password123")
-	fmt.Printf("✓ Registered Identity: %s\n", ident.ID)
+	fmt.Printf("✓ Registered Identity: %s\n", ident.(*identity.Identity).ID)
 
 	// 3. THE CORE PATTERN: Wrap the result for type safety
 	user := WrapUser(ident)
@@ -82,7 +83,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Login failed: %v", err)
 	}
-	fmt.Printf("✓ Login Success for: %s\n", loggedInIdent.ID)
+	fmt.Printf("✓ Login Success for: %s\n", loggedInIdent.(*identity.Identity).ID)
 
 	// Wrap the logged in user as well
 	loggedInUser := WrapUser(loggedInIdent)

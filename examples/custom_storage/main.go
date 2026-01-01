@@ -16,31 +16,46 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// MongoStorage is an implementation of domain.Storage[T] using the official MongoDB driver.
-type MongoStorage[T any] struct {
+// MongoStorage is an implementation of domain.Storage using the official MongoDB driver.
+type MongoStorage struct {
 	client *mongo.Client
 	db     *mongo.Database
 }
 
-func (s *MongoStorage[T]) CreateIdentity(id *identity.Identity[T]) error {
+func (s *MongoStorage) CreateIdentity(id any) error {
 	ctx := context.Background()
 	_, err := s.db.Collection("identities").InsertOne(ctx, id)
 	return err
 }
 
-func (s *MongoStorage[T]) GetIdentity(id string) (*identity.Identity[T], error) {
+func (s *MongoStorage) GetIdentity(factory func() any, id any) (any, error) {
 	ctx := context.Background()
-	var ident identity.Identity[T]
-	err := s.db.Collection("identities").FindOne(ctx, bson.M{"id": id}).Decode(&ident)
+	ident := factory()
+	err := s.db.Collection("identities").FindOne(ctx, bson.M{"id": id}).Decode(ident)
 	if err != nil {
 		return nil, err
 	}
-	return &ident, nil
+	return ident, nil
 }
 
-func (s *MongoStorage[T]) GetCredentialByIdentifier(identifier, method string) (*identity.Credential[T], error) {
+func (s *MongoStorage) FindIdentity(factory func() any, query map[string]any) (any, error) {
 	ctx := context.Background()
-	var ident identity.Identity[T]
+	ident := factory()
+	// Convert map to BSON query
+	filter := bson.M{}
+	for k, v := range query {
+		filter[k] = v
+	}
+	err := s.db.Collection("identities").FindOne(ctx, filter).Decode(ident)
+	if err != nil {
+		return nil, err
+	}
+	return ident, nil
+}
+
+func (s *MongoStorage) GetCredentialByIdentifier(identifier, method string) (*identity.Credential, error) {
+	ctx := context.Background()
+	var ident identity.Identity
 	// Find the identity that has the matching credential
 	err := s.db.Collection("identities").FindOne(ctx, bson.M{
 		"credentials.identifier": identifier,
@@ -60,15 +75,15 @@ func (s *MongoStorage[T]) GetCredentialByIdentifier(identifier, method string) (
 	return nil, fmt.Errorf("credential not found in identity")
 }
 
-func (s *MongoStorage[T]) CreateSession(sess *identity.Session[T]) error {
+func (s *MongoStorage) CreateSession(sess *identity.Session) error {
 	ctx := context.Background()
 	_, err := s.db.Collection("sessions").InsertOne(ctx, sess)
 	return err
 }
 
-func (s *MongoStorage[T]) GetSession(id string) (*identity.Session[T], error) {
+func (s *MongoStorage) GetSession(id any) (*identity.Session, error) {
 	ctx := context.Background()
-	var sess identity.Session[T]
+	var sess identity.Session
 	err := s.db.Collection("sessions").FindOne(ctx, bson.M{"id": id}).Decode(&sess)
 	if err != nil {
 		return nil, err
@@ -76,7 +91,7 @@ func (s *MongoStorage[T]) GetSession(id string) (*identity.Session[T], error) {
 	return &sess, nil
 }
 
-func (s *MongoStorage[T]) DeleteSession(id string) error {
+func (s *MongoStorage) DeleteSession(id any) error {
 	ctx := context.Background()
 	_, err := s.db.Collection("sessions").DeleteOne(ctx, bson.M{"id": id})
 	return err
@@ -92,28 +107,29 @@ func main() {
 	}
 
 	// We'll use uuid.UUID as our ID type for this example
-	storage := &MongoStorage[uuid.UUID]{
+	storage := &MongoStorage{
 		client: client,
 		db:     client.Database("kayan_mongodb"),
 	}
 
 	// 2. Wire the rest of Kayan
-	regManager := flow.NewRegistrationManager[uuid.UUID](storage)
-	logManager := flow.NewLoginManager[uuid.UUID](storage)
-	sessionManager := session.NewManager[uuid.UUID](storage)
+	factory := func() any { return &identity.Identity{} }
+	regManager := flow.NewRegistrationManager(storage, factory)
+	logManager := flow.NewLoginManager(storage)
+	sessionManager := session.NewManager(storage)
 
 	// Register Password Strategy
 	hasher := flow.NewBcryptHasher(14)
-	pwStrategy := flow.NewPasswordStrategy[uuid.UUID](storage, hasher, "email")
+	pwStrategy := flow.NewPasswordStrategy(storage, hasher, "email", factory)
 
 	// Configure ID generation for UUIDs
-	pwStrategy.SetIDGenerator(uuid.New)
+	pwStrategy.SetIDGenerator(func() any { return uuid.New() })
 
 	regManager.RegisterStrategy(pwStrategy)
 	logManager.RegisterStrategy(pwStrategy)
 
 	// 3. Initialize API Handler
-	h := api.NewHandler[uuid.UUID](regManager, logManager, sessionManager, nil)
+	h := api.NewHandler(regManager, logManager, sessionManager, nil)
 
 	// 4. Setup Echo and Routes
 	e := echo.New()

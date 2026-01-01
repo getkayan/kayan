@@ -5,31 +5,31 @@ import (
 )
 
 // Storage defines the interface for all persistence operations.
-type Storage[T any] interface {
-	IdentityStorage[T]
-	SessionStorage[T]
-	CredentialStorage[T]
+type Storage interface {
+	IdentityStorage
+	SessionStorage
+	CredentialStorage
 }
 
-type IdentityStorage[T any] interface {
-	CredentialStorage[T]
-	CreateIdentity(id *identity.Identity[T]) error
-	GetIdentity(id T) (*identity.Identity[T], error)
-	// Add Update/Delete as needed
+type IdentityStorage interface {
+	CredentialStorage
+	CreateIdentity(ident any) error
+	GetIdentity(factory func() any, id any) (any, error)
+	FindIdentity(factory func() any, query map[string]any) (any, error)
 }
 
-type SessionStorage[T any] interface {
-	CreateSession(s *identity.Session[T]) error
-	GetSession(id T) (*identity.Session[T], error)
-	DeleteSession(id T) error
+type SessionStorage interface {
+	CreateSession(s *identity.Session) error
+	GetSession(id any) (*identity.Session, error)
+	DeleteSession(id any) error
 }
 
-type CredentialStorage[T any] interface {
-	GetCredentialByIdentifier(identifier string, method string) (*identity.Credential[T], error)
+type CredentialStorage interface {
+	GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error)
 }
 
-// IDGenerator is a function that generates a new ID of type T.
-type IDGenerator[T any] func() T
+// IDGenerator is a function that generates a new ID.
+type IDGenerator func() any
 
 // Hasher defines the interface for password hashing and verification.
 type Hasher interface {

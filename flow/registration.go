@@ -7,28 +7,30 @@ import (
 	"github.com/getkayan/kayan/identity"
 )
 
-type RegistrationManager[T any] struct {
-	repo       IdentityRepository[T]
-	strategies map[string]RegistrationStrategy[T]
-	preHooks   []Hook[T]
-	postHooks  []Hook[T]
+type RegistrationManager struct {
+	repo       IdentityRepository
+	strategies map[string]RegistrationStrategy
+	preHooks   []Hook
+	postHooks  []Hook
+	factory    func() any
 }
 
-func NewRegistrationManager[T any](repo IdentityRepository[T]) *RegistrationManager[T] {
-	return &RegistrationManager[T]{
+func NewRegistrationManager(repo IdentityRepository, factory func() any) *RegistrationManager {
+	return &RegistrationManager{
 		repo:       repo,
-		strategies: make(map[string]RegistrationStrategy[T]),
+		strategies: make(map[string]RegistrationStrategy),
+		factory:    factory,
 	}
 }
 
-func (m *RegistrationManager[T]) RegisterStrategy(s RegistrationStrategy[T]) {
+func (m *RegistrationManager) RegisterStrategy(s RegistrationStrategy) {
 	m.strategies[s.ID()] = s
 }
 
-func (m *RegistrationManager[T]) AddPreHook(h Hook[T])  { m.preHooks = append(m.preHooks, h) }
-func (m *RegistrationManager[T]) AddPostHook(h Hook[T]) { m.postHooks = append(m.postHooks, h) }
+func (m *RegistrationManager) AddPreHook(h Hook)  { m.preHooks = append(m.preHooks, h) }
+func (m *RegistrationManager) AddPostHook(h Hook) { m.postHooks = append(m.postHooks, h) }
 
-func (m *RegistrationManager[T]) Submit(ctx context.Context, method string, traits identity.JSON, secret string) (*identity.Identity[T], error) {
+func (m *RegistrationManager) Submit(ctx context.Context, method string, traits identity.JSON, secret string) (any, error) {
 	strategy, ok := m.strategies[method]
 	if !ok {
 		return nil, fmt.Errorf("registration: unknown method %q", method)

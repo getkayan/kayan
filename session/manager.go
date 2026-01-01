@@ -8,17 +8,17 @@ import (
 	"github.com/getkayan/kayan/identity"
 )
 
-type SessionRepository[T any] = domain.SessionStorage[T]
+type SessionRepository = domain.SessionStorage
 
-type Manager[T any] struct {
-	repo SessionRepository[T]
+type Manager struct {
+	repo SessionRepository
 }
 
-func NewManager[T any](repo SessionRepository[T]) *Manager[T] {
-	return &Manager[T]{repo: repo}
+func NewManager(repo SessionRepository) *Manager {
+	return &Manager{repo: repo}
 }
 
-func (m *Manager[T]) Create(sessionID, identityID T) (*identity.Session[T], error) {
+func (m *Manager) Create(sessionID, identityID any) (*identity.Session, error) {
 	s := NewSession(sessionID, identityID)
 	if err := m.repo.CreateSession(s); err != nil {
 		return nil, err
@@ -26,7 +26,7 @@ func (m *Manager[T]) Create(sessionID, identityID T) (*identity.Session[T], erro
 	return s, nil
 }
 
-func (m *Manager[T]) Validate(sessionID T) (*identity.Session[T], error) {
+func (m *Manager) Validate(sessionID any) (*identity.Session, error) {
 	s, err := m.repo.GetSession(sessionID)
 	if err != nil {
 		return nil, errors.New("invalid session")

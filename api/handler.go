@@ -12,19 +12,19 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-type TokenParser[T any] func(string) (T, error)
+type TokenParser func(string) (any, error)
 
-type Handler[T any] struct {
-	regManager     *flow.RegistrationManager[T]
-	logManager     *flow.LoginManager[T]
-	sessionManager *session.Manager[T]
-	oidcManager    *flow.OIDCManager[T]
-	generator      domain.IDGenerator[T]
-	tokenParser    TokenParser[T]
+type Handler struct {
+	regManager     *flow.RegistrationManager
+	logManager     *flow.LoginManager
+	sessionManager *session.Manager
+	oidcManager    *flow.OIDCManager
+	generator      domain.IDGenerator
+	tokenParser    TokenParser
 }
 
-func NewHandler[T any](reg *flow.RegistrationManager[T], log *flow.LoginManager[T], sm *session.Manager[T], om *flow.OIDCManager[T]) *Handler[T] {
-	return &Handler[T]{
+func NewHandler(reg *flow.RegistrationManager, log *flow.LoginManager, sm *session.Manager, om *flow.OIDCManager) *Handler {
+	return &Handler{
 		regManager:     reg,
 		logManager:     log,
 		sessionManager: sm,
@@ -32,15 +32,15 @@ func NewHandler[T any](reg *flow.RegistrationManager[T], log *flow.LoginManager[
 	}
 }
 
-func (h *Handler[T]) SetTokenParser(p TokenParser[T]) {
+func (h *Handler) SetTokenParser(p TokenParser) {
 	h.tokenParser = p
 }
 
-func (h *Handler[T]) SetIDGenerator(g domain.IDGenerator[T]) {
+func (h *Handler) SetIDGenerator(g domain.IDGenerator) {
 	h.generator = g
 }
 
-func (h *Handler[T]) RegisterRoutes(g *echo.Group) {
+func (h *Handler) RegisterRoutes(g *echo.Group) {
 	g.POST("/registration", h.HandleRegistration)
 	g.POST("/login", h.HandleLogin)
 
@@ -54,11 +54,11 @@ func (h *Handler[T]) RegisterRoutes(g *echo.Group) {
 	protected.GET("/whoami", h.HandleWhoAmI)
 }
 
-func (h *Handler[T]) HandleRegistration(c echo.Context) error {
+func (h *Handler) HandleRegistration(c echo.Context) error {
 	var body struct {
-		Traits   map[string]interface{} `json:"traits"`
-		Password string                 `json:"password"`
-		Method   string                 `json:"method"`
+		Traits   map[string]any `json:"traits"`
+		Password string         `json:"password"`
+		Method   string         `json:"method"`
 	}
 
 	if err := c.Bind(&body); err != nil {
@@ -78,7 +78,7 @@ func (h *Handler[T]) HandleRegistration(c echo.Context) error {
 	return c.JSON(http.StatusOK, ident)
 }
 
-func (h *Handler[T]) HandleLogin(c echo.Context) error {
+func (h *Handler) HandleLogin(c echo.Context) error {
 	var body struct {
 		Identifier string `json:"identifier"`
 		Password   string `json:"password"`
@@ -99,24 +99,32 @@ func (h *Handler[T]) HandleLogin(c echo.Context) error {
 	}
 
 	// Use generator if provided
-	var sessionID T
+	var sessionID any
 	if h.generator != nil {
 		sessionID = h.generator()
 	}
 
-	s, err := h.sessionManager.Create(sessionID, ident.ID)
+	// Access ID via FlowIdentity interface
+	var identityID any
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		identityID = fi.GetID()
+	} else {
+		return h.Error(c, http.StatusInternalServerError, "Identity model does not implement FlowIdentity", nil)
+	}
+
+	s, err := h.sessionManager.Create(sessionID, identityID)
 	if err != nil {
 		return h.Error(c, http.StatusInternalServerError, "Internal server error", err)
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]any{
 		"identity": ident,
 		"session":  s,
 		"token":    fmt.Sprintf("%v", s.ID),
 	})
 }
 
-func (h *Handler[T]) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+func (h *Handler) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		token := c.Request().Header.Get("Authorization")
 		if token == "" {
@@ -143,15 +151,15 @@ func (h *Handler[T]) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-func (h *Handler[T]) HandleWhoAmI(c echo.Context) error {
-	s := c.Get("session").(*identity.Session[T])
-	return c.JSON(http.StatusOK, map[string]interface{}{
+func (h *Handler) HandleWhoAmI(c echo.Context) error {
+	s := c.Get("session").(*identity.Session)
+	return c.JSON(http.StatusOK, map[string]any{
 		"status":  "authenticated",
 		"session": s,
 	})
 }
 
-func (h *Handler[T]) HandleOIDCAuth(c echo.Context) error {
+func (h *Handler) HandleOIDCAuth(c echo.Context) error {
 	provider := c.Param("provider")
 	state := "random-state" // TODO: Use real state management
 
@@ -163,7 +171,7 @@ func (h *Handler[T]) HandleOIDCAuth(c echo.Context) error {
 	return c.Redirect(http.StatusFound, url)
 }
 
-func (h *Handler[T]) HandleOIDCCallback(c echo.Context) error {
+func (h *Handler) HandleOIDCCallback(c echo.Context) error {
 	provider := c.Param("provider")
 	code := c.QueryParam("code")
 
@@ -173,16 +181,24 @@ func (h *Handler[T]) HandleOIDCCallback(c echo.Context) error {
 	}
 
 	// Create Session
-	var sessionID T
+	var sessionID any
 	if h.generator != nil {
 		sessionID = h.generator()
 	}
-	s, err := h.sessionManager.Create(sessionID, ident.ID)
+	// Access ID via FlowIdentity interface
+	var identityID any
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		identityID = fi.GetID()
+	} else {
+		return h.Error(c, http.StatusInternalServerError, "Identity model does not implement FlowIdentity", nil)
+	}
+
+	s, err := h.sessionManager.Create(sessionID, identityID)
 	if err != nil {
 		return h.Error(c, http.StatusInternalServerError, "Internal server error", err)
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	return c.JSON(http.StatusOK, map[string]any{
 		"identity": ident,
 		"session":  s,
 		"token":    fmt.Sprintf("%v", s.ID),
@@ -190,8 +206,8 @@ func (h *Handler[T]) HandleOIDCCallback(c echo.Context) error {
 }
 
 // Helper for professional errors
-func (h *Handler[T]) Error(c echo.Context, code int, message string, err error) error {
-	resp := map[string]interface{}{
+func (h *Handler) Error(c echo.Context, code int, message string, err error) error {
+	resp := map[string]any{
 		"status": message,
 		"code":   code,
 	}

@@ -45,25 +45,26 @@ type FullCustomStorage struct {
 
 // --- Identity & Credential Storage ---
 
-func (s *FullCustomStorage) CreateIdentity(ident *identity.Identity[string]) error {
-	fmt.Printf("[Adapter] Creating custom account for: %s\n", ident.ID)
+func (s *FullCustomStorage) CreateIdentity(ident any) error {
+	i := ident.(*identity.Identity)
+	fmt.Printf("[Adapter] Creating custom account for: %s\n", i.ID)
 
 	// Extract data from Kayan's Identity struct
 	var traits struct {
 		Email string `json:"email"`
 		Name  string `json:"full_name"`
 	}
-	json.Unmarshal(ident.Traits, &traits)
+	json.Unmarshal(i.Traits, &traits)
 
 	// Kayan puts credentials in the '.Credentials' slice if using default strategies
 	var secret string
-	if len(ident.Credentials) > 0 {
-		secret = ident.Credentials[0].Secret
+	if len(i.Credentials) > 0 {
+		secret = i.Credentials[0].Secret
 	}
 
 	// Save to our completely custom table
 	return s.db.Create(&MyAccount{
-		UID:       ident.ID,
+		UID:       i.ID,
 		EmailAddr: traits.Email,
 		FullName:  traits.Name,
 		PassHash:  secret,
@@ -71,7 +72,8 @@ func (s *FullCustomStorage) CreateIdentity(ident *identity.Identity[string]) err
 	}).Error
 }
 
-func (s *FullCustomStorage) GetIdentity(id string) (*identity.Identity[string], error) {
+func (s *FullCustomStorage) GetIdentity(factory func() any, id any) (any, error) {
+	fmt.Printf("[Adapter] Getting identity: %v\n", id)
 	var acc MyAccount
 	if err := s.db.First(&acc, "uid = ?", id).Error; err != nil {
 		return nil, err
@@ -83,13 +85,28 @@ func (s *FullCustomStorage) GetIdentity(id string) (*identity.Identity[string], 
 		"full_name": acc.FullName,
 	})
 
-	return &identity.Identity[string]{
-		ID:     acc.UID,
-		Traits: identity.JSON(traits),
-	}, nil
+	ident := factory().(*identity.Identity)
+	ident.ID = acc.UID
+	ident.Traits = identity.JSON(traits)
+
+	return ident, nil
 }
 
-func (s *FullCustomStorage) GetCredentialByIdentifier(identifier, method string) (*identity.Credential[string], error) {
+func (s *FullCustomStorage) FindIdentity(factory func() any, query map[string]any) (any, error) {
+	// Simple implementation for this example
+	if email, ok := query["EmailAddr"]; ok {
+		var acc MyAccount
+		if err := s.db.First(&acc, "email_addr = ?", email).Error; err != nil {
+			return nil, err
+		}
+		ident := factory().(*identity.Identity)
+		ident.ID = acc.UID
+		return ident, nil
+	}
+	return nil, fmt.Errorf("lookup not implemented for query: %v", query)
+}
+
+func (s *FullCustomStorage) GetCredentialByIdentifier(identifier, method string) (*identity.Credential, error) {
 	fmt.Printf("[Adapter] Looking up credential: %s\n", identifier)
 
 	var acc MyAccount
@@ -98,7 +115,7 @@ func (s *FullCustomStorage) GetCredentialByIdentifier(identifier, method string)
 	}
 
 	// Map our account table record back to a Kayan Credential struct
-	return &identity.Credential[string]{
+	return &identity.Credential{
 		IdentityID: acc.UID,
 		Identifier: acc.EmailAddr,
 		Secret:     acc.PassHash,
@@ -108,7 +125,7 @@ func (s *FullCustomStorage) GetCredentialByIdentifier(identifier, method string)
 
 // --- Session Storage ---
 
-func (s *FullCustomStorage) CreateSession(sess *identity.Session[string]) error {
+func (s *FullCustomStorage) CreateSession(sess *identity.Session) error {
 	return s.db.Create(&MySession{
 		SessionID: sess.ID,
 		OwnerUID:  sess.IdentityID,
@@ -117,13 +134,13 @@ func (s *FullCustomStorage) CreateSession(sess *identity.Session[string]) error 
 	}).Error
 }
 
-func (s *FullCustomStorage) GetSession(id string) (*identity.Session[string], error) {
+func (s *FullCustomStorage) GetSession(id any) (*identity.Session, error) {
 	var ms MySession
 	if err := s.db.First(&ms, "session_id = ?", id).Error; err != nil {
 		return nil, err
 	}
 
-	return &identity.Session[string]{
+	return &identity.Session{
 		ID:         ms.SessionID,
 		IdentityID: ms.OwnerUID,
 		ExpiresAt:  ms.Expiry,
@@ -131,7 +148,7 @@ func (s *FullCustomStorage) GetSession(id string) (*identity.Session[string], er
 	}, nil
 }
 
-func (s *FullCustomStorage) DeleteSession(id string) error {
+func (s *FullCustomStorage) DeleteSession(id any) error {
 	return s.db.Delete(&MySession{}, "session_id = ?", id).Error
 }
 
@@ -144,14 +161,15 @@ func main() {
 	storage := &FullCustomStorage{db: db}
 
 	// 3. Setup Kayan Managers
-	regManager := flow.NewRegistrationManager[string](storage)
-	loginManager := flow.NewLoginManager[string](storage)
+	factory := func() any { return &identity.Identity{} }
+	regManager := flow.NewRegistrationManager(storage, factory)
+	loginManager := flow.NewLoginManager(storage)
 
 	hasher := flow.NewBcryptHasher(14)
-	pwStrategy := flow.NewPasswordStrategy[string](storage, hasher, "email")
+	pwStrategy := flow.NewPasswordStrategy(storage, hasher, "email", factory)
 
 	// Configure ID generation for string IDs
-	pwStrategy.SetIDGenerator(func() string {
+	pwStrategy.SetIDGenerator(func() any {
 		return uuid.New().String()
 	})
 
@@ -166,14 +184,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Reg failed: %v", err)
 	}
-	fmt.Printf("✓ User saved to 'MyAccount' table. ID: %s\n", ident.ID)
+	fmt.Printf("✓ User saved to 'MyAccount' table. ID: %s\n", ident.(*identity.Identity).ID)
 
 	fmt.Println("\n--- LOGIN ---")
 	loggedIn, err := loginManager.Authenticate(context.Background(), "password", "custom@logic.com", "secret-pass")
 	if err != nil {
 		log.Fatalf("Login failed: %v", err)
 	}
-	fmt.Printf("✓ Login successful for UID: %s\n", loggedIn.ID)
+	fmt.Printf("✓ Login successful for UID: %s\n", loggedIn.(*identity.Identity).ID)
 
 	// Clean up
 	fmt.Println("\n(Cleaning up databases...)")

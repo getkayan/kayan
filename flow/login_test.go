@@ -9,14 +9,15 @@ import (
 )
 
 func TestLogin(t *testing.T) {
-	repo := &mockRepo[uuid.UUID]{
-		identities: make(map[string]*identity.Identity[uuid.UUID]),
-		creds:      make(map[string]*identity.Credential[uuid.UUID]),
+	repo := &mockRepo{
+		identities: make(map[string]any),
+		creds:      make(map[string]*identity.Credential),
 	}
-	regMgr := NewRegistrationManager[uuid.UUID](repo)
-	logMgr := NewLoginManager[uuid.UUID](repo)
-	pwStrategy := NewPasswordStrategy[uuid.UUID](repo, NewBcryptHasher(14), "email")
-	pwStrategy.SetIDGenerator(uuid.New)
+	factory := func() any { return &identity.Identity{} }
+	regMgr := NewRegistrationManager(repo, factory)
+	logMgr := NewLoginManager(repo)
+	pwStrategy := NewPasswordStrategy(repo, NewBcryptHasher(14), "email", factory)
+	pwStrategy.SetIDGenerator(func() any { return uuid.New() })
 	regMgr.RegisterStrategy(pwStrategy)
 	logMgr.RegisterStrategy(pwStrategy)
 

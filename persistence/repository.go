@@ -8,12 +8,16 @@ import (
 	"gorm.io/gorm"
 )
 
-type Repository[T any] struct {
+type Repository struct {
 	db *gorm.DB
 }
 
-func NewRepository[T any](db *gorm.DB) *Repository[T] {
-	return &Repository[T]{db: db}
+func NewRepository(db *gorm.DB) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) DB() *gorm.DB {
+	return r.db
 }
 
 func init() {
@@ -22,46 +26,57 @@ func init() {
 	Register("mysql", mysql.Open)
 }
 
-func (r *Repository[T]) AutoMigrate() error {
-	return r.db.AutoMigrate(
-		&identity.Identity[T]{},
-		&identity.Credential[T]{},
-		&identity.Session[T]{},
-	)
+func (r *Repository) AutoMigrate(models ...any) error {
+	// Identity, Credential, and Session are base models that should always be migrated
+	baseModels := []any{
+		&identity.Identity{},
+		&identity.Credential{},
+		&identity.Session{},
+	}
+	allModels := append(baseModels, models...)
+	return r.db.AutoMigrate(allModels...)
 }
 
-func (r *Repository[T]) CreateIdentity(id *identity.Identity[T]) error {
-	return r.db.Create(id).Error
+func (r *Repository) CreateIdentity(ident any) error {
+	return r.db.Create(ident).Error
 }
 
-func (r *Repository[T]) GetIdentity(id T) (*identity.Identity[T], error) {
-	var ident identity.Identity[T]
-	if err := r.db.Preload("Credentials").First(&ident, "id = ?", id).Error; err != nil {
+func (r *Repository) GetIdentity(factory func() any, id any) (any, error) {
+	ident := factory()
+	if err := r.db.First(ident, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
-	return &ident, nil
+	return ident, nil
 }
 
-func (r *Repository[T]) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential[T], error) {
-	var cred identity.Credential[T]
+func (r *Repository) FindIdentity(factory func() any, query map[string]any) (any, error) {
+	ident := factory()
+	if err := r.db.Where(query).First(ident).Error; err != nil {
+		return nil, err
+	}
+	return ident, nil
+}
+
+func (r *Repository) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error) {
+	var cred identity.Credential
 	if err := r.db.Where("identifier = ? AND type = ?", identifier, method).First(&cred).Error; err != nil {
 		return nil, err
 	}
 	return &cred, nil
 }
 
-func (r *Repository[T]) CreateSession(s *identity.Session[T]) error {
+func (r *Repository) CreateSession(s *identity.Session) error {
 	return r.db.Create(s).Error
 }
 
-func (r *Repository[T]) GetSession(id T) (*identity.Session[T], error) {
-	var s identity.Session[T]
+func (r *Repository) GetSession(id any) (*identity.Session, error) {
+	var s identity.Session
 	if err := r.db.First(&s, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
 	return &s, nil
 }
 
-func (r *Repository[T]) DeleteSession(id T) error {
-	return r.db.Delete(&identity.Session[T]{}, "id = ?", id).Error
+func (r *Repository) DeleteSession(id any) error {
+	return r.db.Delete(&identity.Session{}, "id = ?", id).Error
 }

@@ -3,32 +3,30 @@ package flow
 import (
 	"context"
 	"fmt"
-
-	"github.com/getkayan/kayan/identity"
 )
 
-type LoginManager[T any] struct {
-	repo       IdentityRepository[T]
-	strategies map[string]LoginStrategy[T]
-	preHooks   []Hook[T]
-	postHooks  []Hook[T]
+type LoginManager struct {
+	repo       IdentityRepository
+	strategies map[string]LoginStrategy
+	preHooks   []Hook
+	postHooks  []Hook
 }
 
-func NewLoginManager[T any](repo IdentityRepository[T]) *LoginManager[T] {
-	return &LoginManager[T]{
+func NewLoginManager(repo IdentityRepository) *LoginManager {
+	return &LoginManager{
 		repo:       repo,
-		strategies: make(map[string]LoginStrategy[T]),
+		strategies: make(map[string]LoginStrategy),
 	}
 }
 
-func (m *LoginManager[T]) RegisterStrategy(s LoginStrategy[T]) {
+func (m *LoginManager) RegisterStrategy(s LoginStrategy) {
 	m.strategies[s.ID()] = s
 }
 
-func (m *LoginManager[T]) AddPreHook(h Hook[T])  { m.preHooks = append(m.preHooks, h) }
-func (m *LoginManager[T]) AddPostHook(h Hook[T]) { m.postHooks = append(m.postHooks, h) }
+func (m *LoginManager) AddPreHook(h Hook)  { m.preHooks = append(m.preHooks, h) }
+func (m *LoginManager) AddPostHook(h Hook) { m.postHooks = append(m.postHooks, h) }
 
-func (m *LoginManager[T]) Authenticate(ctx context.Context, method, identifier, secret string) (*identity.Identity[T], error) {
+func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, secret string) (any, error) {
 	strategy, ok := m.strategies[method]
 	if !ok {
 		return nil, fmt.Errorf("login: unknown method %q", method)

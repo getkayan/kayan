@@ -13,20 +13,20 @@ type DialectorOpener = func(string) gorm.Dialector
 
 var (
 	registryMu sync.RWMutex
-	providers  = make(map[string]interface{})
+	providers  = make(map[string]any)
 )
 
 // Register adds a new storage provider to the registry.
 // Provider can be a DialectorOpener (for GORM) or a custom factory function
-// matching func(string, interface{}) (domain.Storage[T], error).
-func Register(name string, provider interface{}) {
+// matching func(string, any) (domain.Storage, error).
+func Register(name string, provider any) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	providers[name] = provider
 }
 
 // NewStorage creates a new storage implementation based on the registered name.
-func NewStorage[T any](name string, dsn string, extra interface{}) (domain.Storage[T], error) {
+func NewStorage(name string, dsn string, extra any, models ...any) (domain.Storage, error) {
 	registryMu.RLock()
 	provider, ok := providers[name]
 	registryMu.RUnlock()
@@ -47,8 +47,8 @@ func NewStorage[T any](name string, dsn string, extra interface{}) (domain.Stora
 			return nil, err
 		}
 
-		repo := NewRepository[T](db)
-		if err := repo.AutoMigrate(); err != nil {
+		repo := NewRepository(db)
+		if err := repo.AutoMigrate(models...); err != nil {
 			return nil, err
 		}
 
@@ -56,7 +56,7 @@ func NewStorage[T any](name string, dsn string, extra interface{}) (domain.Stora
 	}
 
 	// Case 2: Custom Factory Function
-	if factory, ok := provider.(func(string, interface{}) (domain.Storage[T], error)); ok {
+	if factory, ok := provider.(func(string, any) (domain.Storage, error)); ok {
 		return factory(dsn, extra)
 	}
 

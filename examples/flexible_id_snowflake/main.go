@@ -23,21 +23,27 @@ func main() {
 	dbPath := "snowflake_ids.db"
 	defer os.Remove(dbPath)
 
-	storage, err := persistence.NewStorage[int64]("sqlite", dbPath, nil)
+	type Ident struct {
+		identity.Identity
+		ID int64 `gorm:"primaryKey"` // Override to int64
+	}
+
+	storage, err := persistence.NewStorage("sqlite", dbPath, nil, &Ident{})
 	if err != nil {
 		log.Fatalf("failed to initialize storage: %v", err)
 	}
 
 	// 3. Setup Kayan Managers
-	regManager := flow.NewRegistrationManager(storage)
+	factory := func() any { return &Ident{} }
+	regManager := flow.NewRegistrationManager(storage, factory)
 	loginManager := flow.NewLoginManager(storage)
 
 	// Setup Password Strategy with Snowflake ID Generator
 	hasher := flow.NewBcryptHasher(14)
-	pwStrategy := flow.NewPasswordStrategy(storage, hasher, "email")
+	pwStrategy := flow.NewPasswordStrategy(storage, hasher, "email", factory)
 
 	// CONFIGURE THE SNOWFLAKE GENERATOR
-	pwStrategy.SetIDGenerator(func() int64 {
+	pwStrategy.SetIDGenerator(func() any {
 		return int64(node.Generate())
 	})
 
@@ -52,7 +58,7 @@ func main() {
 		log.Fatalf("registration failed: %v", err)
 	}
 
-	fmt.Printf("✓ Registered Identity with Snowflake ID: %d\n", ident.ID)
+	fmt.Printf("✓ Registered Identity with Snowflake ID: %d\n", ident.(*Ident).ID)
 
 	// 5. DEMONSTRATION: Login
 	fmt.Println("\n--- LOGIN PHASE ---")
@@ -61,10 +67,10 @@ func main() {
 		log.Fatalf("login failed: %v", err)
 	}
 
-	fmt.Printf("✓ Success! Logged in with Snowflake ID: %d\n", loggedIn.ID)
+	fmt.Printf("✓ Success! Logged in with Snowflake ID: %d\n", loggedIn.(*Ident).ID)
 
 	// Verify ID consistency
-	if ident.ID != loggedIn.ID {
+	if ident.(*Ident).ID != loggedIn.(*Ident).ID {
 		log.Fatal("Assertion failed: identities do not match")
 	}
 

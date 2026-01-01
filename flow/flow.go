@@ -27,7 +27,7 @@ type Flow struct {
 }
 
 // IdentityRepository is now an alias for domain.IdentityStorage
-type IdentityRepository[T any] = domain.IdentityStorage[T]
+type IdentityRepository = domain.IdentityStorage
 
 func NewFlow(t FlowType, methods []string) *Flow {
 	return &Flow{

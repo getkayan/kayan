@@ -17,20 +17,26 @@ func main() {
 	defer os.Remove(dbPath)
 
 	// We use uint here. SQLite/GORM will handle auto-increment by default.
-	storage, err := persistence.NewStorage[uint]("sqlite", dbPath, nil)
+	type Ident struct {
+		identity.Identity
+		ID uint `gorm:"primaryKey"` // Override to uint
+	}
+
+	storage, err := persistence.NewStorage("sqlite", dbPath, nil, &Ident{})
 	if err != nil {
 		log.Fatalf("failed to initialize storage: %v", err)
 	}
 
 	// 2. Setup Kayan Managers
-	regManager := flow.NewRegistrationManager(storage)
+	factory := func() any { return &Ident{} }
+	regManager := flow.NewRegistrationManager(storage, factory)
 	loginManager := flow.NewLoginManager(storage)
 
 	// Setup Password Strategy (NO IDGenerator provided)
 	// When generator is nil, the ID is submitted as 0,
 	// which GORM interprets as a request for auto-increment.
 	hasher := flow.NewBcryptHasher(14)
-	pwStrategy := flow.NewPasswordStrategy(storage, hasher, "email")
+	pwStrategy := flow.NewPasswordStrategy(storage, hasher, "email", factory)
 
 	regManager.RegisterStrategy(pwStrategy)
 	loginManager.RegisterStrategy(pwStrategy)
@@ -43,7 +49,7 @@ func main() {
 		log.Fatalf("registration failed: %v", err)
 	}
 
-	fmt.Printf("✓ Registered Identity with Auto-Increment ID: %d\n", ident.ID)
+	fmt.Printf("✓ Registered Identity with Auto-Increment ID: %v\n", ident.(*Ident).ID)
 
 	// Register another one
 	traits2 := identity.JSON(`{"email": "second@example.com"}`)
@@ -51,7 +57,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("registration failed: %v", err)
 	}
-	fmt.Printf("✓ Registered Second Identity with Auto-Increment ID: %d\n", ident2.ID)
+	fmt.Printf("✓ Registered Second Identity with Auto-Increment ID: %v\n", ident2.(*Ident).ID)
 
 	// 4. DEMONSTRATION: Login
 	fmt.Println("\n--- LOGIN PHASE ---")
@@ -60,7 +66,7 @@ func main() {
 		log.Fatalf("login failed: %v", err)
 	}
 
-	fmt.Printf("✓ Success! Logged in with ID: %d\n", loggedIn.ID)
+	fmt.Printf("✓ Success! Logged in with ID: %v\n", loggedIn.(*Ident).ID)
 
 	fmt.Printf("\nVerification complete: IDs are auto-incremented by the database.\n")
 }

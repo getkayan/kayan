@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/getkayan/kayan/flow"
+	"github.com/getkayan/kayan/identity"
 	"github.com/getkayan/kayan/persistence"
 	"github.com/getkayan/kayan/session"
 	"github.com/google/uuid"
@@ -20,29 +21,31 @@ func TestAPIIntegration(t *testing.T) {
 	dbPath := "test_kayan.db"
 	defer os.Remove(dbPath)
 
-	repo, err := persistence.NewStorage[uuid.UUID]("sqlite", dbPath, nil)
+	repo, err := persistence.NewStorage("sqlite", dbPath, nil)
 	if err != nil {
 		t.Fatalf("failed to setup repo: %v", err)
 	}
 
-	regManager := flow.NewRegistrationManager[uuid.UUID](repo)
-	logManager := flow.NewLoginManager[uuid.UUID](repo)
-	sm := session.NewManager[uuid.UUID](repo)
+	factory := func() any { return &identity.Identity{} }
+	regManager := flow.NewRegistrationManager(repo, factory)
+	logManager := flow.NewLoginManager(repo)
+	sm := session.NewManager(repo)
 
-	pwStrategy := flow.NewPasswordStrategy[uuid.UUID](repo, flow.NewBcryptHasher(14), "email")
-	pwStrategy.SetIDGenerator(uuid.New)
+	pwStrategy := flow.NewPasswordStrategy(repo, flow.NewBcryptHasher(14), "email", factory)
+	pwStrategy.SetIDGenerator(func() any { return uuid.New() })
 	regManager.RegisterStrategy(pwStrategy)
 	logManager.RegisterStrategy(pwStrategy)
 
-	h := NewHandler[uuid.UUID](regManager, logManager, sm, nil)
-	h.SetIDGenerator(uuid.New)
+	h := NewHandler(regManager, logManager, sm, nil)
+	h.SetIDGenerator(func() any { return uuid.New() })
+	h.SetTokenParser(func(s string) (any, error) { return uuid.Parse(s) })
 
 	e := echo.New()
 	g := e.Group("/api/v1")
 	h.RegisterRoutes(g)
 
 	// 1. Test Registration
-	regBody := map[string]interface{}{
+	regBody := map[string]any{
 		"traits":   map[string]string{"email": "test@example.com"},
 		"password": "password123",
 	}

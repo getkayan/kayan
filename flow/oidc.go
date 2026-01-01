@@ -12,10 +12,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type OIDCManager[T any] struct {
-	repo      domain.Storage[T]
+type OIDCManager struct {
+	repo      domain.Storage
 	providers map[string]*OIDCProviderData
-	generator domain.IDGenerator[T]
+	generator domain.IDGenerator
+	factory   func() any
 }
 
 type OIDCProviderData struct {
@@ -23,7 +24,7 @@ type OIDCProviderData struct {
 	OAuthConfig *oauth2.Config
 }
 
-func NewOIDCManager[T any](repo domain.Storage[T], configs map[string]config.OIDCProvider) (*OIDCManager[T], error) {
+func NewOIDCManager(repo domain.Storage, configs map[string]config.OIDCProvider, factory func() any) (*OIDCManager, error) {
 	providers := make(map[string]*OIDCProviderData)
 	ctx := context.Background()
 
@@ -47,17 +48,18 @@ func NewOIDCManager[T any](repo domain.Storage[T], configs map[string]config.OID
 		}
 	}
 
-	return &OIDCManager[T]{
+	return &OIDCManager{
 		repo:      repo,
 		providers: providers,
+		factory:   factory,
 	}, nil
 }
 
-func (m *OIDCManager[T]) SetIDGenerator(g domain.IDGenerator[T]) {
+func (m *OIDCManager) SetIDGenerator(g domain.IDGenerator) {
 	m.generator = g
 }
 
-func (m *OIDCManager[T]) GetAuthURL(providerID, state string) (string, error) {
+func (m *OIDCManager) GetAuthURL(providerID, state string) (string, error) {
 	p, ok := m.providers[providerID]
 	if !ok {
 		return "", errors.New("provider not found")
@@ -65,7 +67,7 @@ func (m *OIDCManager[T]) GetAuthURL(providerID, state string) (string, error) {
 	return p.OAuthConfig.AuthCodeURL(state), nil
 }
 
-func (m *OIDCManager[T]) HandleCallback(ctx context.Context, providerID, code string) (*identity.Identity[T], error) {
+func (m *OIDCManager) HandleCallback(ctx context.Context, providerID, code string) (any, error) {
 	p, ok := m.providers[providerID]
 	if !ok {
 		return nil, errors.New("provider not found")
@@ -99,40 +101,49 @@ func (m *OIDCManager[T]) HandleCallback(ctx context.Context, providerID, code st
 	return m.reconcileIdentity(providerID, claims.Subject, claims.Email)
 }
 
-func (m *OIDCManager[T]) reconcileIdentity(providerID, subject, email string) (*identity.Identity[T], error) {
+func (m *OIDCManager) reconcileIdentity(providerID, subject, email string) (any, error) {
 	// 1. Check if credential already exists
 	identifier := fmt.Sprintf("%s:%s", providerID, subject)
 	cred, err := m.repo.GetCredentialByIdentifier(identifier, "oidc")
 	if err == nil {
 		// Existing user
-		return m.repo.GetIdentity(cred.IdentityID)
+		return m.repo.GetIdentity(m.factory, cred.IdentityID)
 	}
 
-	// 2. Otherwise create new identity
-	newIdentity := &identity.Identity[T]{
-		Traits: identity.JSON(fmt.Sprintf(`{"email": "%s"}`, email)),
+	// 2. Otherwise create new identity using factory
+	ident := m.factory()
+
+	if ts, ok := ident.(TraitSource); ok {
+		ts.SetTraits(identity.JSON(fmt.Sprintf(`{"email": "%s"}`, email)))
 	}
 
-	// Use generator if provided
-	if m.generator != nil {
-		newIdentity.ID = m.generator()
+	if fi, ok := ident.(FlowIdentity); ok {
+		// Use generator if provided
+		id := fi.GetID()
+		if m.generator != nil && (id == nil || id == "") {
+			fi.SetID(m.generator())
+		}
+
+		if cs, ok := ident.(CredentialSource); ok {
+			newCred := identity.Credential{
+				IdentityID: fmt.Sprintf("%v", fi.GetID()),
+				Type:       "oidc",
+				Identifier: identifier,
+				Secret:     "", // OIDC doesn't need secret stored
+			}
+			// Use generator for credential ID as well
+			if m.generator != nil {
+				newCred.ID = fmt.Sprintf("%v", m.generator())
+			}
+			cs.SetCredentials(append(cs.GetCredentials(), newCred))
+		}
+	} else {
+		return nil, errors.New("identity model does not implement FlowIdentity")
 	}
 
-	newCred := identity.Credential[T]{
-		IdentityID: newIdentity.ID,
-		Type:       "oidc",
-		Identifier: identifier,
-		Secret:     "", // OIDC doesn't need secret stored
-	}
-	// Use generator for credential ID as well
-	if m.generator != nil {
-		newCred.ID = m.generator()
-	}
-	newIdentity.Credentials = append(newIdentity.Credentials, newCred)
-
-	if err := m.repo.CreateIdentity(newIdentity); err != nil {
+	if err := m.repo.CreateIdentity(ident); err != nil {
 		return nil, err
 	}
 
-	return newIdentity, nil
+	return ident, nil
 }

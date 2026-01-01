@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/getkayan/kayan"
 	"github.com/getkayan/kayan/api"
 	"github.com/getkayan/kayan/config"
 	"github.com/getkayan/kayan/flow"
+	"github.com/getkayan/kayan/identity"
 	"github.com/getkayan/kayan/logger"
 	"github.com/getkayan/kayan/persistence"
-	"github.com/getkayan/kayan/session"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -30,34 +31,38 @@ func main() {
 		zap.String("dsn", cfg.DSN),
 	)
 
-	// Initialize Repository
-	repo, err := persistence.NewStorage[uuid.UUID](cfg.DBType, cfg.DSN, nil)
+	// Initialize Repository using DefaultIdentity
+	repo, err := persistence.NewStorage(cfg.DBType, cfg.DSN, nil)
 	if err != nil {
 		logger.Log.Fatal("failed to initialize repository", zap.Error(err))
 	}
 
-	// Initialize Managers
-	regManager := flow.NewRegistrationManager[uuid.UUID](repo)
-	logManager := flow.NewLoginManager[uuid.UUID](repo)
-	sessionManager := session.NewManager[uuid.UUID](repo)
-	oidcManager, err := flow.NewOIDCManager[uuid.UUID](repo, cfg.OIDCProviders)
+	// Initialize Managers using convenience helpers
+	db := repo.(*persistence.Repository).DB()
+	regManager := kayan.NewDefaultRegistrationManager(db)
+	logManager := kayan.NewDefaultLoginManager(db)
+	sessionManager := kayan.NewDefaultSessionManager(db)
+	oidcManager, err := kayan.NewDefaultOIDCManager(db, cfg.OIDCProviders)
 	if err != nil {
 		logger.Log.Error("failed to initialize OIDC manager", zap.Error(err))
 	}
 
 	// Register Strategies
 	hasher := flow.NewBcryptHasher(14)
-	pwStrategy := flow.NewPasswordStrategy[uuid.UUID](repo, hasher, "email")
+	pwStrategy := flow.NewPasswordStrategy(repo, hasher, "email", func() any {
+		return &identity.Identity{}
+	})
 
 	// Set ID generator for UUIDs
-	pwStrategy.SetIDGenerator(uuid.New)
+	pwStrategy.SetIDGenerator(func() any { return uuid.New() })
 
 	regManager.RegisterStrategy(pwStrategy)
 	logManager.RegisterStrategy(pwStrategy)
 
 	// Initialize Handler
-	h := api.NewHandler[uuid.UUID](regManager, logManager, sessionManager, oidcManager)
-	h.SetIDGenerator(uuid.New)
+	h := api.NewHandler(regManager, logManager, sessionManager, oidcManager)
+	h.SetIDGenerator(func() any { return uuid.New() })
+	h.SetTokenParser(func(s string) (any, error) { return uuid.Parse(s) })
 
 	// Setup Echo
 	e := echo.New()
