@@ -22,8 +22,8 @@ func (m *mockRepo[T]) CreateIdentity(id *identity.Identity[T]) error {
 	return nil
 }
 
-func (m *mockRepo[T]) GetIdentity(id string) (*identity.Identity[T], error) {
-	return m.identities[id], nil
+func (m *mockRepo[T]) GetIdentity(id T) (*identity.Identity[T], error) {
+	return m.identities[fmt.Sprintf("%v", id)], nil
 }
 
 func (m *mockRepo[T]) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential[T], error) {

@@ -12,16 +12,28 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+type TokenParser[T any] func(string) (T, error)
+
 type Handler[T any] struct {
 	regManager     *flow.RegistrationManager[T]
 	logManager     *flow.LoginManager[T]
 	sessionManager *session.Manager[T]
 	oidcManager    *flow.OIDCManager[T]
 	generator      domain.IDGenerator[T]
+	tokenParser    TokenParser[T]
 }
 
 func NewHandler[T any](reg *flow.RegistrationManager[T], log *flow.LoginManager[T], sm *session.Manager[T], om *flow.OIDCManager[T]) *Handler[T] {
-	return &Handler[T]{regManager: reg, logManager: log, sessionManager: sm, oidcManager: om}
+	return &Handler[T]{
+		regManager:     reg,
+		logManager:     log,
+		sessionManager: sm,
+		oidcManager:    om,
+	}
+}
+
+func (h *Handler[T]) SetTokenParser(p TokenParser[T]) {
+	h.tokenParser = p
 }
 
 func (h *Handler[T]) SetIDGenerator(g domain.IDGenerator[T]) {
@@ -111,7 +123,16 @@ func (h *Handler[T]) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			return h.Error(c, http.StatusUnauthorized, "Authorization header required", nil)
 		}
 
-		s, err := h.sessionManager.Validate(token)
+		if h.tokenParser == nil {
+			return h.Error(c, http.StatusInternalServerError, "Token parser not configured", nil)
+		}
+
+		parsedToken, err := h.tokenParser(token)
+		if err != nil {
+			return h.Error(c, http.StatusUnauthorized, "Invalid token format", err)
+		}
+
+		s, err := h.sessionManager.Validate(parsedToken)
 		if err != nil {
 			return h.Error(c, http.StatusUnauthorized, "Unauthorized", err)
 		}

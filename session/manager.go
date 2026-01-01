@@ -26,7 +26,7 @@ func (m *Manager[T]) Create(sessionID, identityID T) (*identity.Session[T], erro
 	return s, nil
 }
 
-func (m *Manager[T]) Validate(sessionID string) (*identity.Session[T], error) {
+func (m *Manager[T]) Validate(sessionID T) (*identity.Session[T], error) {
 	s, err := m.repo.GetSession(sessionID)
 	if err != nil {
 		return nil, errors.New("invalid session")

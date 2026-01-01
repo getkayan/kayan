@@ -34,7 +34,7 @@ func (r *Repository[T]) CreateIdentity(id *identity.Identity[T]) error {
 	return r.db.Create(id).Error
 }
 
-func (r *Repository[T]) GetIdentity(id string) (*identity.Identity[T], error) {
+func (r *Repository[T]) GetIdentity(id T) (*identity.Identity[T], error) {
 	var ident identity.Identity[T]
 	if err := r.db.Preload("Credentials").First(&ident, "id = ?", id).Error; err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (r *Repository[T]) CreateSession(s *identity.Session[T]) error {
 	return r.db.Create(s).Error
 }
 
-func (r *Repository[T]) GetSession(id string) (*identity.Session[T], error) {
+func (r *Repository[T]) GetSession(id T) (*identity.Session[T], error) {
 	var s identity.Session[T]
 	if err := r.db.First(&s, "id = ?", id).Error; err != nil {
 		return nil, err
@@ -62,6 +62,6 @@ func (r *Repository[T]) GetSession(id string) (*identity.Session[T], error) {
 	return &s, nil
 }
 
-func (r *Repository[T]) DeleteSession(id string) error {
+func (r *Repository[T]) DeleteSession(id T) error {
 	return r.db.Delete(&identity.Session[T]{}, "id = ?", id).Error
 }

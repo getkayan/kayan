@@ -94,5 +94,5 @@ func (s *PasswordStrategy[T]) Authenticate(ctx context.Context, identifier, pass
 		return nil, errors.New("invalid identifier or password")
 	}
 
-	return s.repo.GetIdentity(fmt.Sprintf("%v", cred.IdentityID))
+	return s.repo.GetIdentity(cred.IdentityID)
 }

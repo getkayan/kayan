@@ -14,14 +14,14 @@ type Storage[T any] interface {
 type IdentityStorage[T any] interface {
 	CredentialStorage[T]
 	CreateIdentity(id *identity.Identity[T]) error
-	GetIdentity(id string) (*identity.Identity[T], error)
+	GetIdentity(id T) (*identity.Identity[T], error)
 	// Add Update/Delete as needed
 }
 
 type SessionStorage[T any] interface {
 	CreateSession(s *identity.Session[T]) error
-	GetSession(id string) (*identity.Session[T], error)
-	DeleteSession(id string) error
+	GetSession(id T) (*identity.Session[T], error)
+	DeleteSession(id T) error
 }
 
 type CredentialStorage[T any] interface {

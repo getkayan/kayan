@@ -105,7 +105,7 @@ func (m *OIDCManager[T]) reconcileIdentity(providerID, subject, email string) (*
 	cred, err := m.repo.GetCredentialByIdentifier(identifier, "oidc")
 	if err == nil {
 		// Existing user
-		return m.repo.GetIdentity(fmt.Sprintf("%v", cred.IdentityID))
+		return m.repo.GetIdentity(cred.IdentityID)
 	}
 
 	// 2. Otherwise create new identity

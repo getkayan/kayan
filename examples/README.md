@@ -4,23 +4,20 @@ This directory contains examples of how to extend Kayan with custom functionalit
 
 ## Examples
 
-### 1. Flexible Generic IDs ([flexible_id_uint64](./flexible_id_uint64))
-Explicitly demonstrates how to use `uint64` as the primary key for identities and sessions, moving away from the default UUIDs.
+### 1. Flexible Generic IDs
+Kayan no longer enforces `uuid.UUID`. You can use any type for primary keys.
 
-### 2. Companion Profile Pattern ([companion_profile](./companion_profile))
-Demonstrates how to keep Kayan's auth data separate from your application's user profiles while keeping them in sync using post-registration hooks.
+- **[Snowflake IDs (int64)](./flexible_id_snowflake)**: Demonstrates integration with a distributed ID generator (Snowflake).
+- **[Auto-Incremental IDs (uint)](./flexible_id_autoincrement)**: Shows how to delegate ID generation to the database.
+- **[Flexible uint64](./flexible_id_uint64)**: A generic example using `uint64`.
 
-### 3. Typed Wrapper Pattern ([typed_wrapper](./typed_wrapper))
-Shows how to wrap Kayan's dynamic `Traits` (JSON) field in a Go struct for type-safe access throughout your application.
+### 2. Standalone Schema Patterns
 
-### 4. Custom Storage Mapping ([custom_storage_mapping](./custom_storage_mapping))
-Illustrates how to implement custom storage logic to perform dual-writes or map Kayan's models to existing legacy tables.
-
-### 5. Full Custom Schema ([full_custom_schema](./full_custom_schema))
-The ultimate flexibility: completely replace Kayan's database layout by implementing the `domain.Storage` interface to map models to entirely custom table structures.
-
-### 6. MongoDB Storage ([custom_storage](./custom_storage))
-Demonstrates how to implement a fully custom non-RDBMS storage backend using the official MongoDB driver.
+- **[Companion Profile Pattern](./companion_profile)**: Keep Auth (Kayan) and Business Data (App) 100% separate.
+- **[Typed Wrapper Pattern](./typed_wrapper)**: Wrap Kayan's dynamic `Traits` (JSON) field in a Go struct.
+- **[Custom Storage Mapping](./custom_storage_mapping)**: Implement custom storage logic for dual-writes or mapping to legacy tables.
+- **[Full Custom Schema](./full_custom_schema)**: Completely replace Kayan's DB layout.
+- **[MongoDB Storage](./custom_storage)**: Use a non-RDBMS backend (MongoDB).
 
 ## How to Run the Examples
 
