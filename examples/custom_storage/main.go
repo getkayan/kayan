@@ -126,7 +126,8 @@ func main() {
 	factory := func() any { return &identity.Identity{} }
 	regManager := flow.NewRegistrationManager(storage, factory)
 	logManager := flow.NewLoginManager(storage)
-	sessionManager := session.NewManager(storage)
+	sessionStrategy := session.NewDatabaseStrategy(storage)
+	sessionManager := session.NewManager(sessionStrategy)
 
 	// Register Password Strategy
 	hasher := flow.NewBcryptHasher(14)

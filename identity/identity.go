@@ -42,12 +42,13 @@ func (j *JSON) Scan(value interface{}) error {
 
 // Identity represents a user identity.
 type Identity struct {
-	ID        string         `gorm:"primaryKey" json:"id"`
-	Traits    JSON           `gorm:"type:json" json:"traits"`
-	Roles     JSON           `gorm:"type:json" json:"roles,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	ID          string         `gorm:"primaryKey" json:"id"`
+	Traits      JSON           `gorm:"type:json" json:"traits"`
+	Roles       JSON           `gorm:"type:json" json:"roles,omitempty"`
+	Permissions JSON           `gorm:"type:json" json:"permissions,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 
 	Credentials []Credential `gorm:"foreignKey:IdentityID" json:"-"`
 }
@@ -93,3 +94,8 @@ type Session struct {
 }
 
 func (Session) TableName() string { return "sessions" }
+
+// Schema defines the interface for validating identity traits.
+type Schema interface {
+	Validate(traits JSON) error
+}

@@ -13,6 +13,7 @@ type RegistrationManager struct {
 	preHooks   []Hook
 	postHooks  []Hook
 	factory    func() any
+	schema     identity.Schema
 }
 
 func NewRegistrationManager(repo IdentityRepository, factory func() any) *RegistrationManager {
@@ -25,6 +26,10 @@ func NewRegistrationManager(repo IdentityRepository, factory func() any) *Regist
 
 func (m *RegistrationManager) RegisterStrategy(s RegistrationStrategy) {
 	m.strategies[s.ID()] = s
+}
+
+func (m *RegistrationManager) SetSchema(s identity.Schema) {
+	m.schema = s
 }
 
 func (m *RegistrationManager) AddPreHook(h Hook)  { m.preHooks = append(m.preHooks, h) }
@@ -43,7 +48,14 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 		}
 	}
 
-	// 2. Delegate to strategy
+	// 2. Schema Validation
+	if m.schema != nil {
+		if err := m.schema.Validate(traits); err != nil {
+			return nil, fmt.Errorf("registration: validation failed: %v", err)
+		}
+	}
+
+	// 3. Delegate to strategy
 	ident, err := strategy.Register(ctx, traits, secret)
 	if err != nil {
 		return nil, err

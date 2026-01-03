@@ -50,3 +50,26 @@ func (m *Middleware) RequireRole(role string) echo.MiddlewareFunc {
 		}
 	}
 }
+
+// RequirePermission returns an Echo middleware that requires the user to have the specified permission.
+func (m *Middleware) RequirePermission(permission string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			identityID := c.Get("identity_id")
+			if identityID == nil {
+				return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
+			}
+
+			allowed, err := m.rbac.AuthorizePermission(identityID, permission)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			}
+
+			if !allowed {
+				return echo.NewHTTPError(http.StatusForbidden, "forbidden: missing required permission")
+			}
+
+			return next(c)
+		}
+	}
+}

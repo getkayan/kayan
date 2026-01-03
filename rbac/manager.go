@@ -40,3 +40,31 @@ func (m *Manager) RequireRole(identityID any, role string) error {
 	}
 	return nil
 }
+
+// AuthorizePermission checks if the given identity has the required permission.
+func (m *Manager) AuthorizePermission(identityID any, permission string) (bool, error) {
+	if m.strategy == nil {
+		return false, fmt.Errorf("rbac strategy not configured")
+	}
+	return m.strategy.HasPermission(identityID, permission)
+}
+
+// GetPermissions returns all permissions for the given identity.
+func (m *Manager) GetPermissions(identityID any) ([]string, error) {
+	if m.strategy == nil {
+		return nil, fmt.Errorf("rbac strategy not configured")
+	}
+	return m.strategy.GetPermissions(identityID)
+}
+
+// RequirePermission is a helper that returns an error if the identity does not have the permission.
+func (m *Manager) RequirePermission(identityID any, permission string) error {
+	allowed, err := m.AuthorizePermission(identityID, permission)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return fmt.Errorf("access denied: missing permission %s", permission)
+	}
+	return nil
+}
