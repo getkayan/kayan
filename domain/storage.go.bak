@@ -21,7 +21,6 @@ type IdentityStorage interface {
 type SessionStorage interface {
 	CreateSession(s *identity.Session) error
 	GetSession(id any) (*identity.Session, error)
-	GetSessionByRefreshToken(token string) (*identity.Session, error)
 	DeleteSession(id any) error
 }
 

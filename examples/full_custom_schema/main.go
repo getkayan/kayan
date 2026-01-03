@@ -148,6 +148,10 @@ func (s *FullCustomStorage) GetSession(id any) (*identity.Session, error) {
 	}, nil
 }
 
+func (s *FullCustomStorage) GetSessionByRefreshToken(token string) (*identity.Session, error) {
+	return nil, fmt.Errorf("refresh token not supported in this custom schema")
+}
+
 func (s *FullCustomStorage) DeleteSession(id any) error {
 	return s.db.Delete(&MySession{}, "session_id = ?", id).Error
 }

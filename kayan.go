@@ -31,7 +31,7 @@ func NewDefaultLoginManager(db *gorm.DB) *flow.LoginManager {
 // NewDefaultSessionManager creates a SessionManager using the default ID type.
 func NewDefaultSessionManager(db *gorm.DB) *session.Manager {
 	repo := persistence.NewRepository(db)
-	return session.NewManager(repo)
+	return session.NewManager(session.NewDatabaseStrategy(repo))
 }
 
 // NewDefaultOIDCManager creates an OIDCManager using the default identity.

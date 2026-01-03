@@ -44,7 +44,6 @@ func (j *JSON) Scan(value interface{}) error {
 type Identity struct {
 	ID        string         `gorm:"primaryKey" json:"id"`
 	Traits    JSON           `gorm:"type:json" json:"traits"`
-	Roles     JSON           `gorm:"type:json" json:"roles,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

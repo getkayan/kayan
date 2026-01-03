@@ -91,6 +91,16 @@ func (s *MongoStorage) GetSession(id any) (*identity.Session, error) {
 	return &sess, nil
 }
 
+func (s *MongoStorage) GetSessionByRefreshToken(token string) (*identity.Session, error) {
+	ctx := context.Background()
+	var sess identity.Session
+	err := s.db.Collection("sessions").FindOne(ctx, bson.M{"refresh_token": token}).Decode(&sess)
+	if err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
 func (s *MongoStorage) DeleteSession(id any) error {
 	ctx := context.Background()
 	_, err := s.db.Collection("sessions").DeleteOne(ctx, bson.M{"id": id})

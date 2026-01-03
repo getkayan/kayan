@@ -77,14 +77,6 @@ func (r *Repository) GetSession(id any) (*identity.Session, error) {
 	return &s, nil
 }
 
-func (r *Repository) GetSessionByRefreshToken(token string) (*identity.Session, error) {
-	var s identity.Session
-	if err := r.db.Where("refresh_token = ?", token).First(&s).Error; err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
 func (r *Repository) DeleteSession(id any) error {
 	return r.db.Delete(&identity.Session{}, "id = ?", id).Error
 }
