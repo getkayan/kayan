@@ -1,7 +1,10 @@
 package kgorm
 
 import (
+	"context"
+
 	"github.com/getkayan/kayan/core/identity"
+	"github.com/getkayan/kayan/core/oauth2"
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -32,6 +35,8 @@ func (r *Repository) AutoMigrate(models ...any) error {
 		&identity.Identity{},
 		&identity.Credential{},
 		&identity.Session{},
+		&oauth2.Client{},
+		&oauth2.AuthCode{},
 	}
 	allModels := append(baseModels, models...)
 	return r.db.AutoMigrate(allModels...)
@@ -87,4 +92,36 @@ func (r *Repository) GetSessionByRefreshToken(token string) (*identity.Session, 
 
 func (r *Repository) DeleteSession(id any) error {
 	return r.db.Delete(&identity.Session{}, "id = ?", id).Error
+}
+
+func (r *Repository) GetClient(ctx context.Context, id string) (*oauth2.Client, error) {
+	var c oauth2.Client
+	if err := r.db.WithContext(ctx).First(&c, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *Repository) CreateClient(ctx context.Context, client *oauth2.Client) error {
+	return r.db.WithContext(ctx).Create(client).Error
+}
+
+func (r *Repository) DeleteClient(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Delete(&oauth2.Client{}, "id = ?", id).Error
+}
+
+func (r *Repository) SaveAuthCode(ctx context.Context, code *oauth2.AuthCode) error {
+	return r.db.WithContext(ctx).Save(code).Error
+}
+
+func (r *Repository) GetAuthCode(ctx context.Context, code string) (*oauth2.AuthCode, error) {
+	var c oauth2.AuthCode
+	if err := r.db.WithContext(ctx).First(&c, "code = ?", code).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *Repository) DeleteAuthCode(ctx context.Context, code string) error {
+	return r.db.WithContext(ctx).Delete(&oauth2.AuthCode{}, "code = ?", code).Error
 }
