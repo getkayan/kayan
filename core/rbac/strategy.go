@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -102,4 +103,20 @@ func (s *BasicStrategy) HasPermission(identityID any, permission string) (bool, 
 	}
 
 	return false, nil
+}
+
+// Can implements policy.Engine interface for unified authorization.
+// The 'action' parameter is interpreted as the required role.
+// The 'resource' parameter is ignored for basic RBAC.
+// Example: Can(ctx, identityID, "admin", nil) checks if identity has "admin" role.
+func (s *BasicStrategy) Can(ctx context.Context, subject any, action string, resource any) (bool, error) {
+	// Extract identity ID from subject
+	var identityID any
+	switch v := subject.(type) {
+	case *identity.Identity:
+		identityID = v.ID
+	default:
+		identityID = subject
+	}
+	return s.HasRole(identityID, action)
 }

@@ -36,5 +36,10 @@ type LoginStrategy interface {
 	Authenticate(ctx context.Context, identifier, secret string) (any, error)
 }
 
+// Initiator is an optional interface for login strategies that support a multi-step initiation (e.g. Magic Link, OTP).
+type Initiator interface {
+	Initiate(ctx context.Context, identifier string) (any, error)
+}
+
 // Hook defines a function that runs before or after a flow action.
 type Hook func(ctx context.Context, ident any) error

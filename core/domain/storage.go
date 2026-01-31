@@ -1,6 +1,9 @@
 package domain
 
 import (
+	"context"
+
+	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/identity"
 )
 
@@ -9,6 +12,8 @@ type Storage interface {
 	IdentityStorage
 	SessionStorage
 	CredentialStorage
+	audit.AuditStore
+	TokenStore
 }
 
 type IdentityStorage interface {
@@ -16,6 +21,9 @@ type IdentityStorage interface {
 	CreateIdentity(ident any) error
 	GetIdentity(factory func() any, id any) (any, error)
 	FindIdentity(factory func() any, query map[string]any) (any, error)
+	ListIdentities(factory func() any, page, limit int) ([]any, error)
+	UpdateIdentity(ident any) error
+	DeleteIdentity(id any) error
 }
 
 type SessionStorage interface {
@@ -27,6 +35,7 @@ type SessionStorage interface {
 
 type CredentialStorage interface {
 	GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error)
+	UpdateCredentialSecret(ctx context.Context, identityID, method, secret string) error
 }
 
 // IDGenerator is a function that generates a new ID.

@@ -54,7 +54,53 @@ func (m *mockRepo) FindIdentity(factory func() any, query map[string]any) (any, 
 }
 
 func (m *mockRepo) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error) {
+	if method == "" {
+		// Find any credential with this identifier
+		for key, c := range m.creds {
+			// key is identifier:method
+			if len(key) > len(identifier) && key[:len(identifier)] == identifier && key[len(identifier)] == ':' {
+				return c, nil
+			}
+		}
+		return nil, nil // Not found
+	}
 	return m.creds[identifier+":"+method], nil
+}
+
+func (m *mockRepo) UpdateCredentialSecret(ctx context.Context, identityID, method, secret string) error {
+	// Need to find credential by identity ID and method.
+	// Our map is keyed by identifier:method.
+	// This makes it hard effectively.
+	// Simplified mock: Iterate.
+	for _, c := range m.creds {
+		if c.IdentityID == identityID && c.Type == method {
+			c.Secret = secret
+			return nil
+		}
+	}
+	return errors.New("credential not found")
+}
+
+func (m *mockRepo) UpdateIdentity(ident any) error {
+	if fi, ok := ident.(FlowIdentity); ok {
+		m.identities[fmt.Sprintf("%v", fi.GetID())] = ident
+		return nil
+	}
+	return errors.New("invalid identity")
+}
+
+func (m *mockRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
+	result := make([]any, 0, len(m.identities))
+	for _, ident := range m.identities {
+		result = append(result, ident)
+	}
+	return result, nil
+}
+
+func (m *mockRepo) DeleteIdentity(id any) error {
+	key := fmt.Sprintf("%v", id)
+	delete(m.identities, key)
+	return nil
 }
 
 func TestRegistration(t *testing.T) {

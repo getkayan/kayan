@@ -1,8 +1,17 @@
 # Kayan 🪁
 
-Kayan is a **headless, non-generic, and highly extensible authentication service** built for Go. It prioritizes developer flexibility, allowing you to "Bring Your Own Schema" (BYOS) and integrate authentication into existing databases without refactoring your entire data model.
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-green?logo=openapi-initiative)](docs/openapi/openapi.yaml)
+
+**Headless, extensible Identity & Access Management for Go.**
+
+Kayan prioritizes developer flexibility with "Bring Your Own Schema" (BYOS), letting you integrate authentication into existing databases without refactoring your data model.
+
+[📖 Documentation](docs/) | [🚀 Examples](../kayan-examples/) | [💬 Discussions](https://github.com/getkayan/kayan/discussions)
 
 ---
+
 
 ## 🚀 Key Features
 

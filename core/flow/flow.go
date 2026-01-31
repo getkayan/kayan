@@ -26,7 +26,8 @@ type Flow struct {
 	Methods []string `json:"methods"`
 }
 
-// IdentityRepository is now an alias for domain.IdentityStorage
+// IdentityRepository is an alias for domain.IdentityStorage.
+// This provides a clearer name within the flow package context.
 type IdentityRepository = domain.IdentityStorage
 
 func NewFlow(t FlowType, methods []string) *Flow {

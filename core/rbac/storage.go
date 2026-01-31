@@ -1,4 +1,4 @@
-package domain
+package rbac
 
 // RBACStorage defines the interface for persisting roles and permissions.
 // In a simple setup, roles are stored directly in the identity traits/roles field.

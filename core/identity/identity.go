@@ -12,7 +12,7 @@ type DefaultIdentity = Identity
 type DefaultCredential = Credential
 type DefaultSession = Session
 
-// JSON is a custom type for handling JSON data in GORM.
+// JSON is a custom type for handling JSON data in various storages.
 type JSON []byte
 
 func (j JSON) Value() (driver.Value, error) {
@@ -40,15 +40,21 @@ func (j *JSON) Scan(value interface{}) error {
 
 // Identity represents a user identity.
 type Identity struct {
-	ID          string     `gorm:"primaryKey" json:"id"`
-	Traits      JSON       `gorm:"type:json" json:"traits"`
-	Roles       JSON       `gorm:"type:json" json:"roles,omitempty"`
-	Permissions JSON       `gorm:"type:json" json:"permissions,omitempty"`
+	ID          string     `json:"id"`
+	Traits      JSON       `json:"traits"`
+	Roles       JSON       `json:"roles,omitempty"`
+	Permissions JSON       `json:"permissions,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
-	DeletedAt   *time.Time `gorm:"index" json:"-"`
+	DeletedAt   *time.Time `json:"-"`
 
-	Credentials []Credential `gorm:"foreignKey:IdentityID" json:"-"`
+	MFAEnabled bool   `json:"mfa_enabled"`
+	MFASecret  string `json:"-"`
+
+	Verified   bool       `json:"verified"`
+	VerifiedAt *time.Time `json:"verified_at"`
+
+	Credentials []Credential `json:"-"`
 }
 
 func (i *Identity) GetID() any { return i.ID }
@@ -59,39 +65,34 @@ func (i *Identity) SetID(id any) {
 		i.ID = fmt.Sprintf("%v", id)
 	}
 }
+
 func (i *Identity) GetTraits() JSON               { return i.Traits }
 func (i *Identity) SetTraits(t JSON)              { i.Traits = t }
 func (i *Identity) GetCredentials() []Credential  { return i.Credentials }
 func (i *Identity) SetCredentials(c []Credential) { i.Credentials = c }
 
-func (Identity) TableName() string { return "identities" }
-
 // Credential represents an authentication credential.
 type Credential struct {
-	ID         string    `gorm:"primaryKey" json:"id"`
-	IdentityID string    `gorm:"index" json:"identity_id"`
-	Type       string    `gorm:"index" json:"type"`
-	Identifier string    `gorm:"index" json:"identifier"`
+	ID         string    `json:"id"`
+	IdentityID string    `json:"identity_id"`
+	Type       string    `json:"type"`
+	Identifier string    `json:"identifier"`
 	Secret     string    `json:"-"`
-	Config     JSON      `gorm:"type:json" json:"config"`
+	Config     JSON      `json:"config"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-func (Credential) TableName() string { return "credentials" }
-
 // Session represents an authenticated session.
 type Session struct {
-	ID               string    `gorm:"primaryKey" json:"id"`
-	IdentityID       string    `gorm:"index" json:"identity_id"`
-	RefreshToken     string    `gorm:"index" json:"refresh_token,omitempty"`
+	ID               string    `json:"id"`
+	IdentityID       string    `json:"identity_id"`
+	RefreshToken     string    `json:"refresh_token,omitempty"`
 	ExpiresAt        time.Time `json:"expires_at"`
 	RefreshExpiresAt time.Time `json:"refresh_expires_at,omitempty"`
 	IssuedAt         time.Time `json:"issued_at"`
 	Active           bool      `json:"active"`
 }
-
-func (Session) TableName() string { return "sessions" }
 
 // Schema defines the interface for validating identity traits.
 type Schema interface {

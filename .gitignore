@@ -34,3 +34,5 @@ go.work.sum
 
 # Database for tests
 *.db
+
+*.bak

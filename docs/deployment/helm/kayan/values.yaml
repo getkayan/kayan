@@ -1,0 +1,194 @@
+# Kayan Helm Values
+# Override these values in your own values file or via --set
+
+# Replica count
+replicaCount: 3
+
+# Image configuration
+image:
+  repository: ghcr.io/getkayan/kayan
+  tag: ""  # Defaults to Chart appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: auth.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: kayan-tls
+      hosts:
+        - auth.example.com
+
+# Resource limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kayan
+          topologyKey: kubernetes.io/hostname
+
+# Kayan configuration
+kayan:
+  # Environment
+  env: production
+  logLevel: info
+  logFormat: json
+  
+  # Database (required)
+  database:
+    type: postgres
+    # DSN is set via secret
+    maxOpenConns: 25
+    maxIdleConns: 5
+    connMaxLifetime: 5m
+  
+  # Redis (required for rate limiting, sessions)
+  redis:
+    enabled: true
+    # URL is set via secret
+  
+  # Session
+  session:
+    ttl: 24h
+    refreshTTL: 168h
+  
+  # Rate limiting
+  rateLimit:
+    enabled: true
+    requests: 100
+    window: 60s
+  
+  # Account lockout
+  lockout:
+    enabled: true
+    maxFailures: 5
+    duration: 15m
+  
+  # CORS
+  cors:
+    origins: "*"
+    methods: "GET,POST,PUT,DELETE,OPTIONS"
+    headers: "Authorization,Content-Type,X-Tenant-ID"
+
+# Secrets (use external secrets in production)
+secrets:
+  # Database connection string
+  dbDsn: ""
+  # Redis URL
+  redisUrl: ""
+  # Session secret (32 bytes)
+  sessionSecret: ""
+  # JWT signing key
+  jwtSecret: ""
+
+# External secrets (recommended for production)
+externalSecrets:
+  enabled: false
+  secretStore: ""
+  refreshInterval: 1h
+  data: []
+    # - secretKey: KAYAN_DB_DSN
+    #   remoteRef:
+    #     key: kayan/database
+    #     property: dsn
+
+# Probes
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Metrics / Monitoring
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}

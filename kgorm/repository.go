@@ -2,23 +2,37 @@ package kgorm
 
 import (
 	"context"
+	"time"
 
-	"github.com/getkayan/kayan/core/identity"
-	"github.com/getkayan/kayan/core/oauth2"
+	"github.com/getkayan/kayan/core/audit"
+	"github.com/getkayan/kayan/core/domain"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
+// Repository is a facade that combines all sub-repositories.
+// It implements domain.Storage by embedding specialized repositories.
 type Repository struct {
+	*IdentityRepository
+	*SessionRepository
+	*OAuth2Repository
 	db *gorm.DB
 }
 
+// NewRepository creates a new Repository with all sub-repositories initialized.
 func NewRepository(db *gorm.DB) *Repository {
-	return &Repository{db: db}
+	return &Repository{
+		IdentityRepository: NewIdentityRepository(db),
+		SessionRepository:  NewSessionRepository(db),
+		OAuth2Repository:   NewOAuth2Repository(db),
+		db:                 db,
+	}
 }
 
+// DB returns the underlying GORM database connection.
 func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
@@ -29,99 +43,63 @@ func init() {
 	Register("mysql", mysql.Open)
 }
 
+// AutoMigrate runs database migrations for all GORM models.
 func (r *Repository) AutoMigrate(models ...any) error {
-	// Identity, Credential, and Session are base models that should always be migrated
 	baseModels := []any{
-		&identity.Identity{},
-		&identity.Credential{},
-		&identity.Session{},
-		&oauth2.Client{},
-		&oauth2.AuthCode{},
+		&gormIdentity{},
+		&gormCredential{},
+		&gormSession{},
+		&gormClient{},
+		&gormAuthCode{},
+		&gormRefreshToken{},
+		&gormAuditEvent{},
+		&gormAuthToken{},
 	}
 	allModels := append(baseModels, models...)
 	return r.db.AutoMigrate(allModels...)
 }
 
-func (r *Repository) CreateIdentity(ident any) error {
-	return r.db.Create(ident).Error
+// SaveEvent implements audit.AuditStore.
+func (r *Repository) SaveEvent(ctx context.Context, event *audit.AuditEvent) error {
+	ge := fromCoreAuditEvent(event)
+	if ge.ID == "" {
+		ge.ID = uuid.New().String()
+	}
+	if ge.CreatedAt.IsZero() {
+		ge.CreatedAt = time.Now()
+	}
+	return r.db.WithContext(ctx).Save(ge).Error
 }
 
-func (r *Repository) GetIdentity(factory func() any, id any) (any, error) {
-	ident := factory()
-	if err := r.db.First(ident, "id = ?", id).Error; err != nil {
+// SaveToken implements domain.TokenStore.
+func (r *Repository) SaveToken(ctx context.Context, token *domain.AuthToken) error {
+	gt := fromCoreAuthToken(token)
+	return r.db.WithContext(ctx).Save(gt).Error
+}
+
+// GetToken implements domain.TokenStore.
+func (r *Repository) GetToken(ctx context.Context, token string) (*domain.AuthToken, error) {
+	var gt gormAuthToken
+	if err := r.db.WithContext(ctx).First(&gt, "token = ?", token).Error; err != nil {
 		return nil, err
 	}
-	return ident, nil
+	return toCoreAuthToken(&gt), nil
 }
 
-func (r *Repository) FindIdentity(factory func() any, query map[string]any) (any, error) {
-	ident := factory()
-	if err := r.db.Where(query).First(ident).Error; err != nil {
-		return nil, err
-	}
-	return ident, nil
+// DeleteToken implements domain.TokenStore.
+func (r *Repository) DeleteToken(ctx context.Context, token string) error {
+	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "token = ?", token).Error
 }
 
-func (r *Repository) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error) {
-	var cred identity.Credential
-	if err := r.db.Where("identifier = ? AND type = ?", identifier, method).First(&cred).Error; err != nil {
-		return nil, err
-	}
-	return &cred, nil
+// DeleteExpiredTokens implements domain.TokenStore.
+func (r *Repository) DeleteExpiredTokens(ctx context.Context) error {
+	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "expires_at < ?", time.Now()).Error
 }
 
-func (r *Repository) CreateSession(s *identity.Session) error {
-	return r.db.Create(s).Error
-}
-
-func (r *Repository) GetSession(id any) (*identity.Session, error) {
-	var s identity.Session
-	if err := r.db.First(&s, "id = ?", id).Error; err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-func (r *Repository) GetSessionByRefreshToken(token string) (*identity.Session, error) {
-	var s identity.Session
-	if err := r.db.Where("refresh_token = ?", token).First(&s).Error; err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-func (r *Repository) DeleteSession(id any) error {
-	return r.db.Delete(&identity.Session{}, "id = ?", id).Error
-}
-
-func (r *Repository) GetClient(ctx context.Context, id string) (*oauth2.Client, error) {
-	var c oauth2.Client
-	if err := r.db.WithContext(ctx).First(&c, "id = ?", id).Error; err != nil {
-		return nil, err
-	}
-	return &c, nil
-}
-
-func (r *Repository) CreateClient(ctx context.Context, client *oauth2.Client) error {
-	return r.db.WithContext(ctx).Create(client).Error
-}
-
-func (r *Repository) DeleteClient(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Delete(&oauth2.Client{}, "id = ?", id).Error
-}
-
-func (r *Repository) SaveAuthCode(ctx context.Context, code *oauth2.AuthCode) error {
-	return r.db.WithContext(ctx).Save(code).Error
-}
-
-func (r *Repository) GetAuthCode(ctx context.Context, code string) (*oauth2.AuthCode, error) {
-	var c oauth2.AuthCode
-	if err := r.db.WithContext(ctx).First(&c, "code = ?", code).Error; err != nil {
-		return nil, err
-	}
-	return &c, nil
-}
-
-func (r *Repository) DeleteAuthCode(ctx context.Context, code string) error {
-	return r.db.WithContext(ctx).Delete(&oauth2.AuthCode{}, "code = ?", code).Error
-}
+// Compile-time interface checks
+var (
+	_ domain.IdentityStorage = (*Repository)(nil)
+	_ domain.SessionStorage  = (*Repository)(nil)
+	_ domain.TokenStore      = (*Repository)(nil)
+	_ audit.AuditStore       = (*Repository)(nil)
+)

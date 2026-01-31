@@ -13,6 +13,9 @@ type Discovery struct {
 	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
 	TokenEndpoint                    string   `json:"token_endpoint"`
 	UserinfoEndpoint                 string   `json:"userinfo_endpoint"`
+	IntrospectionEndpoint            string   `json:"introspection_endpoint,omitempty"`
+	RevocationEndpoint               string   `json:"revocation_endpoint,omitempty"`
+	EndSessionEndpoint               string   `json:"end_session_endpoint,omitempty"`
 	JwksURI                          string   `json:"jwks_uri"`
 	ResponseTypesSupported           []string `json:"response_types_supported"`
 	SubjectTypesSupported            []string `json:"subject_types_supported"`
@@ -58,6 +61,9 @@ func (s *Server) GetDiscovery(baseURL string) Discovery {
 		AuthorizationEndpoint:            baseURL + "/oauth2/auth",
 		TokenEndpoint:                    baseURL + "/oauth2/token",
 		UserinfoEndpoint:                 baseURL + "/oidc/userinfo",
+		IntrospectionEndpoint:            baseURL + "/oauth2/introspect",
+		RevocationEndpoint:               baseURL + "/oauth2/revoke",
+		EndSessionEndpoint:               baseURL + "/oidc/logout",
 		JwksURI:                          baseURL + "/oauth2/jwks",
 		ResponseTypesSupported:           []string{"code", "id_token"},
 		SubjectTypesSupported:            []string{"public"},

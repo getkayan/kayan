@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/identity"
 )
 
 type RegistrationManager struct {
 	repo       IdentityRepository
+	auditStore audit.AuditStore
 	strategies map[string]RegistrationStrategy
 	preHooks   []Hook
 	postHooks  []Hook
@@ -17,8 +19,15 @@ type RegistrationManager struct {
 }
 
 func NewRegistrationManager(repo IdentityRepository, factory func() any) *RegistrationManager {
+	store, ok := repo.(audit.AuditStore)
+	var auditStore audit.AuditStore
+	if ok {
+		auditStore = store
+	}
+
 	return &RegistrationManager{
 		repo:       repo,
+		auditStore: auditStore,
 		strategies: make(map[string]RegistrationStrategy),
 		factory:    factory,
 	}
@@ -58,7 +67,21 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 	// 3. Delegate to strategy
 	ident, err := strategy.Register(ctx, traits, secret)
 	if err != nil {
+		if m.auditStore != nil {
+			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+				Type:    "identity.registration.failure",
+				Status:  "failure",
+				Message: err.Error(),
+			})
+		}
 		return nil, err
+	}
+
+	if m.auditStore != nil {
+		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+			Type:   "identity.registration.success",
+			Status: "success",
+		})
 	}
 
 	// 3. Post-hooks
