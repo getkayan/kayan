@@ -1,3 +1,35 @@
+// Package oidc provides OpenID Connect (OIDC) server functionality for Kayan IAM.
+//
+// This package extends the OAuth 2.0 provider with OIDC capabilities including
+// ID token generation, discovery metadata, and userinfo endpoints. It enables
+// Kayan to act as an OpenID Provider.
+//
+// # Features
+//
+//   - ID token generation with RS256 signing
+//   - OIDC Discovery (.well-known/openid-configuration)
+//   - Standard claims (sub, iss, aud, exp, iat)
+//   - Custom traits in ID tokens
+//   - Single Logout (SLO) support
+//
+// # Endpoints
+//
+//   - /.well-known/openid-configuration: Discovery document
+//   - /oauth2/auth: Authorization endpoint
+//   - /oauth2/token: Token endpoint
+//   - /oidc/userinfo: UserInfo endpoint
+//   - /oidc/logout: End session endpoint
+//   - /oauth2/jwks: JSON Web Key Set
+//
+// # Example Usage
+//
+//	server := oidc.NewServer("https://auth.example.com", privateKey, "key-1")
+//
+//	// Get discovery document
+//	discovery := server.GetDiscovery("https://auth.example.com")
+//
+//	// Generate ID token
+//	idToken, _ := server.GenerateIDToken(clientID, userID, traits)
 package oidc
 
 import (

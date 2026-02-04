@@ -1,3 +1,40 @@
+// Package policy provides authorization engines for Kayan IAM.
+//
+// The policy package implements flexible authorization using Attribute-Based
+// Access Control (ABAC) and Hybrid (RBAC+ABAC) approaches. All policy engines
+// implement the generic Engine interface.
+//
+// # ABAC (Attribute-Based Access Control)
+//
+// ABAC evaluates access based on subject attributes, resource attributes,
+// and environmental context:
+//
+//	engine := policy.NewABACStrategy()
+//	engine.AddRule("documents:read", func(ctx context.Context, subject, resource any, pCtx policy.Context) (bool, error) {
+//	    user := subject.(*User)
+//	    doc := resource.(*Document)
+//	    return doc.OwnerID == user.ID || user.Role == "admin", nil
+//	})
+//
+//	allowed, _ := engine.Can(ctx, user, "documents:read", document)
+//
+// # Hybrid (RBAC + ABAC)
+//
+// Combine role-based and attribute-based checks for maximum flexibility:
+//
+//	hybrid := policy.NewHybridStrategy(rbacEngine, abacEngine)
+//	allowed, _ := hybrid.Can(ctx, subject, action, resource)
+//
+// # Engine Interface
+//
+// All authorization strategies implement the Engine interface:
+//
+//	type Engine interface {
+//	    Can(ctx context.Context, subject any, action string, resource any) (bool, error)
+//	}
+//
+// See also: rbac package for pure role-based access, rebac package for
+// relationship-based access control.
 package policy
 
 import (

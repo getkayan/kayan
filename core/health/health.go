@@ -1,3 +1,39 @@
+// Package health provides health check infrastructure for Kayan IAM.
+//
+// This package implements production-ready health checks for Kubernetes deployments,
+// load balancers, and monitoring systems. It supports liveness, readiness, and
+// comprehensive health reporting.
+//
+// # Features
+//
+//   - Kubernetes-compatible /healthz and /ready endpoints
+//   - Concurrent health check execution with configurable timeouts
+//   - Built-in checkers for database, Redis, and memory
+//   - Custom checker interface for application-specific checks
+//   - Detailed health reports with latency metrics
+//
+// # Health Status
+//
+//   - StatusHealthy: All checks pass
+//   - StatusDegraded: Some non-critical checks fail
+//   - StatusUnhealthy: Critical checks fail
+//
+// # Example Usage
+//
+//	manager := health.NewManager("1.0.0", health.WithTimeout(5*time.Second))
+//
+//	// Register database check
+//	manager.Register(health.NewDatabaseChecker("postgres", db.PingContext))
+//
+//	// Register custom check
+//	manager.RegisterFunc("cache", func(ctx context.Context) *health.Check {
+//	    return &health.Check{Name: "cache", Status: health.StatusHealthy}
+//	})
+//
+//	// Mount HTTP handlers
+//	http.Handle("/healthz", manager.LiveHandler())
+//	http.Handle("/ready", manager.ReadyHandler())
+//	http.Handle("/health", manager.FullHandler())
 package health
 
 import (

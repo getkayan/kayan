@@ -1,3 +1,43 @@
+// Package compliance provides enterprise compliance controls for Kayan IAM.
+//
+// This package implements security and privacy controls aligned with SOC 2, ISO 27001,
+// and GDPR requirements. It provides data retention management, field-level encryption,
+// and security HTTP headers.
+//
+// # Features
+//
+//   - Data retention policies with configurable TTLs for audit logs, sessions, consents
+//   - Automatic cleanup manager for GDPR-compliant data purging
+//   - AES-256-GCM field-level encryption for sensitive data
+//   - Security headers middleware (CSP, HSTS, X-Frame-Options, etc.)
+//   - Per-tenant retention policy overrides
+//
+// # Data Retention
+//
+// The RetentionManager handles automatic cleanup based on configurable policies:
+//
+//	policy := &compliance.RetentionPolicy{
+//	    AuditLogDays:       365,  // SOC 2: 1 year
+//	    SessionHistoryDays: 90,
+//	    ConsentRecordDays:  1825, // GDPR: 5 years
+//	    FailedLoginDays:    30,
+//	}
+//	manager := compliance.NewRetentionManager(store, policy)
+//	manager.RunCleanup(ctx) // Periodic cleanup job
+//
+// # Field-Level Encryption
+//
+// Sensitive data can be encrypted at rest:
+//
+//	enc, _ := compliance.NewAESEncryption(key)
+//	ciphertext, _ := enc.Encrypt([]byte(ssn))
+//	plaintext, _ := enc.Decrypt(ciphertext)
+//
+// # Security Headers
+//
+// Apply security headers to HTTP responses:
+//
+//	mux.Use(compliance.SecurityHeadersMiddleware(nil)) // Uses defaults
 package compliance
 
 import (

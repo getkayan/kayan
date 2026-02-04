@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/getkayan/kayan/core/identity"
+	"github.com/getkayan/kayan/core/rbac"
 )
 
 // Mock RoleSource
@@ -17,18 +18,18 @@ func (m *mockUser) GetRoles() []string { return m.Roles }
 // Test RBAC
 func TestRBAC(t *testing.T) {
 	// 1. Setup
-	rbac := NewRBACStrategy(nil) // Storage nil as we rely on RoleSource interface optimization
+	rbacStrategy := rbac.NewBasicStrategy(nil) // Storage nil as we rely on RoleSource interface optimization
 
 	// 2. Test Allowed
 	admin := &mockUser{Roles: []string{"admin", "editor"}}
-	ok, _ := rbac.Can(context.Background(), admin, "admin", nil)
+	ok, _ := rbacStrategy.Can(context.Background(), admin, "admin", nil)
 	if !ok {
 		t.Error("RBAC should allow admin")
 	}
 
 	// 3. Test Denied
 	guest := &mockUser{Roles: []string{"guest"}}
-	ok, _ = rbac.Can(context.Background(), guest, "admin", nil)
+	ok, _ = rbacStrategy.Can(context.Background(), guest, "admin", nil)
 	if ok {
 		t.Error("RBAC should deny guest")
 	}
@@ -94,14 +95,14 @@ func TestABAC(t *testing.T) {
 // Test Hybrid
 func TestHybrid(t *testing.T) {
 	// Hybrid: Must be Admin (RBAC) AND Owner (ABAC) - strict!
-	rbac := NewRBACStrategy(nil)
+	rbacStrategy := rbac.NewBasicStrategy(nil)
 	abac := NewABACStrategy()
 	abac.AddRule("delete", func(ctx context.Context, sub, res any, pCtx Context) (bool, error) {
 		// Mock owner check
 		return true, nil
 	})
 
-	hybrid := NewHybridStrategy(DenyOverrides, rbac, abac)
+	hybrid := NewHybridStrategy(DenyOverrides, rbacStrategy, abac)
 
 	// User is Admin (Passes RBAC) BUT ABAC check is mocked true.
 	// Actually let's make ABAC conditional so we verify AND logic.

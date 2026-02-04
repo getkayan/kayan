@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +18,22 @@ type mockAudit struct {
 func (m *mockAudit) SaveEvent(ctx context.Context, e *audit.AuditEvent) error {
 	m.events = append(m.events, e)
 	return nil
+}
+
+func (m *mockAudit) Count(ctx context.Context, filter audit.Filter) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAudit) Query(ctx context.Context, filter audit.Filter) ([]audit.AuditEvent, error) {
+	return nil, nil
+}
+
+func (m *mockAudit) Export(ctx context.Context, filter audit.Filter, format audit.ExportFormat) (io.Reader, error) {
+	return nil, nil
+}
+
+func (m *mockAudit) Purge(ctx context.Context, olderThan time.Time) (int64, error) {
+	return 0, nil
 }
 
 // Mock Engine to count calls

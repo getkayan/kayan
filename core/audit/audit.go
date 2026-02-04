@@ -1,3 +1,45 @@
+// Package audit provides comprehensive audit logging for Kayan IAM.
+//
+// Designed for SOC 2 and ISO 27001 compliance, this package captures security-relevant
+// events with rich context including risk levels, geographic location, and change tracking.
+//
+// # Features
+//
+//   - Structured audit events with predefined types for authentication, authorization, and admin actions
+//   - Risk classification (low, medium, high, critical) for compliance reporting
+//   - Fluent EventBuilder API for constructing audit records
+//   - Export support (JSON, CSV) for compliance audits
+//   - Pluggable AuditStore interface for custom backends
+//   - Hooks for enrichment, alerting, and custom processing
+//
+// # Event Types
+//
+// Predefined event types cover common security scenarios:
+//
+//   - Authentication: login success/failure, logout, password changes, MFA events
+//   - Identity lifecycle: user creation, updates, deletion, suspension
+//   - RBAC: role assignments, permission changes
+//   - Consent: GDPR consent grant/revocation
+//   - Security: rate limiting, suspicious activity, token revocation
+//
+// # Example Usage
+//
+//	// Create and log an event
+//	event := audit.NewEvent(audit.EventLoginSuccess).
+//	    Actor(userID).
+//	    IP(clientIP).
+//	    UserAgent(ua).
+//	    Success().
+//	    Build()
+//
+//	logger.Log(ctx, event)
+//
+//	// Query events for compliance report
+//	events, _ := store.Query(ctx, audit.Filter{
+//	    Types: []string{audit.EventLoginFailure},
+//	    RiskLevels: []audit.RiskLevel{audit.RiskHigh, audit.RiskCritical},
+//	    StartTime: startOfMonth,
+//	})
 package audit
 
 import (

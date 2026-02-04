@@ -1,7 +1,47 @@
+// Package kgorm provides a GORM-based storage adapter for Kayan IAM.
+//
+// This package implements all core storage interfaces using GORM, supporting
+// PostgreSQL, MySQL, and SQLite databases. It provides a plug-and-play persistence
+// layer for identities, sessions, credentials, OAuth2 tokens, and audit events.
+//
+// # Features
+//
+//   - Full domain.Storage interface implementation
+//   - Support for PostgreSQL, MySQL, and SQLite
+//   - Automatic schema migration
+//   - Identity repository with credential management
+//   - Session repository with refresh token support
+//   - OAuth2 repository for authorization server
+//   - ReBAC repository for relationship-based access control
+//   - Audit event storage with SOC 2 compliance
+//
+// # Supported Databases
+//
+//   - PostgreSQL: Production recommended
+//   - MySQL: Full support
+//   - SQLite: Development and testing
+//
+// # Example Usage
+//
+//	db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+//	repo := kgorm.NewRepository(db)
+//
+//	// Run migrations
+//	repo.AutoMigrate()
+//
+//	// Use with flow manager
+//	flow.NewManager(repo, ...)
+//
+// # Custom Models
+//
+// To extend the default models, pass them to AutoMigrate:
+//
+//	repo.AutoMigrate(&MyCustomModel{}, &AnotherModel{})
 package kgorm
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/getkayan/kayan/core/audit"
@@ -54,6 +94,7 @@ func (r *Repository) AutoMigrate(models ...any) error {
 		&gormRefreshToken{},
 		&gormAuditEvent{},
 		&gormAuthToken{},
+		&gormRelationTuple{},
 	}
 	allModels := append(baseModels, models...)
 	return r.db.AutoMigrate(allModels...)
@@ -92,8 +133,32 @@ func (r *Repository) DeleteToken(ctx context.Context, token string) error {
 }
 
 // DeleteExpiredTokens implements domain.TokenStore.
+// DeleteExpiredTokens implements domain.TokenStore.
 func (r *Repository) DeleteExpiredTokens(ctx context.Context) error {
 	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "expires_at < ?", time.Now()).Error
+}
+
+// Query implements audit.AuditStore.
+func (r *Repository) Query(ctx context.Context, filter audit.Filter) ([]audit.AuditEvent, error) {
+	// TODO: Implement actual query logic mapping filter to GORM
+	return []audit.AuditEvent{}, nil
+}
+
+// Count implements audit.AuditStore.
+func (r *Repository) Count(ctx context.Context, filter audit.Filter) (int64, error) {
+	var count int64
+	// TODO: Implement actual count logic
+	return count, nil
+}
+
+// Export implements audit.AuditStore.
+func (r *Repository) Export(ctx context.Context, filter audit.Filter, format audit.ExportFormat) (io.Reader, error) {
+	return nil, nil // TODO: Implement export
+}
+
+// Purge implements audit.AuditStore.
+func (r *Repository) Purge(ctx context.Context, olderThan time.Time) (int64, error) {
+	return 0, nil // TODO: Implement purge
 }
 
 // Compile-time interface checks

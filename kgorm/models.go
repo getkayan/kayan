@@ -77,6 +77,7 @@ type gormIdentity struct {
 	MFASecret   string
 	Verified    bool
 	VerifiedAt  *time.Time
+	State       string
 }
 
 func (gormIdentity) TableName() string { return "identities" }
@@ -97,6 +98,7 @@ func toCoreIdentity(gi *gormIdentity) *identity.Identity {
 		MFASecret:   gi.MFASecret,
 		Verified:    gi.Verified,
 		VerifiedAt:  gi.VerifiedAt,
+		State:       gi.State,
 	}
 }
 
@@ -116,6 +118,7 @@ func fromCoreIdentity(i *identity.Identity) *gormIdentity {
 		MFASecret:   i.MFASecret,
 		Verified:    i.Verified,
 		VerifiedAt:  i.VerifiedAt,
+		State:       i.State,
 	}
 }
 

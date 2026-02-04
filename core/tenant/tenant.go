@@ -1,3 +1,46 @@
+// Package tenant provides multi-tenancy support for Kayan IAM.
+//
+// This package enables SaaS applications to isolate identities, sessions, and
+// configuration per tenant. It supports multiple resolution strategies including
+// domain-based, path-based, and header-based tenant identification.
+//
+// # Features
+//
+//   - Tenant isolation for identities and sessions
+//   - Per-tenant configuration (password policies, session TTL, etc.)
+//   - Multiple resolution strategies (domain, subdomain, path, header)
+//   - TenantAware interface for automatic scoping
+//   - Lifecycle hooks for tenant operations
+//   - Context-based tenant propagation
+//
+// # Resolution Strategies
+//
+// Tenants can be resolved from incoming requests via:
+//   - Domain: tenant1.example.com → tenant1
+//   - Path: example.com/tenant1/* → tenant1
+//   - Header: X-Tenant-ID: tenant1
+//   - Custom: Implement the Resolver interface
+//
+// # Example Usage
+//
+//	// Store tenant in context
+//	ctx = tenant.WithTenant(ctx, t)
+//
+//	// Retrieve tenant from context
+//	t := tenant.FromContext(ctx)
+//
+//	// Get tenant settings
+//	settings := t.Settings
+//
+// # TenantAware Interface
+//
+// Implement TenantAware on your identity model for automatic scoping:
+//
+//	type User struct {
+//	    TenantID string
+//	}
+//	func (u *User) GetTenantID() string { return u.TenantID }
+//	func (u *User) SetTenantID(id string) { u.TenantID = id }
 package tenant
 
 import (

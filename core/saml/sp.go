@@ -1,10 +1,52 @@
+// Package saml provides SAML 2.0 Service Provider functionality for Kayan IAM.
+//
+// This package implements the SAML 2.0 protocol for enterprise Single Sign-On (SSO),
+// enabling integration with Identity Providers like Okta, Azure AD, and OneLogin.
+// It supports SP-initiated and IdP-initiated flows with full attribute mapping.
+//
+// # Features
+//
+//   - SP-initiated SSO via HTTP-Redirect binding
+//   - IdP-initiated SSO (optional, configurable)
+//   - Multiple IdP support with per-IdP configuration
+//   - Automatic IdP metadata parsing from URL
+//   - Attribute mapping for user provisioning
+//   - Session management for pending authentications
+//   - Lifecycle hooks for customization
+//   - SP metadata generation
+//
+// # SAML Flow
+//
+//  1. User initiates login → InitiateLogin() generates AuthnRequest
+//  2. User redirects to IdP for authentication
+//  3. IdP posts SAMLResponse → ProcessResponse() validates and extracts user
+//  4. User is authenticated and identity is reconciled
+//
+// # Example Usage
+//
+//	sp := saml.NewServiceProvider(config, sessionStore, identityRepo, userFactory)
+//
+//	// Register an Identity Provider
+//	sp.RegisterIdP(&saml.IdPConfig{
+//	    ID:       "okta",
+//	    EntityID: "https://okta.example.com",
+//	    SSOUrl:   "https://okta.example.com/sso",
+//	})
+//
+//	// Initiate login
+//	redirectURL, _ := sp.InitiateLogin(ctx, "okta", "/dashboard")
+//
+//	// Process response (in ACS handler)
+//	user, _ := sp.ProcessResponse(ctx, samlResponse, relayState)
 package saml
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -569,15 +611,108 @@ func (sp *ServiceProvider) GetMetadata() ([]byte, error) {
 
 // ParseIdPMetadata parses IdP metadata XML into a config.
 func ParseIdPMetadata(id string, metadata []byte) (*IdPConfig, error) {
-	// Simplified parsing - production should use proper XML parsing
-	// This is a placeholder that would need full implementation
-	return &IdPConfig{
+	var entityDesc EntityDescriptor
+	if err := xml.Unmarshal(metadata, &entityDesc); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	idp := &IdPConfig{
 		ID:       id,
 		Metadata: metadata,
-	}, nil
+		EntityID: entityDesc.EntityID,
+	}
+
+	// Find IDPSSODescriptor
+	var idpDesc *IDPSSODescriptor
+	for _, role := range entityDesc.RoleDescriptors {
+		if desc, ok := role.(*IDPSSODescriptor); ok {
+			idpDesc = desc
+			break
+		}
+	}
+	// Fallback to searching specific element if unmarshaling interface failed
+	if idpDesc == nil {
+		// Simplified: assumes the structured binding worked or we implement a custom unmarshaler.
+		// For this implementation, we'll define explicit struct fields for common descriptors.
+		// See EntityDescriptor struct definition below.
+		if entityDesc.IDPSSODescriptor != nil {
+			idpDesc = entityDesc.IDPSSODescriptor
+		}
+	}
+
+	if idpDesc == nil {
+		return nil, fmt.Errorf("no IDPSSODescriptor found in metadata")
+	}
+
+	// Extract SSO URL (HTTP-Redirect favored)
+	for _, sso := range idpDesc.SingleSignOnService {
+		if sso.Binding == "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" {
+			idp.SSOUrl = sso.Location
+			break
+		}
+	}
+	if idp.SSOUrl == "" && len(idpDesc.SingleSignOnService) > 0 {
+		idp.SSOUrl = idpDesc.SingleSignOnService[0].Location
+	}
+
+	// Extract Certificate
+	for _, key := range idpDesc.KeyDescriptors {
+		if key.Use == "signing" || key.Use == "" {
+			certData, err := base64.StdEncoding.DecodeString(key.KeyInfo.X509Data.X509Certificate)
+			if err != nil {
+				continue
+			}
+			cert, err := x509.ParseCertificate(certData)
+			if err != nil {
+				continue
+			}
+			idp.Certificate = cert
+			break
+		}
+	}
+
+	return idp, nil
+}
+
+// ---- Metadata Types ----
+
+type EntityDescriptor struct {
+	XMLName          xml.Name          `xml:"urn:oasis:names:tc:SAML:2.0:metadata EntityDescriptor"`
+	EntityID         string            `xml:"entityID,attr"`
+	IDPSSODescriptor *IDPSSODescriptor `xml:"urn:oasis:names:tc:SAML:2.0:metadata IDPSSODescriptor"`
+	RoleDescriptors  []interface{}     `xml:"-"` // Placeholder for generic access
+}
+
+type IDPSSODescriptor struct {
+	XMLName             xml.Name              `xml:"urn:oasis:names:tc:SAML:2.0:metadata IDPSSODescriptor"`
+	KeyDescriptors      []KeyDescriptor       `xml:"KeyDescriptor"`
+	SingleSignOnService []SingleSignOnService `xml:"SingleSignOnService"`
+}
+
+type KeyDescriptor struct {
+	Use     string  `xml:"use,attr"`
+	KeyInfo KeyInfo `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
+}
+
+type KeyInfo struct {
+	X509Data X509Data `xml:"http://www.w3.org/2000/09/xmldsig# X509Data"`
+}
+
+type X509Data struct {
+	X509Certificate string `xml:"http://www.w3.org/2000/09/xmldsig# X509Certificate"`
+}
+
+type SingleSignOnService struct {
+	Binding  string `xml:"Binding,attr"`
+	Location string `xml:"Location,attr"`
 }
 
 func generateID() string {
-	// Use crypto/rand in production
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Fallback for extreme cases, though rand.Read should usually succeed
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }

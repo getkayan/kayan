@@ -1,3 +1,43 @@
+// Package telemetry provides observability infrastructure for Kayan IAM.
+//
+// This package integrates OpenTelemetry for distributed tracing and metrics,
+// enabling production observability with Prometheus, Jaeger, and OTLP-compatible
+// backends.
+//
+// # Features
+//
+//   - Distributed tracing with configurable sampling
+//   - Prometheus-compatible metrics export
+//   - OTLP trace export (gRPC)
+//   - Pre-defined IAM metrics (login, registration, MFA, sessions)
+//   - Easy integration with existing IAM flows
+//
+// # Pre-defined Metrics
+//
+//   - kayan.login.total: Login attempts by status, strategy, tenant
+//   - kayan.registration.total: Registration attempts
+//   - kayan.mfa.total: MFA verification attempts
+//   - kayan.rate_limit.total: Rate limit events
+//   - kayan.lockout.total: Account lockout events
+//   - kayan.auth.duration: Authentication duration histogram
+//   - kayan.sessions.active: Active session count
+//
+// # Example Usage
+//
+//	cfg := telemetry.Config{
+//	    ServiceName:    "my-app",
+//	    ServiceVersion: "1.0.0",
+//	    OTLPEndpoint:   "localhost:4317",
+//	    SamplingRate:   0.1, // 10% sampling
+//	    Enabled:        true,
+//	}
+//
+//	provider, _ := telemetry.NewProvider(cfg)
+//	defer provider.Shutdown(ctx)
+//
+//	// Record metrics
+//	provider.RecordLogin(ctx, "password", true, "tenant-1")
+//	provider.SessionCreated(ctx, "tenant-1")
 package telemetry
 
 import (

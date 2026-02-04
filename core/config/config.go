@@ -1,3 +1,32 @@
+// Package config provides environment-based configuration for Kayan IAM.
+//
+// Configuration is loaded from environment variables using Viper, with sensible
+// defaults for development. This package handles database connection settings,
+// logging levels, server ports, and OIDC provider configurations.
+//
+// # Environment Variables
+//
+//   - DB_TYPE: Database type (sqlite, postgres, mysql). Default: sqlite
+//   - DSN: Database connection string. Default: kayan.db
+//   - SKIP_AUTO_MIGRATE: Skip automatic database migrations. Default: false
+//   - LOG_LEVEL: Logging level (debug, info, warn, error). Default: info
+//   - PORT: HTTP server port. Default: 8080
+//
+// # OIDC Provider Configuration
+//
+// OIDC providers are configured via the OIDC_PROVIDERS map:
+//
+//	OIDC_PROVIDERS_GOOGLE_ISSUER=https://accounts.google.com
+//	OIDC_PROVIDERS_GOOGLE_CLIENT_ID=your-client-id
+//	OIDC_PROVIDERS_GOOGLE_CLIENT_SECRET=your-secret
+//
+// # Example Usage
+//
+//	cfg, err := config.LoadConfig()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	fmt.Printf("Starting on port %d with %s database\n", cfg.Port, cfg.DBType)
 package config
 
 import (
@@ -39,4 +68,3 @@ func LoadConfig() (*Config, error) {
 
 	return &cfg, nil
 }
-

@@ -1,3 +1,45 @@
+// Package rbac provides Role-Based Access Control for Kayan IAM.
+//
+// The rbac package implements a flexible RBAC system with support for:
+//
+//   - Role assignment and checking
+//   - Permission-based authorization
+//   - Hierarchical roles (through custom strategies)
+//   - Pluggable storage backends
+//
+// # Basic Usage
+//
+//	// Setup
+//	strategy := rbac.NewGORMStrategy(db)
+//	manager := rbac.NewManager(strategy)
+//
+//	// Assign roles
+//	strategy.AssignRole(userID, "admin")
+//
+//	// Check authorization
+//	allowed, err := manager.Authorize(userID, "admin")
+//	if allowed {
+//	    // User has admin role
+//	}
+//
+// # Permissions
+//
+// Roles can have associated permissions for fine-grained control:
+//
+//	// Check specific permission
+//	allowed, err := manager.AuthorizePermission(userID, "users:delete")
+//
+//	// Get all permissions for a user
+//	perms, err := manager.GetPermissions(userID)
+//
+// # Middleware
+//
+// Use the provided middleware for HTTP handlers:
+//
+//	e.GET("/admin", adminHandler, rbac.RequireRole(manager, "admin"))
+//	e.DELETE("/users/:id", deleteHandler, rbac.RequirePermission(manager, "users:delete"))
+//
+// See also: policy package for ABAC, rebac package for relationship-based access.
 package rbac
 
 import (
@@ -5,10 +47,12 @@ import (
 )
 
 // Manager handles authorization checks using a configured strategy.
+// It provides a high-level API for role and permission checks.
 type Manager struct {
 	strategy Strategy
 }
 
+// NewManager creates a new RBAC Manager with the given strategy.
 func NewManager(strategy Strategy) *Manager {
 	return &Manager{strategy: strategy}
 }

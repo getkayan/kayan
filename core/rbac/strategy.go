@@ -17,6 +17,12 @@ type Strategy interface {
 	GetPermissions(identityID any) ([]string, error)
 }
 
+// RoleSource is an interface for objects that can provide their own roles.
+// This allows for optimization where roles are already loaded.
+type RoleSource interface {
+	GetRoles() []string
+}
+
 // BasicStrategy implements RBAC by reading roles directly from the Identity model.
 // It uses the provided IdentityStorage to fetch the identity.
 type BasicStrategy struct {
@@ -28,6 +34,15 @@ func NewBasicStrategy(storage domain.IdentityStorage) *BasicStrategy {
 }
 
 func (s *BasicStrategy) GetRoles(identityID any) ([]string, error) {
+	// Optimization: Check if identityID implements RoleSource
+	if rs, ok := identityID.(RoleSource); ok {
+		return rs.GetRoles(), nil
+	}
+
+	if s.storage == nil {
+		return nil, fmt.Errorf("rbac: storage is nil and identity does not implement RoleSource")
+	}
+
 	// For BasicStrategy, we assume the identity model has a Roles field
 	// which is a JSON array of strings.
 	ident, err := s.storage.GetIdentity(func() any { return &identity.Identity{} }, identityID)

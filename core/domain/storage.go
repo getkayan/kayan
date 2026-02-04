@@ -1,3 +1,25 @@
+// Package domain defines core storage interfaces for Kayan IAM.
+//
+// This package provides the fundamental contracts that storage implementations must fulfill.
+// It abstracts persistence operations for identities, sessions, credentials, and tokens,
+// allowing developers to use any backend (GORM, MongoDB, Redis, etc.).
+//
+// # Interfaces
+//
+//   - Storage: Composite interface combining all storage operations
+//   - IdentityStorage: Identity CRUD and credential management
+//   - SessionStorage: Session lifecycle operations
+//   - CredentialStorage: Credential lookup and updates
+//   - TokenStore: Authentication token management
+//
+// # Supporting Types
+//
+//   - IDGenerator: Function type for generating unique identifiers
+//   - Hasher: Interface for password hashing and verification
+//
+// # Example Implementation
+//
+// See the kgorm package for a complete GORM-based implementation of these interfaces.
 package domain
 
 import (

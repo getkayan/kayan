@@ -1,3 +1,42 @@
+// Package oauth2 provides OAuth 2.0 Authorization Server functionality for Kayan IAM.
+//
+// This package implements the OAuth 2.0 specification (RFC 6749) with support for
+// the Authorization Code flow, PKCE (RFC 7636), token introspection (RFC 7662),
+// and token refresh with rotation.
+//
+// # Features
+//
+//   - Authorization Code flow with PKCE support
+//   - JWT access tokens with RSA-256 signing
+//   - Refresh token rotation for security
+//   - Token introspection endpoint
+//   - Client credential validation
+//   - Audit logging integration
+//
+// # Supported Flows
+//
+//   - Authorization Code (with optional PKCE)
+//   - Refresh Token (with automatic rotation)
+//
+// # Example Usage
+//
+//	provider := oauth2.NewProvider(
+//	    clientStore,
+//	    authCodeStore,
+//	    refreshTokenStore,
+//	    "https://auth.example.com",
+//	    privateKey,
+//	    "key-1",
+//	)
+//
+//	// Generate authorization code
+//	code, _ := provider.GenerateAuthCode(ctx, clientID, userID, redirect, scopes, challenge, "S256")
+//
+//	// Exchange code for tokens
+//	tokens, _ := provider.Exchange(ctx, code, clientID, secret, redirect, verifier)
+//
+//	// Refresh access token
+//	newTokens, _ := provider.Refresh(ctx, refreshToken, clientID, secret)
 package oauth2
 
 import (

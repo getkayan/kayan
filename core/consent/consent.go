@@ -1,3 +1,46 @@
+// Package consent provides GDPR-compliant consent management for Kayan IAM.
+//
+// This package enables tracking user consent for various data processing purposes,
+// supporting both GDPR (EU) and CCPA (California) privacy requirements. It provides
+// consent granting, revocation, history tracking, and data export capabilities.
+//
+// # Features
+//
+//   - Predefined consent purposes (marketing, analytics, third-party, etc.)
+//   - Custom purpose support for application-specific needs
+//   - Consent versioning for policy change tracking
+//   - Essential purposes that cannot be revoked
+//   - Full consent history for audit trails
+//   - GDPR-compliant data export
+//   - Automatic consent expiration
+//
+// # Predefined Purposes
+//
+//   - PurposeMarketing: Marketing communications
+//   - PurposeAnalytics: Usage analytics
+//   - PurposeThirdParty: Third-party data sharing
+//   - PurposePersonalization: Personalized experiences
+//   - PurposeEssential: Required for service (cannot be revoked)
+//
+// # Example Usage
+//
+//	manager := consent.NewManager(store, "v1.2.0",
+//	    consent.WithEssentialPurposes(consent.PurposeEssential),
+//	)
+//
+//	// Grant consent
+//	_, err := manager.Grant(ctx, &consent.ConsentRequest{
+//	    IdentityID: userID,
+//	    Purpose:    consent.PurposeMarketing,
+//	    Granted:    true,
+//	    Source:     "registration",
+//	})
+//
+//	// Check consent
+//	hasConsent, _ := manager.Check(ctx, userID, consent.PurposeMarketing)
+//
+//	// Export for GDPR request
+//	export, _ := manager.ExportConsents(ctx, userID)
 package consent
 
 import (

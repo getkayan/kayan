@@ -1,3 +1,29 @@
+// Package logger provides structured logging for Kayan IAM.
+//
+// This package wraps Uber's zap logger to provide high-performance, structured
+// logging with configurable log levels. It initializes a global logger instance
+// for use throughout the Kayan application.
+//
+// # Configuration
+//
+// The log level is configured via the LOG_LEVEL environment variable or
+// directly via InitLogger:
+//
+//	logger.InitLogger("debug") // Options: debug, info, warn, error
+//
+// # Usage
+//
+// After initialization, use the global Log variable:
+//
+//	logger.Log.Info("user logged in",
+//	    zap.String("user_id", userID),
+//	    zap.String("ip", clientIP),
+//	)
+//
+//	logger.Log.Error("authentication failed",
+//	    zap.Error(err),
+//	    zap.String("strategy", "password"),
+//	)
 package logger
 
 import (
@@ -23,4 +49,3 @@ func InitLogger(level string) {
 		panic(err)
 	}
 }
-

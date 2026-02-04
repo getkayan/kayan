@@ -21,6 +21,15 @@ func (r *IdentityRepository) CreateIdentity(ident any) error {
 	return r.db.Create(ident).Error
 }
 
+func (r *IdentityRepository) CreateCredential(cred any) error {
+	// Convert to gormCredential if it's identity.Credential
+	if c, ok := cred.(*identity.Credential); ok {
+		gc := fromCoreCredential(c)
+		return r.db.Create(gc).Error
+	}
+	return r.db.Create(cred).Error
+}
+
 func (r *IdentityRepository) GetIdentity(factory func() any, id any) (any, error) {
 	ident := factory()
 	if err := r.db.First(ident, "id = ?", id).Error; err != nil {

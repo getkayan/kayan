@@ -1,3 +1,32 @@
+// Package identity provides core identity types for Kayan IAM.
+//
+// This package defines the fundamental types for user identities, credentials,
+// and sessions. These types serve as defaults that can be used directly or
+// extended by implementing your own types with the required interfaces.
+//
+// # Core Types
+//
+//   - Identity: User identity with traits (JSON), roles, permissions, and MFA settings
+//   - Credential: Authentication credential (password, WebAuthn, TOTP, etc.)
+//   - Session: Authenticated session with refresh token support
+//   - JSON: Custom type for flexible JSON data storage in various databases
+//
+// # Identity States
+//
+// Identities can be in one of several states:
+//   - active: Normal operational state
+//   - inactive: Disabled but not deleted
+//   - locked: Temporarily locked (e.g., too many failed logins)
+//   - pending: Awaiting verification
+//
+// # Schema Validation
+//
+// The Schema interface allows custom validation of identity traits:
+//
+//	type MySchema struct{}
+//	func (s MySchema) Validate(traits identity.JSON) error {
+//	    // Validate required fields, formats, etc.
+//	}
 package identity
 
 import (
@@ -47,6 +76,7 @@ type Identity struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	DeletedAt   *time.Time `json:"-"`
+	State       string     `json:"state"` // active, inactive, locked, pending
 
 	MFAEnabled bool   `json:"mfa_enabled"`
 	MFASecret  string `json:"-"`
