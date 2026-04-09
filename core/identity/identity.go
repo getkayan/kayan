@@ -31,6 +31,7 @@ package identity
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -100,6 +101,37 @@ func (i *Identity) GetTraits() JSON               { return i.Traits }
 func (i *Identity) SetTraits(t JSON)              { i.Traits = t }
 func (i *Identity) GetCredentials() []Credential  { return i.Credentials }
 func (i *Identity) SetCredentials(c []Credential) { i.Credentials = c }
+
+// IsEmailVerified checks if the identity has a verified email trait.
+func (i *Identity) IsEmailVerified() bool {
+	var traits map[string]any
+	json.Unmarshal(i.Traits, &traits)
+	if verified, ok := traits["email_verified"].(bool); ok {
+		return verified
+	}
+	// Fallback to searching for "email" if it's the primary identifier and verified status is stored elsewhere
+	return i.Verified
+}
+
+// Linkable defines methods for attaching credentials to an existing identity.
+type Linkable interface {
+	AddCredential(cred Credential)
+	RemoveCredential(id string)
+}
+
+func (i *Identity) AddCredential(cred Credential) {
+	i.Credentials = append(i.Credentials, cred)
+}
+
+func (i *Identity) RemoveCredential(id string) {
+	newCreds := make([]Credential, 0, len(i.Credentials))
+	for _, c := range i.Credentials {
+		if c.ID != id {
+			newCreds = append(newCreds, c)
+		}
+	}
+	i.Credentials = newCreds
+}
 
 // Credential represents an authentication credential.
 type Credential struct {

@@ -12,6 +12,11 @@ import (
 	"github.com/getkayan/kayan/core/identity"
 )
 
+// Attacher is an optional interface for strategies that support linking to an existing identity.
+type Attacher interface {
+	Attach(ctx context.Context, ident any, identifier, secret string) error
+}
+
 type LoginManager struct {
 	repo       IdentityRepository
 	auditStore audit.AuditStore
@@ -213,4 +218,54 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	}
 
 	return ident, nil
+}
+
+// LinkMethod links a new authentication method to an existing authenticated identity.
+func (m *LoginManager) LinkMethod(ctx context.Context, ident any, method, identifier, secret string) error {
+	m.mu.RLock()
+	strategy, ok := m.strategies[method]
+	m.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("login: unknown method %q", method)
+	}
+
+	attacher, ok := strategy.(Attacher)
+	if !ok {
+		return fmt.Errorf("login: method %q does not support linking to existing account", method)
+	}
+
+	// 1. Audit link attempt
+	if m.auditStore != nil {
+		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+			Type:    "identity.link.initiate",
+			ActorID: identifier,
+			Status:  "success",
+			Message: fmt.Sprintf("Initiated linking for %s", method),
+		})
+	}
+
+	// 2. Perform linking
+	if err := attacher.Attach(ctx, ident, identifier, secret); err != nil {
+		if m.auditStore != nil {
+			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+				Type:    "identity.link.failure",
+				ActorID: identifier,
+				Status:  "failure",
+				Message: err.Error(),
+			})
+		}
+		return err
+	}
+
+	if m.auditStore != nil {
+		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+			Type:    "identity.link.success",
+			ActorID: identifier,
+			Status:  "success",
+			Message: fmt.Sprintf("Successfully linked %s", method),
+		})
+	}
+
+	return nil
 }

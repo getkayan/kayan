@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/identity"
@@ -148,6 +149,41 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, identifier, passwor
 	}
 
 	return s.repo.GetIdentity(s.factory, cred.IdentityID)
+}
+
+func (s *PasswordStrategy) Attach(ctx context.Context, ident any, identifier, secret string) error {
+	hashed, err := s.hasher.Hash(secret)
+	if err != nil {
+		return err
+	}
+
+	// 1. Get model from any
+	fi, ok := ident.(FlowIdentity)
+	if !ok {
+		return errors.New("registration: identity must implement FlowIdentity")
+	}
+
+	// 2. Add credential
+	cred := identity.Credential{
+		IdentityID: fmt.Sprintf("%v", fi.GetID()),
+		Type:       "password",
+		Identifier: identifier,
+		Secret:     hashed,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	if s.generator != nil {
+		cred.ID = fmt.Sprintf("%v", s.generator())
+	}
+
+	// 3. Save
+	if cs, ok := ident.(CredentialSource); ok {
+		cs.SetCredentials(append(cs.GetCredentials(), cred))
+		return s.repo.UpdateIdentity(ident)
+	}
+
+	return s.repo.CreateCredential(&cred)
 }
 
 func (s *PasswordStrategy) setField(obj any, field string, value any) error {

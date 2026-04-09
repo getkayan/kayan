@@ -1,388 +1,241 @@
-# Kayan Project Context for AI Agents
+# Kayan — AI Agent Rules
 
-> **Purpose**: This file provides comprehensive context for AI agents working with the Kayan codebase. Read this first to understand the project's architecture, patterns, and conventions.
-
----
-
-## Project Identity
-
-**Kayan** is a headless, non-generic, extensible Identity & Access Management (IAM) library for Go.
-
-**Mission**: Provide enterprise-grade authentication and authorization without forcing schema migrations or UI opinions.
-
-**Philosophy**:
-1. **Headless** - No UI, pure APIs
-2. **Non-Generic** - Uses interfaces, not Go generics
-3. **BYOS** - Bring Your Own Schema (your models, your way)
-4. **Strategy Pattern** - Pluggable auth methods
-5. **Enterprise Ready** - Multi-tenancy, RBAC, ABAC, compliance
+> **Purpose**: Architectural guardrails for AI agents working on the Kayan codebase. These rules enforce the project's design philosophy and prevent architectural drift.
 
 ---
 
-## Repository Structure
+## 1. Core Philosophy (NEVER Violate)
 
-```
-kayan-workspace/
-├── kayan/                    # Core library (main package)
-│   ├── core/                 # Core packages
-│   │   ├── flow/             # Registration, Login managers & strategies
-│   │   ├── session/          # Session management (JWT, Database)
-│   │   ├── identity/         # Identity types and interfaces
-│   │   ├── policy/           # Authorization engines (ABAC)
-│   │   ├── rbac/             # Role-based access control
-│   │   ├── tenant/           # Multi-tenancy support
-│   │   ├── oauth2/           # OAuth2 provider implementation
-│   │   ├── oidc/             # OpenID Connect client
-│   │   ├── saml/             # SAML 2.0 SP
-│   │   ├── audit/            # Audit logging
-│   │   ├── compliance/       # Data retention, encryption
-│   │   └── telemetry/        # OpenTelemetry, Prometheus
-│   ├── kgorm/                # GORM storage adapter
-│   ├── cmd/                  # CLI tools
-│   └── docs/                 # Documentation
-│       ├── architecture/     # Deep technical docs
-│       ├── concepts/         # Concept guides
-│       ├── reference/        # API & config reference
-│       └── openapi/          # OpenAPI spec
-│
-├── kayan-echo/               # Echo framework integration
-│   └── handler.go            # HTTP handlers for Echo
-│
-├── kayan-js/                 # TypeScript SDK
-│   ├── src/
-│   │   ├── client.ts         # Simple client wrapper
-│   │   ├── generated/        # Auto-generated from OpenAPI
-│   │   └── types.ts          # TypeScript types
-│   └── package.json
-│
-├── kayan-console/            # Admin UI (Next.js)
-│   ├── app/                  # Next.js app router
-│   └── components/           # React components
-│
-└── kayan-examples/           # 23+ runnable examples
-    ├── byos_schema/          # Field mapping example
-    ├── webauthn_passkeys/    # Passkey auth
-    ├── multi_tenancy/        # Tenant isolation
-    ├── rbac_basic/           # Role-based access
-    ├── abac_policy/          # Attribute-based access
-    └── ...
-```
+### 1.1 Headless Only
+- Kayan is a **library**, not a service. Never add UI code, HTML templates, or frontend assets to this repo.
+- Never add HTTP framework dependencies to `core/`. Framework bindings belong in separate repos (`kayan-echo`, `kayan-gin`, etc.).
+
+### 1.2 Non-Generic Architecture
+- **Do NOT use Go generics** (type parameters `[T any]`). Kayan uses interfaces + `any` + factory functions.
+- Use `any` with type assertions at boundaries, not generic type constraints.
+- Factory pattern: `func() any { return &Type{} }` for instantiation.
+
+### 1.3 BYOS (Bring Your Own Schema)
+- Never force specific struct fields or table names on user models.
+- The **only required interface** for identity models is `FlowIdentity`:
+  ```go
+  type FlowIdentity interface {
+      GetID() any
+      SetID(any)
+  }
+  ```
+- Use reflection-based field mapping (`MapFields`) for accessing user-defined fields.
+- Optional interfaces (`TraitSource`, `CredentialSource`) are opt-in, never mandatory.
 
 ---
 
-## Core Concepts
+## 2. Package Dependency Rules
 
-### 1. BYOS (Bring Your Own Schema)
+### 2.1 Dependency Direction (Strictly Enforced)
 
-Users keep their existing database models. Kayan adapts via:
-- **Field mapping**: `pwStrategy.MapFields([]string{"Email"}, "PasswordHash")`
-- **Factory functions**: `func() any { return &MyUser{} }`
-- **Minimal interface**: Only `GetID()` and `SetID(any)` required
-
-```go
-// User's existing model - NO changes required
-type User struct {
-    ID           uuid.UUID `gorm:"primaryKey"`
-    Email        string    `gorm:"uniqueIndex"`
-    PasswordHash string
-}
-
-// Only interface needed
-func (u *User) GetID() any   { return u.ID }
-func (u *User) SetID(id any) { u.ID = id.(uuid.UUID) }
+```
+core/domain     ← Depends on: core/identity, core/audit ONLY
+core/identity   ← Depends on: stdlib ONLY (zero internal deps)
+core/flow       ← Depends on: core/domain, core/identity, core/audit
+core/session    ← Depends on: core/domain, core/identity
+core/rbac       ← Depends on: stdlib ONLY (zero internal deps)
+core/rebac      ← Depends on: stdlib ONLY (zero internal deps)
+core/policy     ← Depends on: stdlib ONLY (zero internal deps)
+core/tenant     ← Depends on: stdlib ONLY (zero internal deps)
+core/audit      ← Depends on: stdlib ONLY (zero internal deps)
+core/oauth2     ← Depends on: core/identity
+core/oidc       ← Depends on: core/identity
+core/saml       ← Depends on: core/identity
+kgorm/          ← Depends on: core/domain, core/identity, core/audit (GORM adapter)
 ```
 
-### 2. Strategy Pattern
+### 2.2 Forbidden Dependencies
+- `core/` packages must **never** import `kgorm/` or any storage adapter.
+- `core/identity` must **never** import other `core/` packages — it is the leaf dependency.
+- `core/rbac`, `core/rebac`, `core/policy`, `core/tenant` must **never** import `core/flow` or `core/session`.
+- No package may import `core/flow` except through its exported interfaces.
 
-All auth methods are pluggable strategies:
-
-```go
-// Registration strategies
-regManager.RegisterStrategy(passwordStrategy)
-regManager.RegisterStrategy(magicLinkStrategy)
-
-// Login strategies  
-loginManager.RegisterStrategy(passwordStrategy)
-loginManager.RegisterStrategy(oidcStrategy)
-loginManager.RegisterStrategy(webauthnStrategy)
-
-// Use by name
-regManager.Submit(ctx, "password", traits, secret)
-loginManager.Authenticate(ctx, "webauthn", identifier, "")
-```
-
-### 3. Session Strategies
-
-Two primary modes:
-- **JWT (stateless)**: Token contains claims, no DB lookup
-- **Database (stateful)**: Token is ID, requires DB lookup, revocable
-
-### 4. Hook System
-
-Pre/post hooks for extensibility:
-
-```go
-regManager.AddPostHook(func(ctx context.Context, ident any) error {
-    user := ident.(*User)
-    return sendWelcomeEmail(user.Email)
-})
-```
-
-### 5. Multi-Tenancy
-
-Tenant resolution from requests → Per-tenant settings → Scoped queries
+### 2.3 External Dependency Policy
+- `core/identity`: **Zero external deps** — stdlib only.
+- `core/flow`, `core/session`: Minimal deps (`golang-jwt`, `x/crypto`, `google/uuid`).
+- New external dependencies in `core/` require justification. Prefer stdlib solutions.
+- Database drivers and ORM dependencies belong in adapter packages (`kgorm/`), never in `core/`.
 
 ---
 
-## Key Interfaces
+## 3. Interface & Type Contracts
 
-```go
-// Required for all identity models
-type FlowIdentity interface {
-    GetID() any
-    SetID(any)
-}
+### 3.1 Strategy Pattern
+All pluggable behaviors must follow the strategy pattern:
 
-// Storage abstraction
-type IdentityRepository interface {
-    CreateIdentity(identity any) error
-    GetIdentity(factory func() any, id any) (any, error)
-    FindIdentity(factory func() any, query map[string]any) (any, error)
-    UpdateIdentity(identity any) error
-    DeleteIdentity(id any) error
-}
+| Domain | Interface | Methods |
+|--------|-----------|---------|
+| Registration | `RegistrationStrategy` | `ID() string`, `Register(ctx, traits, secret) (any, error)` |
+| Login | `LoginStrategy` | `ID() string`, `Authenticate(ctx, identifier, secret) (any, error)` |
+| Session | `session.Strategy` | `Create()`, `Validate()`, `Refresh()`, `Delete()` |
+| Authorization | `policy.Engine` | `Can(ctx, subject, action, resource) (bool, error)` |
+| Tenant Resolution | `tenant.Resolver` | `Resolve(ctx, *http.Request) (string, error)` |
 
-// Auth strategies
-type RegistrationStrategy interface {
-    ID() string
-    Register(ctx context.Context, traits identity.JSON, secret string) (any, error)
-}
+- Every new auth method **must** implement `RegistrationStrategy` and/or `LoginStrategy`.
+- Every new authorization model **must** implement `policy.Engine`.
+- Strategy ID strings must be lowercase, alphanumeric with underscores (e.g., `"password"`, `"magic_link"`, `"webauthn"`).
 
-type LoginStrategy interface {
-    ID() string
-    Authenticate(ctx context.Context, identifier, secret string) (any, error)
-}
+### 3.2 Manager Pattern
+Managers orchestrate strategies and provide hooks:
 
-// Session strategies
-type SessionStrategy interface {
-    Create(sessionID, identityID string) (*Session, error)
-    Validate(token string) (*Session, error)
-    Delete(token string) error
-}
+- Managers own the strategy map and lifecycle hooks (`PreHook`, `PostHook`).
+- Managers must be **thread-safe**: use `sync.RWMutex` for strategy registration and lookup.
+- Managers delegate to strategies — they never implement auth logic directly.
 
-// Policy engines
-type Engine interface {
-    Can(ctx context.Context, subject any, action string, resource any) (bool, error)
-}
-```
+### 3.3 Storage Interfaces
+- `domain.Storage` is the composite interface. Adapters implement sub-interfaces:
+  - `IdentityStorage` — identity CRUD + credential access
+  - `SessionStorage` — session lifecycle
+  - `CredentialStorage` — credential lookup
+  - `TokenStore` — token persistence
+  - `audit.AuditStore` — audit event persistence
+- Storage methods use `any` for models and `func() any` factories for instantiation.
+- Never return concrete types from storage interfaces — always `any` or interface types.
 
 ---
 
-## Common Patterns
+## 4. File & Package Conventions
 
-### Initialization Pattern
-
-```go
-// 1. Database
-db, _ := gorm.Open(sqlite.Open("app.db"), &gorm.Config{})
-repo := kgorm.NewRepository(db)
-
-// 2. Factory (creates empty instances for DB scanning)
-factory := func() any { return &User{} }
-
-// 3. Managers
-regManager := flow.NewRegistrationManager(repo, factory)
-loginManager := flow.NewLoginManager(repo)
-
-// 4. Strategies
-hasher := flow.NewBcryptHasher(10)
-pwStrategy := flow.NewPasswordStrategy(repo, hasher, "", factory)
-pwStrategy.MapFields([]string{"Email"}, "PasswordHash")
-pwStrategy.SetIDGenerator(func() any { return uuid.New().String() })
-
-// 5. Register strategies
-regManager.RegisterStrategy(pwStrategy)
-loginManager.RegisterStrategy(pwStrategy)
-
-// 6. Sessions
-sessManager := session.NewManager(session.NewHS256Strategy(secret, 24*time.Hour))
-```
-
-### HTTP Handler Pattern (Echo)
-
-```go
-e.POST("/register", func(c echo.Context) error {
-    var req RegisterRequest
-    c.Bind(&req)
-    
-    traits := identity.JSON(fmt.Sprintf(`{"Email":"%s"}`, req.Email))
-    ident, err := regManager.Submit(c.Request().Context(), "password", traits, req.Password)
-    if err != nil {
-        return c.JSON(400, map[string]string{"error": err.Error()})
-    }
-    
-    return c.JSON(201, ident)
-})
-```
-
-### Auth Middleware Pattern
-
-```go
-func AuthMiddleware(sessManager *session.Manager) echo.MiddlewareFunc {
-    return func(next echo.HandlerFunc) echo.HandlerFunc {
-        return func(c echo.Context) error {
-            token := c.Request().Header.Get("Authorization")
-            token = strings.TrimPrefix(token, "Bearer ")
-            
-            sess, err := sessManager.Validate(token)
-            if err != nil {
-                return c.JSON(401, map[string]string{"error": "Unauthorized"})
-            }
-            
-            c.Set("session", sess)
-            c.Set("user_id", sess.IdentityID)
-            return next(c)
-        }
-    }
-}
-```
-
----
-
-## File Naming Conventions
+### 4.1 File Naming
 
 | Pattern | Example | Purpose |
 |---------|---------|---------|
-| `*_strategy.go` | `password_strategy.go` | Auth strategy impl |
-| `*_manager.go` | `registration_manager.go` | Manager orchestration |
-| `*_store.go` | `session_store.go` | Storage implementation |
-| `*_test.go` | `password_test.go` | Unit tests |
-| `handler.go` | `handler.go` | HTTP handlers |
+| `strategy_*.go` | `strategy_password.go` | Auth strategy implementations |
+| `*_manager.go` or `manager.go` | `registration.go`, `manager.go` | Manager/orchestrator |
+| `*_store.go` or `store.go` | `memory_store.go` | Storage implementations |
+| `*_test.go` | `lockout_test.go` | Tests (must match source file) |
 | `middleware.go` | `middleware.go` | HTTP middleware |
+| `types.go` | `types.go` | Type definitions and constants |
+| `checker.go` | `checker.go` | Validation/verification logic |
+
+### 4.2 Package Doc Comments
+Every package must have a doc comment in its primary `.go` file with:
+- One-line description of purpose
+- Subpackage listing (if applicable)
+- Usage example in godoc format
+
+### 4.3 New Package Checklist
+When adding a new package under `core/`:
+1. Create the package directory under `core/`
+2. Add a primary file with package doc comment
+3. Define interfaces **in the consuming package** (consumer-defined interfaces)
+4. Ensure it does not violate dependency rules (Section 2)
+5. Add tests (`*_test.go`) — **do not merge untested packages**
+6. Update `core/kayan.go` doc comment with the new subpackage
+7. Update `docs/architecture/README.md` with the new component
 
 ---
 
-## Code Style
+## 5. Code Style Rules
 
-- **Errors**: Return `error` as last return value, check with `if err != nil`
-- **Context**: First parameter for functions that may need cancellation
-- **Interfaces**: Define in the package that uses them (consumer-defined)
-- **Factories**: Use `func() any` for generic instantiation
-- **Field access**: Use reflection for BYOS field mapping
-- **Logging**: Structured logging with key-value pairs
+### 5.1 Error Handling
+- Return `error` as the last return value.
+- Use `fmt.Errorf("package: description: %w", err)` wrapping with package prefix.
+- Define sentinel errors for cases consumers need to handle:
+  ```go
+  var ErrMFARequired = errors.New("login: mfa required")
+  ```
+- Never expose internal error messages to HTTP responses — use generic messages at the handler layer.
 
----
+### 5.2 Context Usage
+- `context.Context` must be the **first parameter** for any function that:
+  - Calls external services or databases
+  - May need cancellation or timeout
+  - Passes through audit/tenant context
+- Strategies, managers, and storage methods must accept `context.Context`.
 
-## Testing
+### 5.3 Constructor Pattern
+```go
+// Required dependencies as positional args
+// Optional config via functional options or setters
+func NewManager(store Store, resolver Resolver, opts ...ManagerOption) *Manager
 
-Examples are the primary test suite. Each example in `kayan-examples/` is:
-- Self-contained (`main.go` + `go.mod`)
-- Uses local SQLite (auto-deleted)
-- Demonstrates one feature pattern
-
-Run examples:
-```bash
-cd kayan-examples/byos_schema
-go run main.go
+// Option type
+type ManagerOption func(*Manager)
+func WithHooks(hooks Hooks) ManagerOption { ... }
 ```
 
----
-
-## Dependencies
-
-**Core**: Standard library + minimal deps
-- `golang.org/x/crypto` - bcrypt
-- `github.com/golang-jwt/jwt/v5` - JWT handling
-
-**Storage** (kgorm):
-- `gorm.io/gorm` - ORM
-
-**OIDC/OAuth2**:
-- `github.com/coreos/go-oidc/v3` - OIDC client
-- `golang.org/x/oauth2` - OAuth2
-
-**WebAuthn**:
-- `github.com/go-webauthn/webauthn` - FIDO2/WebAuthn
+### 5.4 Audit Integration
+- All `RegistrationManager` and `LoginManager` flows must emit audit events for both success and failure.
+- Audit events must include: `Type`, `ActorID`, `Status`, `Message`.
+- Audit is **opt-in**: check `if auditStore != nil` before logging (never panic on missing audit).
 
 ---
 
-## Important Notes for AI Agents
+## 6. Testing Rules
 
-1. **BYOS is key**: Users don't change their models, Kayan adapts
-2. **Non-generic**: Don't suggest generic type parameters
-3. **Strategy ID**: String identifies strategy (`"password"`, `"oidc"`, `"webauthn"`)
-4. **Factory pattern**: `func() any { return &Type{} }` for creating instances
-5. **Field mapping**: Reflection-based, not compile-time
-6. **Examples first**: Check `kayan-examples/` for patterns
-7. **No UI**: Kayan is headless, `kayan-console` is separate
+### 6.1 Requirements
+- Every new strategy, manager, or storage adapter **must** have corresponding `*_test.go` files.
+- Use **table-driven tests** for strategies with multiple input scenarios.
+- Use **test interfaces** or mocks, never concrete storage in unit tests.
+- Tests must run with `go test -race` (no data races).
+
+### 6.2 Test File Location
+- Unit tests: same package, `*_test.go` suffix.
+- Integration tests: use `//go:build integration` build tag.
+
+---
+
+## 7. Security Rules
+
+### 7.1 Secrets
+- Never log passwords, tokens, or hashed secrets.
+- Password hashes must use `bcrypt` (default) or `argon2`. Never use MD5, SHA-1, or SHA-256 for password hashing.
+- JWT secrets must not be hardcoded. Always accept them via configuration.
+
+### 7.2 OIDC/OAuth
+- OIDC state parameters must be **cryptographically random** and validated on callback.
+- Always use PKCE (`code_challenge`/`code_verifier`) for OAuth2 authorization code flows.
+- Never return raw tokens in API responses meant for production use.
+
+### 7.3 Timing Safety
+- Use constant-time comparison (`subtle.ConstantTimeCompare`) for token validation.
+- Use the `Hasher.Compare()` interface (which uses bcrypt's constant-time comparison) for passwords.
+
+---
+
+## 8. Architecture Decision Records
+
+| Decision | Rationale |
+|----------|-----------|
+| Non-generic design | Supports any ID type without compile-time constraints. Trades compile-time safety for universal compatibility. |
+| `any`-based interfaces | Enables BYOS — users keep their models, Kayan adapts with reflection. |
+| Strategy pattern | Allows mixing auth methods without modifying core logic. New methods = new files, not modified files. |
+| Separate adapter repos | `kgorm/` is co-located but self-contained. Future adapters (MongoDB, Redis) follow the same pattern. |
+| Consumer-defined interfaces | Interfaces are declared where they're consumed, not where they're implemented. Follows Go best practices. |
+| Hook system over inheritance | Pre/post hooks on managers instead of subclassing. Keeps the API surface flat and composable. |
 
 ---
 
 ## Quick Reference
 
-| Task | Package/Function |
-|------|------------------|
-| Hash password | `flow.NewBcryptHasher(cost)` |
-| Create user | `regManager.Submit(ctx, "password", traits, secret)` |
-| Authenticate | `loginManager.Authenticate(ctx, "password", id, secret)` |
-| Create session | `sessManager.Create(sessionID, identityID)` |
-| Validate session | `sessManager.Validate(token)` |
-| Check role | `rbacManager.Authorize(userID, role)` |
-| Check attribute | `abacEngine.Can(ctx, user, action, resource)` |
-| Check relationship | `rebacManager.Check(ctx, subType, subID, rel, objType, objID)` |
-| Grant relation | `rebacManager.Grant(ctx, subType, subID, rel, objType, objID)` |
-| Resolve tenant | `tenantManager.Resolve(ctx, request)` |
-
----
-
-## ReBAC (Relationship-Based Access Control)
-
-ReBAC provides fine-grained authorization based on relationships:
-
-```go
-// Create ReBAC manager with in-memory store
-store := rebac.NewMemoryStore()
-manager := rebac.NewManager(store)
-
-// Grant a relationship
-manager.Grant(ctx, "user", "alice", "viewer", "document", "readme")
-
-// Check permission
-allowed, _ := manager.Check(ctx, "user", "alice", "viewer", "document", "readme")
-
-// Group membership
-manager.AddToGroup(ctx, "alice", "engineering")
-manager.GrantUserset(ctx, "group", "engineering", "member", "viewer", "document", "specs")
-
-// Hierarchical resources (folder → document inheritance)
-manager.SetParent(ctx, "folder", "home", "document", "readme")
 ```
-
-For computed relations (owner→editor→viewer), define schemas:
-
-```go
-schema := rebac.Schema{
-    Type: "document",
-    Relations: map[string]rebac.RelationConfig{
-        "viewer": {
-            DirectAllowed: true,
-            ComputedFrom: []rebac.ComputedRule{
-                {Relation: "editor"}, // editors are also viewers
-            },
-        },
-    },
-}
-manager := rebac.NewManager(store, rebac.WithSchema(schema))
+kayan/
+├── core/                     # Core library — NO framework deps
+│   ├── identity/             # Leaf dep: types only (Identity, Session, Credential, JSON)
+│   ├── domain/               # Storage interfaces (IdentityStorage, SessionStorage, etc.)
+│   ├── flow/                 # Auth flows: strategies, managers, hooks, rate limiting
+│   ├── session/              # Session management: JWT + Database strategies
+│   ├── rbac/                 # RBAC engine (standalone, no core deps)
+│   ├── rebac/                # ReBAC engine (standalone, no core deps)
+│   ├── policy/               # ABAC + Hybrid policy engine (standalone)
+│   ├── tenant/               # Multi-tenancy: resolver, manager, scoped store
+│   ├── oauth2/               # OAuth2 provider (auth codes, tokens, PKCE)
+│   ├── oidc/                 # OIDC provider (discovery, userinfo, ID tokens)
+│   ├── saml/                 # SAML 2.0 SP/IdP
+│   ├── audit/                # Audit logging (events, store interface)
+│   ├── compliance/           # Data retention, encryption
+│   ├── telemetry/            # OpenTelemetry, Prometheus
+│   ├── config/               # Dynamic configuration
+│   ├── consent/              # GDPR/CCPA consent management
+│   ├── health/               # Health check utilities
+│   └── logger/               # Structured logging
+├── kgorm/                    # GORM storage adapter
+├── cmd/                      # CLI tools
+└── docs/                     # Documentation
 ```
-
-See `rebac_basic` and `rebac_google_drive` examples for complete usage.
-
----
-
-## Links
-
-- [Architecture Overview](./docs/architecture/README.md)
-- [Security Model](./docs/architecture/security-model.md)
-- [OpenAPI Spec](./docs/openapi/openapi.yaml)
-- [Examples](../kayan-examples/README.md)
-

@@ -16,6 +16,8 @@ type RegistrationManager struct {
 	postHooks  []Hook
 	factory    func() any
 	schema     identity.Schema
+	linker                 Linker
+	PreventPasswordCapture bool
 }
 
 func NewRegistrationManager(repo IdentityRepository, factory func() any) *RegistrationManager {
@@ -41,6 +43,10 @@ func (m *RegistrationManager) SetSchema(s identity.Schema) {
 	m.schema = s
 }
 
+func (m *RegistrationManager) SetLinker(l Linker) {
+	m.linker = l
+}
+
 func (m *RegistrationManager) AddPreHook(h Hook)  { m.preHooks = append(m.preHooks, h) }
 func (m *RegistrationManager) AddPostHook(h Hook) { m.postHooks = append(m.postHooks, h) }
 
@@ -61,6 +67,27 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 	if m.schema != nil {
 		if err := m.schema.Validate(traits); err != nil {
 			return nil, fmt.Errorf("registration: validation failed: %v", err)
+		}
+	}
+
+	// 2.5 Auto-Unification (Implicit Linking)
+	if m.linker != nil {
+		existing, err := m.linker.FindExisting(ctx, traits)
+		if err == nil && existing != nil {
+			// FOUND a matching identity with verified traits!
+			
+			// BLOCK if it's a password registration and policy is enabled
+			if method == "password" && m.PreventPasswordCapture {
+				return nil, ErrIdentityAlreadyExists
+			}
+
+			// Otherwise, try to link it.
+			err := m.linker.Link(ctx, existing, method, "", secret)
+			if err == nil {
+				return existing, nil
+			}
+			// If linking failed specifically, we continue to regular registration? 
+			// Or return error? For security, we might want to fail or prompt for "Connect accounts".
 		}
 	}
 

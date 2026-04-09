@@ -14,6 +14,8 @@
 //   - Magic Link: Passwordless email authentication
 //   - TOTP: Time-based one-time passwords for MFA
 //   - SAML 2.0: Enterprise SSO (see saml package)
+//   - OTP: SMS/Voice one-time passwords via user-provided OTPSender
+//   - Step-Up: Step-up authentication for sensitive operations
 //
 // # BYOS (Bring Your Own Schema)
 //

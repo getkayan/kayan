@@ -46,6 +46,7 @@ type IdentityStorage interface {
 	ListIdentities(factory func() any, page, limit int) ([]any, error)
 	UpdateIdentity(ident any) error
 	DeleteIdentity(id any) error
+	CreateCredential(cred any) error
 }
 
 type SessionStorage interface {

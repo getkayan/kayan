@@ -77,6 +77,9 @@ func (m *mockIdentityRepo) UpdateIdentity(identity any) error {
 func (m *mockIdentityRepo) DeleteIdentity(id any) error {
 	return nil
 }
+func (m *mockIdentityRepo) CreateCredential(cred any) error {
+	return nil
+}
 func (m *mockIdentityRepo) FindIdentity(factory func() any, query map[string]any) (any, error) {
 	return nil, nil
 }

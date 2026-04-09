@@ -84,9 +84,13 @@ func (m *mockRepo) UpdateCredentialSecret(ctx context.Context, identityID, metho
 func (m *mockRepo) UpdateIdentity(ident any) error {
 	if fi, ok := ident.(FlowIdentity); ok {
 		m.identities[fmt.Sprintf("%v", fi.GetID())] = ident
-		return nil
 	}
-	return errors.New("invalid identity")
+	if cs, ok := ident.(CredentialSource); ok {
+		for _, c := range cs.GetCredentials() {
+			m.creds[c.Identifier+":"+c.Type] = &c
+		}
+	}
+	return nil
 }
 
 func (m *mockRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
@@ -100,6 +104,13 @@ func (m *mockRepo) ListIdentities(factory func() any, page, limit int) ([]any, e
 func (m *mockRepo) DeleteIdentity(id any) error {
 	key := fmt.Sprintf("%v", id)
 	delete(m.identities, key)
+	return nil
+}
+
+func (m *mockRepo) CreateCredential(cred any) error {
+	if c, ok := cred.(*identity.Credential); ok {
+		m.creds[c.Identifier+":"+c.Type] = c
+	}
 	return nil
 }
 

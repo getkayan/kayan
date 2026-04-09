@@ -20,6 +20,7 @@ type OIDCManager struct {
 	generator   domain.IDGenerator
 	factory     func() any
 	claimMapper ClaimMapper
+	linker      Linker
 }
 
 type OIDCProviderData struct {
@@ -62,6 +63,10 @@ func (m *OIDCManager) SetIDGenerator(g domain.IDGenerator) {
 	m.generator = g
 }
 
+func (m *OIDCManager) SetLinker(l Linker) {
+	m.linker = l
+}
+
 func (m *OIDCManager) GetAuthURL(providerID, state string) (string, error) {
 	p, ok := m.providers[providerID]
 	if !ok {
@@ -98,14 +103,14 @@ func (m *OIDCManager) HandleCallback(ctx context.Context, providerID, code strin
 	}
 
 	// Logic to link or create identity
-	return m.reconcileIdentity(providerID, claims)
+	return m.reconcileIdentity(ctx, providerID, claims)
 }
 
 func (m *OIDCManager) SetClaimMapper(mapper ClaimMapper) {
 	m.claimMapper = mapper
 }
 
-func (m *OIDCManager) reconcileIdentity(providerID string, claims map[string]any) (any, error) {
+func (m *OIDCManager) reconcileIdentity(ctx context.Context, providerID string, claims map[string]any) (any, error) {
 	subject, _ := claims["sub"].(string)
 	email, _ := claims["email"].(string)
 
@@ -119,12 +124,18 @@ func (m *OIDCManager) reconcileIdentity(providerID string, claims map[string]any
 
 	// 2. Account Linking: Check if user exists by email
 	if email != "" {
-		// Look for any credential with this email, or an identity with this email trait
-		// For simplicity in this core implementation, we check if an identity already has this email
-		existingIdent, err := m.repo.FindIdentity(m.factory, map[string]any{"traits": email})
-		if err == nil && existingIdent != nil {
-			// Found an existing user with the same email. Link this OIDC provider to them.
-			return m.linkOIDC(existingIdent, providerID, subject)
+		if m.linker != nil {
+			traits := m.mapClaims(claims)
+			existingIdent, err := m.linker.FindExisting(ctx, traits)
+			if err == nil && existingIdent != nil {
+				return m.linkOIDC(existingIdent, providerID, subject)
+			}
+		} else {
+			// Fallback to legacy email lookup if no linker is set
+			existingIdent, err := m.repo.FindIdentity(m.factory, map[string]any{"email": email})
+			if err == nil && existingIdent != nil {
+				return m.linkOIDC(existingIdent, providerID, subject)
+			}
 		}
 	}
 
@@ -207,4 +218,11 @@ func (m *OIDCManager) linkOIDC(ident any, providerID, subject string) (any, erro
 	}
 
 	return ident, nil
+}
+
+// Attach implements the Attacher interface for OIDC.
+// identifier = subject, secret = providerID
+func (m *OIDCManager) Attach(ctx context.Context, ident any, identifier, secret string) error {
+	_, err := m.linkOIDC(ident, secret, identifier)
+	return err
 }
