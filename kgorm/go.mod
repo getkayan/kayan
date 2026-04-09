@@ -58,4 +58,5 @@ require (
 	modernc.org/sqlite v1.23.1 // indirect
 )
 
-replace github.com/getkayan/kayan/core => ../core
+
+// Cleanup: replace directive removed for publishing
