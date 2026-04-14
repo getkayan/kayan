@@ -1,44 +1,43 @@
 # Kayan Documentation
 
-Welcome to the Kayan documentation! Kayan is a headless, extensible Identity & Access Management library for Go.
+Welcome to the official technical documentation for **Kayan**, a headless, non-generic, extensible Identity & Access Management (IAM) library for Go.
 
-## 📚 Documentation Structure
+Kayan is designed for developers who need enterprise-grade authentication and authorization without the overhead of forced schemas or UI opinions.
 
-### Getting Started
-- [Getting Started Guide](./getting-started.md) - Quick start with Kayan
+## 📚 Documentation Map
 
-### Core Concepts
-- [BYOS (Bring Your Own Schema)](./concepts/byos.md) - Use your own data models
-- [Authentication Strategies](./concepts/strategies.md) - Password, OIDC, WebAuthn, SAML, Magic Link
-- [Session Management](./concepts/sessions.md) - JWT and database sessions
-- [Authorization](./concepts/authorization.md) - RBAC, ABAC, and hybrid policies
-- [Multi-Tenancy](./concepts/multi-tenancy.md) - Tenant isolation and configuration
+### [Overview](overview/)
+- **[Philosophy](overview/philosophy.md)**: Headless, BYOS (Bring Your Own Schema), Non-generic design, and the Strategy Pattern.
+- **[Architecture](overview/architecture.md)**: Exhaustive map of all 22 core packages, layering, and dependency rules.
 
-### Reference
-- [Configuration](./reference/configuration.md) - Environment and code configuration
-- [API Reference](./reference/api.md) - REST API endpoints
+### [Core API & Usage Reference](core/)
+Each guide includes **Standard Usage**, **Custom Implementation**, and **Common Mistakes**.
 
-### SDKs
-- [JavaScript/TypeScript SDK](./sdk/javascript.md) - kayan.js usage guide
+- **[Identity](core/identity.md)**: Multi-identifier identities, Traits (JSON), and the BYOS Reflection Mapper.
+- **[Flow](core/flow.md)**: Registration and Login flows, and how to build custom authentication strategies.
+- **[Session](core/session.md)**: Stateless (JWT) and Stateful (DB/Redis) session lifecycle management.
+- **[MFA](core/mfa.md)**: TOTP, Recovery codes, and custom Multi-Factor methods (Push, etc.).
+- **[RBAC](core/rbac.md)**: Role-Based Access Control via Bitmasks or traditional JSON roles.
+- **[ReBAC](core/rebac.md)**: Relationship-Based Access Control (Zanzibar style) for complex hierarchies.
+- **[Policy & ABAC](core/policy.md)**: Dynamic Attribute-Based checks and Hybrid authorization engines.
+- **[Multi-Tenancy](core/tenant.md)**: Native isolation, resolution strategies, and scoped storage.
+- **[Audit](core/audit.md)**: SOC 2 compliant structured security logging and change tracking.
+- **[Infrastructure](core/infrastructure.md)**: Compliance, Telemetry, Health checks, and Dynamic config.
 
-### Architecture
-- [Overview](./architecture/README.md) - System architecture
-- [Security Model](./architecture/security-model.md) - Threat model and security controls
-- [Strategy Internals](./architecture/strategy-internals.md) - How strategies work
-- [Storage Layer](./architecture/storage-layer.md) - Repository pattern
-- [Extending Kayan](./architecture/extending-kayan.md) - Custom strategies guide
-- [Authentication Flows](./architecture/authentication-flows.md) - Flow diagrams
-- [Authorization Models](./architecture/authorization-models.md) - RBAC/ABAC deep dive
+### [Protocols](core/)
+Extensive guides on enterprise protocol integration.
+- **[OIDC](core/oidc.md)**: Implementing an OpenID Connect Provider or Relying Party.
+- **[SAML 2.0](core/saml.md)**: Enterprise SSO with Service Provider (SP) and IdP support.
+- **[SCIM 2.0](core/scim.md)**: Automated user provisioning and advanced filtering.
 
-### Deployment
-- [Docker](./deployment/docker/) - Docker deployment
-- [Kubernetes](./deployment/kubernetes/) - K8s manifests
-- [Helm](./deployment/helm/) - Helm charts
+### [Adapters & Extensions](adapters/)
+- **[Storage Adapters](adapters/storage.md)**: Using `kgorm` or implementing a custom DB adapter from scratch.
 
 ---
 
-## 🔗 Quick Links
+## 🚀 Getting Started
 
-- [Examples](../../kayan-examples/) - 20+ runnable examples
-- [OpenAPI Spec](./openapi/openapi.yaml) - Full API specification
-- [GitHub](https://github.com/getkayan/kayan) - Source code
+1. Understand the **[Philosophy](overview/philosophy.md)**.
+2. Define your **[Identity](core/identity.md)** model.
+3. Configure your **[Auth Flows](core/flow.md)**.
+4. Integrate **[RBAC](core/rbac.md)** or **[Fine-grained ReBAC](core/rebac.md)** for access control.
