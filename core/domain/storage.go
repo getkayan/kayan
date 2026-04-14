@@ -45,7 +45,7 @@ type IdentityStorage interface {
 	FindIdentity(factory func() any, query map[string]any) (any, error)
 	ListIdentities(factory func() any, page, limit int) ([]any, error)
 	UpdateIdentity(ident any) error
-	DeleteIdentity(id any) error
+	DeleteIdentity(factory func() any, id any) error
 	CreateCredential(cred any) error
 }
 

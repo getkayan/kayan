@@ -101,7 +101,7 @@ func (m *mockRepo) ListIdentities(factory func() any, page, limit int) ([]any, e
 	return result, nil
 }
 
-func (m *mockRepo) DeleteIdentity(id any) error {
+func (m *mockRepo) DeleteIdentity(factory func() any, id any) error {
 	key := fmt.Sprintf("%v", id)
 	delete(m.identities, key)
 	return nil

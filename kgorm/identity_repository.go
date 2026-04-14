@@ -82,8 +82,8 @@ func (r *IdentityRepository) UpdateIdentity(ident any) error {
 	return r.db.Save(ident).Error
 }
 
-func (r *IdentityRepository) DeleteIdentity(id any) error {
-	return r.db.Delete(&gormIdentity{}, "id = ?", id).Error
+func (r *IdentityRepository) DeleteIdentity(factory func() any, id any) error {
+	return r.db.Delete(factory(), "id = ?", id).Error
 }
 
 func (r *IdentityRepository) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error) {

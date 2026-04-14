@@ -3,7 +3,6 @@ module github.com/getkayan/kayan/examples/nextjs-kayan-demo/backend
 go 1.25.5
 
 replace github.com/getkayan/kayan/core => ../../../core
-
 replace github.com/getkayan/kayan/kgorm => ../../../kgorm
 
 require (

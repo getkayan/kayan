@@ -18,7 +18,34 @@ type gormAuditEvent struct {
 	Message   string
 	Metadata  identity.JSON `gorm:"type:json"`
 	CreatedAt time.Time     `gorm:"index"`
+
+	// Compliance fields
+	TenantID     string `gorm:"index"`
+	IPAddress    string `gorm:"index"`
+	UserAgent    string
+	DeviceID     string `gorm:"index"`
+	SessionID    string `gorm:"index"`
+	ResourceType string `gorm:"index"`
+	ResourceID   string `gorm:"index"`
+	OldValue     identity.JSON `gorm:"type:json"`
+	NewValue     identity.JSON `gorm:"type:json"`
+	Risk         string `gorm:"index"`
+	RequestID    string `gorm:"index"`
+
+	// Geo fields
+	GeoCountry string
+	GeoRegion  string
+	GeoCity    string
+	GeoLat     float64
+	GeoLong    float64
 }
+
+type gormGroup struct {
+	ID          string `gorm:"primaryKey"`
+	DisplayName string `gorm:"uniqueIndex"`
+}
+
+func (gormGroup) TableName() string { return "scim_groups" }
 
 func (gormAuditEvent) TableName() string { return "audit_events" }
 
@@ -53,16 +80,72 @@ func fromCoreAuditEvent(e *audit.AuditEvent) *gormAuditEvent {
 	if e == nil {
 		return nil
 	}
-	return &gormAuditEvent{
-		ID:        e.ID,
-		Type:      e.Type,
-		ActorID:   e.ActorID,
-		SubjectID: e.SubjectID,
-		Status:    e.Status,
-		Message:   e.Message,
-		Metadata:  identity.JSON(e.Metadata),
-		CreatedAt: e.CreatedAt,
+	ge := &gormAuditEvent{
+		ID:           e.ID,
+		Type:         e.Type,
+		ActorID:      e.ActorID,
+		SubjectID:    e.SubjectID,
+		Status:       e.Status,
+		Message:      e.Message,
+		Metadata:     identity.JSON(e.Metadata),
+		CreatedAt:    e.CreatedAt,
+		TenantID:     e.TenantID,
+		IPAddress:    e.IPAddress,
+		UserAgent:    e.UserAgent,
+		DeviceID:     e.DeviceID,
+		SessionID:    e.SessionID,
+		ResourceType: e.ResourceType,
+		ResourceID:   e.ResourceID,
+		OldValue:     e.OldValue,
+		NewValue:     e.NewValue,
+		Risk:         string(e.Risk),
+		RequestID:    e.RequestID,
 	}
+	if e.GeoLocation != nil {
+		ge.GeoCountry = e.GeoLocation.Country
+		ge.GeoRegion = e.GeoLocation.Region
+		ge.GeoCity = e.GeoLocation.City
+		ge.GeoLat = e.GeoLocation.Latitude
+		ge.GeoLong = e.GeoLocation.Longitude
+	}
+	return ge
+}
+
+func toCoreAuditEvent(ge *gormAuditEvent) *audit.AuditEvent {
+	if ge == nil {
+		return nil
+	}
+	res := &audit.AuditEvent{
+		ID:           ge.ID,
+		Type:         ge.Type,
+		ActorID:      ge.ActorID,
+		SubjectID:    ge.SubjectID,
+		Status:       ge.Status,
+		Message:      ge.Message,
+		Metadata:     ge.Metadata,
+		CreatedAt:    ge.CreatedAt,
+		TenantID:     ge.TenantID,
+		IPAddress:    ge.IPAddress,
+		UserAgent:    ge.UserAgent,
+		DeviceID:     ge.DeviceID,
+		SessionID:    ge.SessionID,
+		ResourceType: ge.ResourceType,
+		ResourceID:   ge.ResourceID,
+		OldValue:     ge.OldValue,
+		NewValue:     ge.NewValue,
+		Risk:         audit.RiskLevel(ge.Risk),
+		RequestID:    ge.RequestID,
+	}
+	if ge.GeoCountry != "" || ge.GeoCity != "" {
+		res.GeoLocation = &audit.GeoLocation{
+			Country:   ge.GeoCountry,
+			Region:    ge.GeoRegion,
+			City:      ge.GeoCity,
+			Latitude:  ge.GeoLat,
+			Longitude: ge.GeoLong,
+		}
+	}
+	return res
 }
 
 type gormIdentity struct {

@@ -101,7 +101,7 @@ func (s *InMemStorage) UpdateIdentity(ident any) error {
 	return s.CreateIdentity(ident)
 }
 
-func (s *InMemStorage) DeleteIdentity(id any) error {
+func (s *InMemStorage) DeleteIdentity(factory func() any, id any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.identities, fmt.Sprintf("%v", id))

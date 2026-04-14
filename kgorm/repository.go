@@ -41,6 +41,9 @@ package kgorm
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -95,6 +98,7 @@ func (r *Repository) AutoMigrate(models ...any) error {
 		&gormAuditEvent{},
 		&gormAuthToken{},
 		&gormRelationTuple{},
+		&gormGroup{},
 	}
 	allModels := append(baseModels, models...)
 	return r.db.AutoMigrate(allModels...)
@@ -138,27 +142,117 @@ func (r *Repository) DeleteExpiredTokens(ctx context.Context) error {
 	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "expires_at < ?", time.Now()).Error
 }
 
+// applyFilter applies audit.Filter to a GORM DB.
+func (r *Repository) applyFilter(db *gorm.DB, filter audit.Filter) *gorm.DB {
+	if filter.TenantID != "" {
+		db = db.Where("tenant_id = ?", filter.TenantID)
+	}
+	if filter.ActorID != "" {
+		db = db.Where("actor_id = ?", filter.ActorID)
+	}
+	if filter.SubjectID != "" {
+		db = db.Where("subject_id = ?", filter.SubjectID)
+	}
+	if len(filter.Types) > 0 {
+		db = db.Where("type IN ?", filter.Types)
+	}
+	if len(filter.Statuses) > 0 {
+		db = db.Where("status IN ?", filter.Statuses)
+	}
+	if len(filter.RiskLevels) > 0 {
+		db = db.Where("risk IN ?", filter.RiskLevels)
+	}
+	if filter.ResourceType != "" {
+		db = db.Where("resource_type = ?", filter.ResourceType)
+	}
+	if filter.ResourceID != "" {
+		db = db.Where("resource_id = ?", filter.ResourceID)
+	}
+	if !filter.StartTime.IsZero() {
+		db = db.Where("created_at >= ?", filter.StartTime)
+	}
+	if !filter.EndTime.IsZero() {
+		db = db.Where("created_at <= ?", filter.EndTime)
+	}
+	if filter.IPAddress != "" {
+		db = db.Where("ip_address = ?", filter.IPAddress)
+	}
+	if filter.SessionID != "" {
+		db = db.Where("session_id = ?", filter.SessionID)
+	}
+
+	if filter.OrderBy != "" {
+		db = db.Order(filter.OrderBy)
+	} else {
+		db = db.Order("created_at DESC")
+	}
+
+	if filter.Limit > 0 {
+		db = db.Limit(filter.Limit)
+	}
+	if filter.Offset > 0 {
+		db = db.Offset(filter.Offset)
+	}
+
+	return db
+}
+
 // Query implements audit.AuditStore.
 func (r *Repository) Query(ctx context.Context, filter audit.Filter) ([]audit.AuditEvent, error) {
-	// TODO: Implement actual query logic mapping filter to GORM
-	return []audit.AuditEvent{}, nil
+	var gormEvents []gormAuditEvent
+	db := r.applyFilter(r.db.WithContext(ctx), filter)
+
+	if err := db.Find(&gormEvents).Error; err != nil {
+		return nil, fmt.Errorf("kgorm: failed to query audit events: %w", err)
+	}
+
+	events := make([]audit.AuditEvent, len(gormEvents))
+	for i, ge := range gormEvents {
+		events[i] = *toCoreAuditEvent(&ge)
+	}
+	return events, nil
 }
 
 // Count implements audit.AuditStore.
 func (r *Repository) Count(ctx context.Context, filter audit.Filter) (int64, error) {
 	var count int64
-	// TODO: Implement actual count logic
+	db := r.applyFilter(r.db.WithContext(ctx), filter)
+	// Clear order, limit, offset for count
+	db = db.Order(nil).Limit(-1).Offset(-1)
+
+	if err := db.Model(&gormAuditEvent{}).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("kgorm: failed to count audit events: %w", err)
+	}
 	return count, nil
 }
 
 // Export implements audit.AuditStore.
 func (r *Repository) Export(ctx context.Context, filter audit.Filter, format audit.ExportFormat) (io.Reader, error) {
-	return nil, nil // TODO: Implement export
+	events, err := r.Query(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		if format == audit.ExportJSON {
+			if err := json.NewEncoder(pw).Encode(events); err != nil {
+				pw.CloseWithError(err)
+			}
+		} else {
+			// CSV or other formats could be implemented here
+			pw.CloseWithError(errors.New("kgorm: unsupported export format"))
+		}
+	}()
+
+	return pr, nil
 }
 
 // Purge implements audit.AuditStore.
 func (r *Repository) Purge(ctx context.Context, olderThan time.Time) (int64, error) {
-	return 0, nil // TODO: Implement purge
+	res := r.db.WithContext(ctx).Delete(&gormAuditEvent{}, "created_at < ?", olderThan)
+	return res.RowsAffected, res.Error
 }
 
 // Compile-time interface checks

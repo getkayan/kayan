@@ -29,7 +29,10 @@ func (r *ScimRepository) CreateScimUser(ctx context.Context, user *scim.User) er
 		return err
 	}
 	// Map back to update ID and other fields
-	updated, _ := r.mapper.FromModel(model)
+	updated, err := r.mapper.FromModel(model)
+	if err != nil {
+		return err
+	}
 	*user = *updated
 	return nil
 }
@@ -85,33 +88,67 @@ func (r *ScimRepository) ListScimUsers(ctx context.Context, filter string, start
 	for rows.Next() {
 		inst := r.mapper.ToModelPlaceholder()
 		r.db.ScanRows(rows, inst)
-		u, _ := r.mapper.FromModel(inst)
-		users = append(users, u)
+		u, err := r.mapper.FromModel(inst)
+		if err == nil && u != nil {
+			users = append(users, u)
+		}
 	}
 
 	return users, int(total), nil
 }
 
-// Group implementations (Simplified)
+// Group implementations (Basic GORM implementations)
 
 func (r *ScimRepository) CreateScimGroup(ctx context.Context, group *scim.Group) error {
-	return scim.ErrUnsupported
+	g := &gormGroup{
+		ID:          group.ID,
+		DisplayName: group.DisplayName,
+	}
+	return r.db.WithContext(ctx).Create(g).Error
 }
 
 func (r *ScimRepository) GetScimGroup(ctx context.Context, id string) (*scim.Group, error) {
-	return nil, scim.ErrNotFound
+	var g gormGroup
+	if err := r.db.WithContext(ctx).First(&g, "id = ?", id).Error; err != nil {
+		return nil, scim.ErrNotFound
+	}
+	res := &scim.Group{
+		DisplayName: g.DisplayName,
+	}
+	res.ID = g.ID
+	return res, nil
 }
 
 func (r *ScimRepository) UpdateScimGroup(ctx context.Context, group *scim.Group) error {
-	return scim.ErrUnsupported
+	g := &gormGroup{
+		ID:          group.ID,
+		DisplayName: group.DisplayName,
+	}
+	return r.db.WithContext(ctx).Save(g).Error
 }
 
 func (r *ScimRepository) DeleteScimGroup(ctx context.Context, id string) error {
-	return scim.ErrUnsupported
+	return r.db.WithContext(ctx).Delete(&gormGroup{}, "id = ?", id).Error
 }
 
 func (r *ScimRepository) ListScimGroups(ctx context.Context, filter string, startIndex, count int) ([]*scim.Group, int, error) {
-	return nil, 0, nil
+	var total int64
+	r.db.WithContext(ctx).Model(&gormGroup{}).Count(&total)
+
+	var groups []gormGroup
+	if err := r.db.WithContext(ctx).Offset(startIndex - 1).Limit(count).Find(&groups).Error; err != nil {
+		return nil, 0, err
+	}
+
+	res := make([]*scim.Group, len(groups))
+	for i, g := range groups {
+		group := &scim.Group{
+			DisplayName: g.DisplayName,
+		}
+		group.ID = g.ID
+		res[i] = group
+	}
+	return res, int(total), nil
 }
 
 func (r *ScimRepository) getIdentityModel(ctx context.Context, id string) (any, error) {

@@ -160,3 +160,26 @@ type Session struct {
 type Schema interface {
 	Validate(traits JSON) error
 }
+
+// FlowIdentity defines the minimum interface for identity models used in auth flows.
+type FlowIdentity interface {
+	GetID() any
+	SetID(any)
+}
+
+// TraitSource provides access to an identity's flexible trait data.
+type TraitSource interface {
+	GetTraits() JSON
+	SetTraits(JSON)
+}
+
+// CredentialSource provides access to an identity's authentication credentials.
+type CredentialSource interface {
+	GetCredentials() []Credential
+}
+
+// Mapper defines the interface for mapping conceptual keys to struct fields.
+type Mapper interface {
+	MapTraits(ident FlowIdentity) (JSON, error)
+	UnmapTraits(ident FlowIdentity, traits JSON) error
+}
