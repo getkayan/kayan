@@ -5,12 +5,14 @@ import (
 	"fmt"
 
 	"github.com/getkayan/kayan/core/audit"
+	"github.com/getkayan/kayan/core/events"
 	"github.com/getkayan/kayan/core/identity"
 )
 
 type RegistrationManager struct {
 	repo       IdentityRepository
 	auditStore audit.AuditStore
+	dispatcher events.Dispatcher
 	strategies map[string]RegistrationStrategy
 	preHooks   []Hook
 	postHooks  []Hook
@@ -37,6 +39,10 @@ func NewRegistrationManager(repo IdentityRepository, factory func() any) *Regist
 
 func (m *RegistrationManager) RegisterStrategy(s RegistrationStrategy) {
 	m.strategies[s.ID()] = s
+}
+
+func (m *RegistrationManager) SetDispatcher(d events.Dispatcher) {
+	m.dispatcher = d
 }
 
 func (m *RegistrationManager) SetSchema(s identity.Schema) {
@@ -96,19 +102,31 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 	if err != nil {
 		if m.auditStore != nil {
 			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-				Type:    "identity.registration.failure",
+				Type:    string(events.TopicIdentityFailure),
 				Status:  "failure",
 				Message: err.Error(),
 			})
+		}
+		if m.dispatcher != nil {
+			event := events.NewEvent(events.TopicIdentityFailure, events.CodeBadRequest)
+			m.dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
 	}
 
 	if m.auditStore != nil {
 		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-			Type:   "identity.registration.success",
+			Type:   string(events.TopicIdentityCreated),
 			Status: "success",
 		})
+	}
+
+	if m.dispatcher != nil {
+		event := events.NewEvent(events.TopicIdentityCreated, events.CodeCreated)
+		if fi, ok := ident.(FlowIdentity); ok {
+			event.SubjectID = fi.GetID()
+		}
+		m.dispatcher.Dispatch(ctx, event)
 	}
 
 	// 3. Post-hooks

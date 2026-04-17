@@ -47,6 +47,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/getkayan/kayan/core/events"
 	"github.com/getkayan/kayan/core/identity"
 )
 
@@ -142,38 +143,39 @@ const (
 	ExportCSV  ExportFormat = "csv"
 )
 
-// ---- Predefined Event Types (SOC 2 / ISO 27001 aligned) ----
+// // ---- Predefined Event Types (SOC 2 / ISO 27001 aligned) ----
+// These are now mapped to the unified events.Topic system.
 
 const (
 	// Authentication events
-	EventLoginSuccess    = "auth.login.success"
-	EventLoginFailure    = "auth.login.failure"
-	EventLoginBlocked    = "auth.login.blocked"
-	EventLogout          = "auth.logout"
-	EventSessionCreated  = "auth.session.created"
-	EventSessionRevoked  = "auth.session.revoked"
-	EventSessionExpired  = "auth.session.expired"
-	EventPasswordChanged = "auth.password.changed"
-	EventPasswordReset   = "auth.password.reset"
-	EventMFAEnabled      = "auth.mfa.enabled"
+	EventLoginSuccess    = string(events.TopicLoginSuccess)
+	EventLoginFailure    = string(events.TopicLoginFailure)
+	EventLoginBlocked    = string(events.TopicLoginBlocked)
+	EventLogout          = string(events.TopicLogout)
+	EventSessionCreated  = string(events.TopicSessionCreated)
+	EventSessionRevoked  = string(events.TopicSessionRevoked)
+	EventSessionExpired  = string(events.TopicSessionExpired)
+	EventPasswordChanged = string(events.TopicPasswordChanged)
+	EventPasswordReset   = string(events.TopicPasswordReset)
+	EventMFAEnabled      = "auth.mfa.enabled" // TBD in events
 	EventMFADisabled     = "auth.mfa.disabled"
-	EventMFAChallenge    = "auth.mfa.challenge"
+	EventMFAChallenge    = string(events.TopicLoginMFARequired)
 
 	// Identity lifecycle events
-	EventUserCreated   = "identity.created"
-	EventUserUpdated   = "identity.updated"
-	EventUserDeleted   = "identity.deleted"
-	EventUserSuspended = "identity.suspended"
-	EventUserActivated = "identity.activated"
+	EventUserCreated   = string(events.TopicIdentityCreated)
+	EventUserUpdated   = string(events.TopicIdentityUpdated)
+	EventUserDeleted   = string(events.TopicIdentityDeleted)
+	EventUserSuspended = string(events.TopicIdentitySuspended)
+	EventUserActivated = string(events.TopicIdentityActivated)
 
 	// RBAC events
-	EventRoleCreated       = "rbac.role.created"
-	EventRoleUpdated       = "rbac.role.updated"
-	EventRoleDeleted       = "rbac.role.deleted"
-	EventRoleAssigned      = "rbac.role.assigned"
-	EventRoleRevoked       = "rbac.role.revoked"
-	EventPermissionGranted = "rbac.permission.granted"
-	EventPermissionRevoked = "rbac.permission.revoked"
+	EventRoleCreated       = string(events.TopicRoleCreated)
+	EventRoleUpdated       = string(events.TopicRoleUpdated)
+	EventRoleDeleted       = string(events.TopicRoleDeleted)
+	EventRoleAssigned      = string(events.TopicRoleAssigned)
+	EventRoleRevoked       = string(events.TopicRoleRevoked)
+	EventPermissionGranted = string(events.TopicPermissionGranted)
+	EventPermissionRevoked = string(events.TopicPermissionRevoked)
 
 	// Consent events (GDPR compliance)
 	EventConsentGranted = "consent.granted"
@@ -188,14 +190,14 @@ const (
 	// Admin events
 	EventAdminAction     = "admin.action"
 	EventConfigChanged   = "admin.config.changed"
-	EventTenantCreated   = "admin.tenant.created"
-	EventTenantUpdated   = "admin.tenant.updated"
+	EventTenantCreated   = string(events.TopicTenantCreated)
+	EventTenantUpdated   = string(events.TopicTenantUpdated)
 	EventTenantSuspended = "admin.tenant.suspended"
 
 	// Security events
-	EventRateLimited     = "security.rate_limited"
-	EventSuspiciousLogin = "security.suspicious_login"
-	EventTokenRevoked    = "security.token.revoked"
+	EventRateLimited     = string(events.TopicSecurityRateLimited)
+	EventSuspiciousLogin = string(events.TopicSecuritySuspiciousLogin)
+	EventTokenRevoked    = string(events.TopicSecurityTokenRevoked)
 )
 
 // ---- Event Builder (Developer-Friendly API) ----
@@ -404,4 +406,33 @@ func (l *Logger) Query(ctx context.Context, filter Filter) ([]AuditEvent, error)
 // Store returns the underlying store for direct access.
 func (l *Logger) Store() AuditStore {
 	return l.store
+}
+
+// SubscribeToDispatcher hooks the logger into a dispatcher to automatically capture events.
+func (l *Logger) SubscribeToDispatcher(d events.Dispatcher) {
+	d.Subscribe(events.Topic("*"), func(ctx context.Context, event events.Event) error {
+		// Map events.Event to audit.AuditEvent
+		ae := &AuditEvent{
+			ID:        event.ID,
+			Type:      string(event.Topic),
+			Status:    event.Status,
+			CreatedAt: event.CreatedAt,
+			TenantID:  event.TenantID,
+		}
+
+		// Add code to metadata since it's now machine-readable
+		if ae.Metadata == nil {
+			ae.Metadata = make(identity.JSON)
+		}
+		ae.Metadata["event_code"] = event.Code
+
+		if id, ok := event.ActorID.(string); ok {
+			ae.ActorID = id
+		}
+		if id, ok := event.SubjectID.(string); ok {
+			ae.SubjectID = id
+		}
+
+		return l.Log(ctx, ae)
+	})
 }

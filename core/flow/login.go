@@ -9,6 +9,7 @@ import (
 
 	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/domain"
+	"github.com/getkayan/kayan/core/events"
 	"github.com/getkayan/kayan/core/identity"
 )
 
@@ -20,6 +21,7 @@ type Attacher interface {
 type LoginManager struct {
 	repo       IdentityRepository
 	auditStore audit.AuditStore
+	dispatcher events.Dispatcher
 
 	// Dynamic Config
 	strategyStore    domain.StrategyStore
@@ -55,6 +57,10 @@ func (m *LoginManager) SetStrategyStore(store domain.StrategyStore) {
 
 func (m *LoginManager) Registry() *StrategyRegistry {
 	return m.strategyRegistry
+}
+
+func (m *LoginManager) SetDispatcher(d events.Dispatcher) {
+	m.dispatcher = d
 }
 
 // ReloadStrategies fetches configs from the store and rebuilds strategies.
@@ -147,11 +153,17 @@ func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier str
 
 	if m.auditStore != nil {
 		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-			Type:    "identity.login.initiate",
+			Type:    string(events.TopicLoginInitiated),
 			ActorID: identifier,
 			Status:  "success",
 			Message: fmt.Sprintf("Initiated login using %s", method),
 		})
+	}
+
+	if m.dispatcher != nil {
+		event := events.NewEvent(events.TopicLoginInitiated, events.CodeAccepted)
+		event.ActorID = identifier
+		m.dispatcher.Dispatch(ctx, event)
 	}
 
 	return result, nil
@@ -178,11 +190,16 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	if err != nil {
 		if m.auditStore != nil {
 			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-				Type:    "identity.login.failure",
+				Type:    string(events.TopicLoginFailure),
 				ActorID: identifier,
 				Status:  "failure",
 				Message: err.Error(),
 			})
+		}
+		if m.dispatcher != nil {
+			event := events.NewEvent(events.TopicLoginFailure, events.CodeUnauthorized)
+			event.ActorID = identifier
+			m.dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
 	}
@@ -192,22 +209,34 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	if ok && i.MFAEnabled {
 		if m.auditStore != nil {
 			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-				Type:    "identity.login.mfa_challenge",
+				Type:    string(events.TopicLoginMFARequired),
 				ActorID: identifier,
 				Status:  "success",
 				Message: "First step success, MFA required",
 			})
+		}
+		if m.dispatcher != nil {
+			event := events.NewEvent(events.TopicLoginMFARequired, events.CodeAccepted)
+			event.ActorID = identifier
+			m.dispatcher.Dispatch(ctx, event)
 		}
 		return ident, ErrMFARequired
 	}
 
 	if m.auditStore != nil {
 		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-			Type:    "identity.login.success",
+			Type:    string(events.TopicLoginSuccess),
 			ActorID: identifier,
 			Status:  "success",
 			Message: "Login successful",
 		})
+	}
+
+	if m.dispatcher != nil {
+		event := events.NewEvent(events.TopicLoginSuccess, events.CodeOK)
+		event.ActorID = identifier
+		event.SubjectID = i.GetID()
+		m.dispatcher.Dispatch(ctx, event)
 	}
 
 	// 3. Post-hooks
@@ -249,7 +278,7 @@ func (m *LoginManager) LinkMethod(ctx context.Context, ident any, method, identi
 	if err := attacher.Attach(ctx, ident, identifier, secret); err != nil {
 		if m.auditStore != nil {
 			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-				Type:    "identity.link.failure",
+				Type:    string(events.TopicIdentityFailure),
 				ActorID: identifier,
 				Status:  "failure",
 				Message: err.Error(),
@@ -260,7 +289,7 @@ func (m *LoginManager) LinkMethod(ctx context.Context, ident any, method, identi
 
 	if m.auditStore != nil {
 		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-			Type:    "identity.link.success",
+			Type:    string(events.TopicIdentityCreated),
 			ActorID: identifier,
 			Status:  "success",
 			Message: fmt.Sprintf("Successfully linked %s", method),

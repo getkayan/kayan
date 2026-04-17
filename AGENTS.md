@@ -36,13 +36,14 @@
 ```
 core/domain     ← Depends on: core/identity, core/audit ONLY
 core/identity   ← Depends on: stdlib ONLY (zero internal deps)
-core/flow       ← Depends on: core/domain, core/identity, core/audit
+core/flow       ← Depends on: core/domain, core/identity, core/audit, core/events
 core/session    ← Depends on: core/domain, core/identity
 core/rbac       ← Depends on: stdlib ONLY (zero internal deps)
 core/rebac      ← Depends on: stdlib ONLY (zero internal deps)
 core/policy     ← Depends on: stdlib ONLY (zero internal deps)
 core/tenant     ← Depends on: stdlib ONLY (zero internal deps)
 core/audit      ← Depends on: stdlib ONLY (zero internal deps)
+core/events     ← Depends on: core/identity
 core/oauth2     ← Depends on: core/identity
 core/oidc       ← Depends on: core/identity
 core/saml       ← Depends on: core/identity
@@ -225,6 +226,7 @@ kayan/
 │   ├── rebac/                # ReBAC engine (standalone, no core deps)
 │   ├── policy/               # ABAC + Hybrid policy engine (standalone)
 │   ├── tenant/               # Multi-tenancy: resolver, manager, scoped store
+│   ├── events/               # Unified event system & hooks
 │   ├── oauth2/               # OAuth2 provider (auth codes, tokens, PKCE)
 │   ├── oidc/                 # OIDC provider (discovery, userinfo, ID tokens)
 │   ├── saml/                 # SAML 2.0 SP/IdP
