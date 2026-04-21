@@ -3,6 +3,7 @@ package mfa
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Manager provides a unified API for MFA enrollment, challenge, and verification.
@@ -267,22 +269,29 @@ func (m *Manager) DisableMethod(ctx context.Context, enrollmentID string) error 
 }
 
 // GenerateRecoveryCodes generates one-time-use backup codes for an identity.
-// Codes are stored as-is (the caller/store should hash before persisting in production).
+// Plaintext codes are returned once to the caller and bcrypt-hashed before persistence.
 func (m *Manager) GenerateRecoveryCodes(ctx context.Context, identityID string, count int) ([]string, error) {
 	if count <= 0 {
 		count = 10
 	}
 
 	codes := make([]string, count)
+	storedCodes := make([]string, count)
 	for i := 0; i < count; i++ {
 		code, err := generateRecoveryCode()
 		if err != nil {
 			return nil, fmt.Errorf("mfa: failed to generate recovery code: %w", err)
 		}
 		codes[i] = code
+
+		hash, err := hashRecoveryCode(code)
+		if err != nil {
+			return nil, fmt.Errorf("mfa: failed to hash recovery code: %w", err)
+		}
+		storedCodes[i] = hash
 	}
 
-	if err := m.store.SaveRecoveryCodes(ctx, identityID, codes); err != nil {
+	if err := m.store.SaveRecoveryCodes(ctx, identityID, storedCodes); err != nil {
 		return nil, fmt.Errorf("mfa: failed to save recovery codes: %w", err)
 	}
 
@@ -301,8 +310,11 @@ func (m *Manager) VerifyRecoveryCode(ctx context.Context, identityID, code strin
 	normalizedInput := strings.ToUpper(strings.ReplaceAll(code, "-", ""))
 
 	for _, stored := range codes {
-		normalizedStored := strings.ToUpper(strings.ReplaceAll(stored, "-", ""))
-		if normalizedInput == normalizedStored {
+		matched, err := matchRecoveryCode(normalizedInput, stored)
+		if err != nil {
+			return false, fmt.Errorf("mfa: failed to verify recovery code: %w", err)
+		}
+		if matched {
 			// Consume the code
 			if err := m.store.ConsumeRecoveryCode(ctx, identityID, stored); err != nil {
 				return false, err
@@ -322,4 +334,34 @@ func generateRecoveryCode() (string, error) {
 	}
 	hex := strings.ToUpper(hex.EncodeToString(bytes))
 	return hex[:4] + "-" + hex[4:], nil
+}
+
+func hashRecoveryCode(code string) (string, error) {
+	normalized := normalizeRecoveryCode(code)
+	hash, err := bcrypt.GenerateFromPassword([]byte(normalized), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func matchRecoveryCode(normalizedInput, stored string) (bool, error) {
+	if strings.HasPrefix(stored, "$2") {
+		err := bcrypt.CompareHashAndPassword([]byte(stored), []byte(normalizedInput))
+		if err == nil {
+			return true, nil
+		}
+		if err == bcrypt.ErrMismatchedHashAndPassword {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// Backward-compatible plaintext comparison for existing stores.
+	normalizedStored := normalizeRecoveryCode(stored)
+	return subtle.ConstantTimeCompare([]byte(normalizedInput), []byte(normalizedStored)) == 1, nil
+}
+
+func normalizeRecoveryCode(code string) string {
+	return strings.ToUpper(strings.ReplaceAll(code, "-", ""))
 }

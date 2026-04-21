@@ -146,21 +146,21 @@ func PreloadConsents(cfg PreloadConfig) func(http.Handler) http.Handler {
 
 // ---- Decorator Pattern for Functions ----
 
+type ConsentHandlerFunc func(ctx context.Context, identityID string) (any, error)
+
 // RequireConsentFunc wraps a function to check consent before execution.
-func RequireConsentFunc[T any](
+func RequireConsentFunc(
 	manager *Manager,
 	purpose Purpose,
-	fn func(ctx context.Context, identityID string) (T, error),
-) func(ctx context.Context, identityID string) (T, error) {
-	return func(ctx context.Context, identityID string) (T, error) {
-		var zero T
-
+	fn ConsentHandlerFunc,
+) ConsentHandlerFunc {
+	return func(ctx context.Context, identityID string) (any, error) {
 		granted, err := manager.Check(ctx, identityID, purpose)
 		if err != nil {
-			return zero, err
+			return nil, err
 		}
 		if !granted {
-			return zero, fmt.Errorf("consent required for purpose: %s", purpose)
+			return nil, fmt.Errorf("consent required for purpose: %s", purpose)
 		}
 
 		return fn(ctx, identityID)

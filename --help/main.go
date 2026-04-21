@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 
-	"github.com/getkayan/kayan-echo"
 	"github.com/getkayan/kayan/core/flow"
 	"github.com/getkayan/kayan/core/session"
 	"github.com/getkayan/kayan/kgorm"
@@ -38,8 +37,8 @@ func main() {
 	// Password strategy
 	hasher := flow.NewBcryptHasher(12)
 	pwStrategy := flow.NewPasswordStrategy(identityRepo, hasher, "email", func() any { return &kgorm.DefaultIdentity{} })
-	regManager.AddStrategy("password", pwStrategy)
-	loginManager.AddStrategy("password", pwStrategy)
+	regManager.RegisterStrategy(pwStrategy)
+	loginManager.RegisterStrategy(pwStrategy)
 
 	// Echo setup
 	e := echo.New()

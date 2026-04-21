@@ -47,8 +47,7 @@ func TestMagicLinkFlow(t *testing.T) {
 
 	factory := func() any { return &identity.Identity{} }
 	regMgr := NewRegistrationManager(repo, factory)
-	logMgr := NewLoginManager(repo)
-	logMgr.SetFactory(factory)
+	logMgr := NewLoginManager(repo, factory)
 
 	// Register a password strategy just to create the user easily
 	pwStrategy := NewPasswordStrategy(repo, NewBcryptHasher(14), "email", factory)
@@ -62,7 +61,7 @@ func TestMagicLinkFlow(t *testing.T) {
 	// 2. Register user
 	// We register with password, but this creates the "email" credential and identity
 	traits := identity.JSON(`{"email": "magic@example.com"}`)
-	_, err := regMgr.Submit(context.Background(), "password", traits, "ignored")
+	_, err := regMgr.Submit(context.Background(), "password", traits, "ignored1234")
 	if err != nil {
 		t.Fatalf("failed registration: %v", err)
 	}

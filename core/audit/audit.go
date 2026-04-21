@@ -44,6 +44,8 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"time"
 
@@ -421,16 +423,30 @@ func (l *Logger) SubscribeToDispatcher(d events.Dispatcher) {
 		}
 
 		// Add code to metadata since it's now machine-readable
-		if ae.Metadata == nil {
-			ae.Metadata = make(identity.JSON)
+		metadata := map[string]any{
+			"event_code": event.Code,
 		}
-		ae.Metadata["event_code"] = event.Code
+		if len(event.Metadata) > 0 {
+			var existing map[string]any
+			if err := json.Unmarshal(event.Metadata, &existing); err == nil {
+				for key, value := range existing {
+					metadata[key] = value
+				}
+			}
+		}
+		if data, err := json.Marshal(metadata); err == nil {
+			ae.Metadata = identity.JSON(data)
+		}
 
 		if id, ok := event.ActorID.(string); ok {
 			ae.ActorID = id
+		} else if event.ActorID != nil {
+			ae.ActorID = fmt.Sprintf("%v", event.ActorID)
 		}
 		if id, ok := event.SubjectID.(string); ok {
 			ae.SubjectID = id
+		} else if event.SubjectID != nil {
+			ae.SubjectID = fmt.Sprintf("%v", event.SubjectID)
 		}
 
 		return l.Log(ctx, ae)

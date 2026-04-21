@@ -1,0 +1,20 @@
+apiVersion: v2
+name: kayan
+description: A headless, extensible authentication service for Go
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - authentication
+  - identity
+  - iam
+  - oauth2
+  - oidc
+  - saml
+  - webauthn
+home: https://github.com/getkayan/kayan
+sources:
+  - https://github.com/getkayan/kayan
+maintainers:
+  - name: Kayan Team
+    url: https://github.com/getkayan

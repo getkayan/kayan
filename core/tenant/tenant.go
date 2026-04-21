@@ -185,21 +185,82 @@ type ListFilter struct {
 	Offset int
 }
 
+// ResolveInfo carries transport-agnostic data used for tenant resolution.
+// HTTP callers can construct it with ResolveInfoFromRequest.
+type ResolveInfo struct {
+	Host       string
+	Path       string
+	Method     string
+	RemoteAddr string
+	Headers    map[string][]string
+	Query      map[string][]string
+	Attributes map[string]any
+}
+
+// ResolveInfoFromRequest builds ResolveInfo from an HTTP request.
+func ResolveInfoFromRequest(r *http.Request) ResolveInfo {
+	if r == nil {
+		return ResolveInfo{}
+	}
+
+	info := ResolveInfo{
+		Host:       r.Host,
+		Method:     r.Method,
+		RemoteAddr: r.RemoteAddr,
+		Headers:    make(map[string][]string, len(r.Header)),
+		Query:      make(map[string][]string),
+	}
+	if r.URL != nil {
+		info.Path = r.URL.Path
+		for key, values := range r.URL.Query() {
+			info.Query[key] = append([]string(nil), values...)
+		}
+	}
+	for key, values := range r.Header {
+		info.Headers[key] = append([]string(nil), values...)
+	}
+
+	return info
+}
+
+// HeaderValue returns the first matching header value.
+func (i ResolveInfo) HeaderValue(name string) string {
+	for key, values := range i.Headers {
+		if http.CanonicalHeaderKey(key) != http.CanonicalHeaderKey(name) {
+			continue
+		}
+		if len(values) > 0 {
+			return values[0]
+		}
+		return ""
+	}
+	return ""
+}
+
+// QueryValue returns the first matching query value.
+func (i ResolveInfo) QueryValue(name string) string {
+	values, ok := i.Query[name]
+	if !ok || len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
 // ---- Resolver Interface ----
 
-// Resolver extracts tenant identity from an incoming request.
+// Resolver extracts tenant identity from incoming transport data.
 // Implement custom resolvers for different multi-tenancy patterns.
 type Resolver interface {
-	// Resolve extracts the tenant identifier from the request.
+	// Resolve extracts the tenant identifier from the resolution input.
 	// Returns empty string if no tenant can be determined.
-	Resolve(ctx context.Context, r *http.Request) (string, error)
+	Resolve(ctx context.Context, info ResolveInfo) (string, error)
 }
 
 // ResolverFunc is an adapter to allow ordinary functions as Resolvers.
-type ResolverFunc func(ctx context.Context, r *http.Request) (string, error)
+type ResolverFunc func(ctx context.Context, info ResolveInfo) (string, error)
 
-func (f ResolverFunc) Resolve(ctx context.Context, r *http.Request) (string, error) {
-	return f(ctx, r)
+func (f ResolverFunc) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
+	return f(ctx, info)
 }
 
 // ---- Hooks ----
@@ -215,13 +276,13 @@ type Hooks struct {
 
 	// BeforeResolve is called before tenant resolution.
 	// Return a tenant ID to skip normal resolution.
-	BeforeResolve func(ctx context.Context, r *http.Request) (string, bool)
+	BeforeResolve func(ctx context.Context, info ResolveInfo) (string, bool)
 
 	// AfterResolve is called after successful tenant resolution.
-	AfterResolve func(ctx context.Context, tenant *Tenant, r *http.Request)
+	AfterResolve func(ctx context.Context, tenant *Tenant, info ResolveInfo)
 
 	// OnResolveFailed is called when tenant resolution fails.
-	OnResolveFailed func(ctx context.Context, r *http.Request, err error)
+	OnResolveFailed func(ctx context.Context, info ResolveInfo, err error)
 
 	// ValidateTenant allows custom tenant validation.
 	// Return error to reject the tenant (e.g., inactive, suspended).

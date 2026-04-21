@@ -1,43 +1,94 @@
 # Kayan Documentation
 
-Welcome to the official technical documentation for **Kayan**, a headless, non-generic, extensible Identity & Access Management (IAM) library for Go.
+Kayan is a headless IAM library for Go. It is not an HTTP framework, not a hosted service, and not an opinionated user schema. The core packages give you authentication, sessions, authorization, federation, provisioning, compliance, and observability primitives that you compose inside your own application.
 
-Kayan is designed for developers who need enterprise-grade authentication and authorization without the overhead of forced schemas or UI opinions.
+The codebase is organized around three hard constraints:
 
-## 📚 Documentation Map
+- Headless only. `core/` contains no UI and no framework-specific transport logic.
+- Non-generic public APIs. Extension points use interfaces, `any`, and factory functions instead of Go type parameters.
+- BYOS. Your identity model, ID type, field names, and storage adapter remain yours.
 
-### [Overview](overview/)
-- **[Philosophy](overview/philosophy.md)**: Headless, BYOS (Bring Your Own Schema), Non-generic design, and the Strategy Pattern.
-- **[Architecture](overview/architecture.md)**: Exhaustive map of all 22 core packages, layering, and dependency rules.
+## Reading Path
 
-### [Core API & Usage Reference](core/)
-Each guide includes **Standard Usage**, **Custom Implementation**, and **Common Mistakes**.
+Start here if you are integrating Kayan into an application for the first time:
 
-- **[Identity](core/identity.md)**: Multi-identifier identities, Traits (JSON), and the BYOS Reflection Mapper.
-- **[Flow](core/flow.md)**: Registration and Login flows, and how to build custom authentication strategies.
-- **[Session](core/session.md)**: Stateless (JWT) and Stateful (DB/Redis) session lifecycle management.
-- **[MFA](core/mfa.md)**: TOTP, Recovery codes, and custom Multi-Factor methods (Push, etc.).
-- **[RBAC](core/rbac.md)**: Role-Based Access Control via Bitmasks or traditional JSON roles.
-- **[ReBAC](core/rebac.md)**: Relationship-Based Access Control (Zanzibar style) for complex hierarchies.
-- **[Policy & ABAC](core/policy.md)**: Dynamic Attribute-Based checks and Hybrid authorization engines.
-- **[Multi-Tenancy](core/tenant.md)**: Native isolation, resolution strategies, and scoped storage.
-- **[Audit](core/audit.md)**: SOC 2 compliant structured security logging and change tracking.
-- **[Infrastructure](core/infrastructure.md)**: Compliance, Telemetry, Health checks, and Dynamic config.
+1. [Getting Started](./getting-started.md)
+2. [BYOS](./concepts/byos.md)
+3. [Authentication Strategies](./concepts/strategies.md)
+4. [Session Management](./concepts/sessions.md)
+5. [Authorization](./concepts/authorization.md)
+6. [Multi-Tenancy](./concepts/multi-tenancy.md)
 
-### [Protocols](core/)
-Extensive guides on enterprise protocol integration.
-- **[OIDC](core/oidc.md)**: Implementing an OpenID Connect Provider or Relying Party.
-- **[SAML 2.0](core/saml.md)**: Enterprise SSO with Service Provider (SP) and IdP support.
-- **[SCIM 2.0](core/scim.md)**: Automated user provisioning and advanced filtering.
+Use these sections when you are designing or extending the library:
 
-### [Adapters & Extensions](adapters/)
-- **[Storage Adapters](adapters/storage.md)**: Using `kgorm` or implementing a custom DB adapter from scratch.
+- [Architecture Overview](./architecture/README.md)
+- [Authentication Flows](./architecture/authentication-flows.md)
+- [Authorization Models](./architecture/authorization-models.md)
+- [Security Model](./architecture/security-model.md)
+- [Storage Layer](./architecture/storage-layer.md)
+- [Strategy Internals](./architecture/strategy-internals.md)
+- [Extending Kayan](./architecture/extending-kayan.md)
 
----
+Use these package-level references when you need feature-specific guidance:
 
-## 🚀 Getting Started
+- [Infrastructure Packages](./core/infrastructure.md)
+- [OIDC and OAuth 2.0](./core/oidc.md)
+- [SAML 2.0](./core/saml.md)
+- [SCIM 2.0](./core/scim.md)
+- [Storage Adapters](./adapters/storage.md)
+- [Operations](./operations/README.md)
+- [Configuration](./reference/configuration.md)
+- [API Reference](./reference/api.md)
+- [JavaScript and TypeScript Integration](./sdk/javascript.md)
 
-1. Understand the **[Philosophy](overview/philosophy.md)**.
-2. Define your **[Identity](core/identity.md)** model.
-3. Configure your **[Auth Flows](core/flow.md)**.
-4. Integrate **[RBAC](core/rbac.md)** or **[Fine-grained ReBAC](core/rebac.md)** for access control.
+## Package Map
+
+### Identity and authentication
+
+- `core/identity`: default identity, credential, session, JSON helpers
+- `core/domain`: persistence contracts and helper interfaces
+- `core/flow`: registration, login, MFA checks, magic link, OTP, WebAuthn, password policy, rate limiting, lockout, recovery, step-up
+- `core/session`: JWT and database-backed sessions
+- `core/device`: device trust and fingerprinting
+- `core/mfa`: standalone MFA enrollment, challenge, and verification orchestration
+- `core/risk`: adaptive risk evaluation
+
+### Authorization and tenancy
+
+- `core/rbac`: role and permission checks
+- `core/rebac`: relation graph authorization
+- `core/policy`: ABAC and hybrid policies
+- `core/tenant`: tenant resolution, hooks, scoped storage
+- `core/admin`: framework-agnostic admin management APIs
+
+### Federation and provisioning
+
+- `core/oauth2`: OAuth 2.0 authorization server
+- `core/oidc`: OIDC discovery, ID tokens, logout helpers
+- `core/saml`: SAML 2.0 service provider
+- `core/scim`: SCIM 2.0 provisioning and mapping
+
+### Compliance and operations
+
+- `core/audit`: audit event model and store interface
+- `core/events`: event dispatch and topic model
+- `core/consent`: consent tracking and export
+- `core/compliance`: retention and encryption helpers
+- `core/config`: environment-backed configuration loader
+- `core/logger`: zap-backed logging
+- `core/telemetry`: OpenTelemetry traces and metrics
+- `core/health`: liveness, readiness, and detailed health checks
+
+### Adapters
+
+- `kgorm`: GORM-backed persistence for identities, sessions, audit, OAuth 2.0, RBAC, ReBAC, and SCIM
+- `kredis`: Redis-backed session, rate-limit, lockout, and WebAuthn-related support
+
+## What Kayan Does Not Do
+
+- It does not choose your HTTP framework.
+- It does not require the default identity structs.
+- It does not force a single authorization model.
+- It does not own your migrations, tenant topology, or UI.
+
+That separation is deliberate. The recommended pattern is to keep Kayan in your domain layer and adapt it outward into handlers, middleware, CLIs, jobs, and background workers.

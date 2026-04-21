@@ -1,222 +1,67 @@
 # Multi-Tenancy
 
-Kayan provides full multi-tenancy support for SaaS applications.
+`core/tenant` provides transport-agnostic tenant resolution and validation. It is designed to sit in front of authentication, authorization, provisioning, and admin operations without forcing a specific routing model.
 
-## Overview
+## Manager Responsibilities
 
-Multi-tenancy isolates data between different organizations (tenants) in a single deployment.
+`tenant.NewManager(store, resolver, opts...)` handles:
 
-```
-┌─────────────────────────────────────────┐
-│              Single Deployment           │
-├─────────────┬─────────────┬─────────────┤
-│  Tenant A   │  Tenant B   │  Tenant C   │
-│  (Acme Inc) │  (Startup)  │  (Corp XYZ) │
-└─────────────┴─────────────┴─────────────┘
-```
+- resolving a tenant ID from request metadata
+- validating existence and active state
+- adding tenant information to context
+- running lifecycle hooks
+- creating a scoped store wrapper when needed
 
----
+## Built-in Resolvers
 
-## Tenant Resolution
+Use a resolver that matches your tenancy model:
 
-Kayan supports multiple ways to identify which tenant a request belongs to.
+- subdomain-based: `acme.example.com`
+- header-based: `X-Tenant-ID: acme`
+- path-based: `/t/acme/...`
 
-### Header-Based
+The manager also exposes `ResolveFromRequest` and HTTP middleware helpers for standard `net/http` stacks.
 
-```go
-import "github.com/getkayan/kayan/core/tenant"
+## Default and Optional Tenants
 
-resolver := tenant.NewHeaderResolver("X-Tenant-ID")
-manager := tenant.NewManager(store, resolver)
+Use `tenant.WithOptionalTenant()` when some routes are tenantless. Use `tenant.WithDefaultTenant(id)` when a fallback tenant exists and tenant selection should not fail hard.
 
-// Request: X-Tenant-ID: tenant_acme
-```
+Keep required and optional flows explicit. Public auth flows with optional tenants can become ambiguous if email addresses or usernames are not globally unique.
 
-### Domain-Based
+## Full Tenant vs Lightweight Mode
 
-```go
-resolver := tenant.NewDomainResolver()
+By default, the manager loads the full tenant object and places it in context. Use `tenant.WithLightweight()` when you only need tenant ID and want to avoid the extra object load in hot paths.
 
-// Request: acme.myapp.com → tenant_acme
-// Request: startup.myapp.com → tenant_startup
-```
+## Hooks
 
-### Path-Based
+Hooks are available for:
 
-```go
-resolver := tenant.NewPathResolver()
+- pre-resolution overrides
+- post-resolution side effects
+- tenant validation
+- failure handling
+- tenant creation workflows
 
-// Request: /t/acme/api/users → tenant_acme
-// Request: /t/startup/api/users → tenant_startup
-```
+Typical uses:
 
----
+- enforcing plan status or feature flags
+- attaching tenant-specific telemetry attributes
+- implementing custom domain allowlists
 
-## Tenant Model
+## Scoped Storage
 
-```go
-type Tenant struct {
-    ID        string          `json:"id"`
-    Name      string          `json:"name"`
-    Domain    string          `json:"domain"`
-    Slug      string          `json:"slug"`
-    Settings  json.RawMessage `json:"settings"`
-    Active    bool            `json:"active"`
-    CreatedAt time.Time       `json:"created_at"`
-}
-```
+`tenant.NewScopedStore(inner, tenantID)` wraps a store so your application code can enforce tenant scoping consistently. This is especially useful when your repository layer expects tenant identity as part of every query.
 
----
+## Interaction with Other Packages
 
-## Per-Tenant Settings
+- `core/flow`: use resolved tenant context before registration or login if identity uniqueness is tenant-scoped
+- `core/policy` and `core/rbac`: pass tenant context into rules or permission loaders
+- `core/admin`: scope list and mutation operations for non-super-admin callers
+- `core/audit`: include tenant IDs in audit event metadata and actor context
 
-Configure different behaviors per tenant:
+## Operational Guidance
 
-```go
-type TenantSettings struct {
-    AllowedStrategies []string       `json:"allowed_strategies"`
-    SessionTTL        time.Duration  `json:"session_ttl"`
-    MFARequired       bool           `json:"mfa_required"`
-    PasswordPolicy    *PasswordPolicy `json:"password_policy"`
-}
-
-type PasswordPolicy struct {
-    MinLength        int  `json:"min_length"`
-    RequireUppercase bool `json:"require_uppercase"`
-    RequireNumbers   bool `json:"require_numbers"`
-    RequireSymbols   bool `json:"require_symbols"`
-}
-```
-
-### Example Usage
-
-```go
-// Strict tenant
-settingsA := TenantSettings{
-    AllowedStrategies: []string{"password", "webauthn"},
-    MFARequired:       true,
-    PasswordPolicy: &PasswordPolicy{
-        MinLength:        16,
-        RequireSymbols:   true,
-    },
-}
-
-// Relaxed tenant
-settingsB := TenantSettings{
-    AllowedStrategies: []string{"password", "oidc"},
-    PasswordPolicy: &PasswordPolicy{
-        MinLength: 8,
-    },
-}
-```
-
----
-
-## TenantAware Interface
-
-Make your user model tenant-aware:
-
-```go
-type User struct {
-    ID       string `gorm:"primaryKey"`
-    TenantID string `gorm:"index"`
-    Email    string `gorm:"uniqueIndex:idx_tenant_email"`
-}
-
-// Implement TenantAware
-func (u *User) GetTenantID() string   { return u.TenantID }
-func (u *User) SetTenantID(id string) { u.TenantID = id }
-```
-
----
-
-## Middleware Integration
-
-```go
-e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-    return func(c echo.Context) error {
-        ctx := c.Request().Context()
-        
-        // Resolve tenant from request
-        t, err := tenantManager.Resolve(ctx, c.Request())
-        if err != nil {
-            return c.JSON(400, map[string]string{"error": "Invalid tenant"})
-        }
-        
-        // Add to context
-        ctx = tenant.WithTenant(ctx, t)
-        c.SetRequest(c.Request().WithContext(ctx))
-        c.Set("tenant", t)
-        
-        return next(c)
-    }
-})
-```
-
-### In Handlers
-
-```go
-func CreateUser(c echo.Context) error {
-    t := c.Get("tenant").(*tenant.Tenant)
-    
-    // Validate against tenant's password policy
-    var settings TenantSettings
-    json.Unmarshal(t.Settings, &settings)
-    
-    if len(password) < settings.PasswordPolicy.MinLength {
-        return c.JSON(400, map[string]string{
-            "error": fmt.Sprintf("Password must be %d+ chars for %s",
-                settings.PasswordPolicy.MinLength, t.Name),
-        })
-    }
-    
-    // Create user with tenant ID
-    user.TenantID = t.ID
-    // ...
-}
-```
-
----
-
-## Tenant Isolation
-
-Ensure queries are scoped to tenant:
-
-```go
-// GORM scope
-db.Where("tenant_id = ?", tenantID).Find(&users)
-
-// Or use middleware
-func TenantScope(tenantID string) func(db *gorm.DB) *gorm.DB {
-    return func(db *gorm.DB) *gorm.DB {
-        return db.Where("tenant_id = ?", tenantID)
-    }
-}
-
-db.Scopes(TenantScope(t.ID)).Find(&users)
-```
-
----
-
-## Lifecycle Hooks
-
-```go
-manager.SetHooks(tenant.Hooks{
-    BeforeCreate: func(ctx context.Context, t *tenant.Tenant) error {
-        // Validate, provision resources, etc.
-        return nil
-    },
-    AfterResolve: func(ctx context.Context, t *tenant.Tenant, r *http.Request) {
-        log.Printf("Request for tenant: %s", t.Name)
-    },
-    OnResolveFailed: func(ctx context.Context, r *http.Request, err error) {
-        log.Printf("Tenant resolution failed: %v", err)
-    },
-})
-```
-
----
-
-## See Also
-
-- [Example: multi_tenancy](../../../kayan-examples/multi_tenancy/)
+- Resolve tenants early in the request lifecycle.
+- Decide whether identities are globally unique or tenant-local and keep that invariant consistent.
+- Test inactive and unknown tenant cases as first-class security scenarios.
+- Avoid implicit fallback tenants in production unless the business model truly requires them.

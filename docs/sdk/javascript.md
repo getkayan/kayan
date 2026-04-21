@@ -1,238 +1,76 @@
-# JavaScript/TypeScript SDK
+# JavaScript and TypeScript Integration
 
-The official TypeScript SDK for Kayan IAM.
+Kayan is a Go library, not a browser or Node.js SDK. JavaScript and TypeScript clients integrate with Kayan indirectly through the transport surface your application exposes.
 
-## Installation
+That means there are two valid frontend integration models.
 
-```bash
-npm install kayan.js
-# or
-yarn add kayan.js
-```
+## 1. Standards-Based Integration
 
----
+Use this when your Go service exposes protocol endpoints backed by Kayan:
 
-## Quick Start
+- OAuth 2.0 token endpoints
+- OIDC discovery, authorize, token, userinfo, and logout endpoints
+- SCIM endpoints for provisioning clients
+- SAML browser redirects and ACS handlers for enterprise login
 
-### Simple Client (Recommended)
+In this model, frontend code talks to standards-compliant endpoints. Kayan stays on the server side.
 
-```typescript
-import { KayanClient } from 'kayan.js';
+## 2. Application-Specific API Integration
 
-const client = new KayanClient({
-  baseURL: 'http://localhost:8080/api/v1',
-});
+Use this when your service wraps Kayan flows in your own JSON APIs, for example:
 
-// Register
-await client.register({ email: 'user@example.com' }, 'password123');
+- `/auth/register`
+- `/auth/login`
+- `/auth/magic-link/start`
+- `/auth/mfa/challenge`
+- `/auth/mfa/verify`
 
-// Login
-const { token } = await client.login('user@example.com', 'password123');
+Your JS client calls those APIs, while the Go service maps them onto `core/flow`, `core/session`, and related packages.
 
-// Get current user
-const user = await client.whoami(token);
-```
+## Example: Password Login
 
----
+```ts
+type LoginRequest = {
+  method: "password";
+  identifier: string;
+  secret: string;
+};
 
-## Full API Access
+type LoginResponse = {
+  accessToken?: string;
+  refreshToken?: string;
+  requiresMfa?: boolean;
+  challengeId?: string;
+};
 
-For complete control, use the generated SDK:
+export async function login(input: LoginRequest): Promise<LoginResponse> {
+  const response = await fetch("/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
 
-```typescript
-import { 
-  register, 
-  login, 
-  whoami,
-  webauthnLoginBegin,
-  adminListUsers,
-} from 'kayan.js';
-
-import { client } from 'kayan.js/generated';
-
-// Configure base URL
-client.setConfig({ baseUrl: 'http://localhost:8080' });
-
-// Registration
-const { data: user } = await register({
-  body: { 
-    traits: { email: 'user@example.com' }, 
-    password: 'secret123' 
+  if (!response.ok) {
+    throw new Error("login failed");
   }
-});
 
-// Login
-const { data: session } = await login({
-  body: { 
-    identifier: 'user@example.com', 
-    password: 'secret123' 
-  }
-});
-
-// Authenticated requests
-const { data: me } = await whoami({
-  headers: { Authorization: `Bearer ${session.token}` }
-});
-```
-
----
-
-## Simple Client Methods
-
-| Method | Description |
-|--------|-------------|
-| `register(traits, password)` | Create new user |
-| `login(identifier, password)` | Authenticate |
-| `loginMFA(identifier, code)` | Complete MFA |
-| `logout(token)` | End session |
-| `whoami(token)` | Get current user |
-| `recoveryInitiate(email)` | Start password reset |
-| `recoveryReset(token, password)` | Complete reset |
-
----
-
-## WebAuthn (Passkeys)
-
-```typescript
-import { 
-  webauthnRegisterBegin, 
-  webauthnRegisterFinish,
-  webauthnLoginBegin,
-  webauthnLoginFinish 
-} from 'kayan.js';
-
-// Registration
-const { data: options } = await webauthnRegisterBegin({
-  headers: { Authorization: `Bearer ${token}` },
-  body: { user_name: 'My Passkey' }
-});
-
-// Use browser's WebAuthn API
-const credential = await navigator.credentials.create({
-  publicKey: options
-});
-
-await webauthnRegisterFinish({
-  headers: { Authorization: `Bearer ${token}` },
-  body: credential
-});
-
-// Login
-const { data: loginOptions } = await webauthnLoginBegin({
-  body: { identifier: 'user@example.com' }
-});
-
-const assertion = await navigator.credentials.get({
-  publicKey: loginOptions
-});
-
-const { data: session } = await webauthnLoginFinish({
-  body: assertion
-});
-```
-
----
-
-## Admin Operations
-
-```typescript
-import { 
-  adminListUsers, 
-  adminCreateUser, 
-  adminDeleteUser 
-} from 'kayan.js';
-
-// List users
-const { data: users } = await adminListUsers({
-  headers: { Authorization: `Bearer ${adminToken}` },
-  query: { limit: 10, offset: 0 }
-});
-
-// Create user
-const { data: newUser } = await adminCreateUser({
-  headers: { Authorization: `Bearer ${adminToken}` },
-  body: {
-    traits: { email: 'newuser@example.com' },
-    password: 'tempPassword123'
-  }
-});
-
-// Delete user
-await adminDeleteUser({
-  headers: { Authorization: `Bearer ${adminToken}` },
-  path: { id: 'user_123' }
-});
-```
-
----
-
-## React Example
-
-```tsx
-import { useState } from 'react';
-import { KayanClient } from 'kayan.js';
-
-const client = new KayanClient({
-  baseURL: '/api/v1',
-});
-
-function LoginForm() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const { token } = await client.login(email, password);
-      localStorage.setItem('token', token);
-      window.location.href = '/dashboard';
-    } catch (err) {
-      setError('Invalid credentials');
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <input 
-        type="email" 
-        value={email} 
-        onChange={e => setEmail(e.target.value)} 
-      />
-      <input 
-        type="password" 
-        value={password} 
-        onChange={e => setPassword(e.target.value)} 
-      />
-      <button type="submit">Login</button>
-      {error && <p>{error}</p>}
-    </form>
-  );
+  return response.json();
 }
 ```
 
----
+On the server, that handler would call `LoginManager.Authenticate` and then issue a session through `core/session`.
 
-## Regenerating the SDK
+## Example: OIDC Client
 
-If the OpenAPI spec changes:
+If your application exposes OIDC endpoints backed by `core/oauth2` and `core/oidc`, use a standard OIDC client library on the JS side. That is usually a better choice than inventing a custom login protocol.
 
-```bash
-cd kayan-js
-npm run generate
-```
+## Security Guidance for Frontends
 
----
+- prefer authorization-code plus PKCE over implicit-style flows
+- do not handle passwords in frontend code if your architecture can delegate to a hosted or redirected login experience
+- treat refresh tokens as high-sensitivity credentials
+- handle MFA-required states as explicit branch conditions in the client state machine
 
-## Types
+## Example App
 
-All types are auto-generated:
-
-```typescript
-import type { 
-  Identity,
-  Session,
-  RegistrationRequest,
-  LoginRequest 
-} from 'kayan.js';
-```
+The repository includes `examples/nextjs-kayan-demo`, which is the best place to evolve framework-specific frontend integration examples without pushing frontend assumptions into the core library.

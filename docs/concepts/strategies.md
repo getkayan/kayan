@@ -1,175 +1,129 @@
 # Authentication Strategies
 
-Kayan uses a strategy pattern for authentication, allowing you to mix and match methods.
+`core/flow` is built around strategies and managers.
 
-## Available Strategies
+- A strategy implements the authentication method.
+- A manager owns strategy registration, hooks, event emission, and orchestration.
+- Your application wires managers into handlers, RPC methods, jobs, or CLIs.
 
-| Strategy | Use Case | Stateless |
-|----------|----------|-----------|
-| Password | Traditional email/password | ✅ |
-| OIDC | Social login (Google, GitHub) | ❌ |
-| WebAuthn | Passkeys/biometrics | ❌ |
-| SAML | Enterprise SSO | ❌ |
-| Magic Link | Passwordless email | ❌ |
-| TOTP | Two-factor authentication | ✅ |
-
----
-
-## Password Strategy
-
-The most common authentication method.
+## Core Interfaces
 
 ```go
-hasher := flow.NewBcryptHasher(10) // Cost factor 4-31
-pwStrategy := flow.NewPasswordStrategy(repo, hasher, "email", factory)
-
-// Register with both managers
-regManager.RegisterStrategy(pwStrategy)
-loginManager.RegisterStrategy(pwStrategy)
-
-// Authenticate
-ident, err := loginManager.Authenticate(ctx, "password", email, password)
-```
-
-### Bcrypt Cost
-
-| Cost | Time (approx) | Use Case |
-|------|---------------|----------|
-| 10 | ~100ms | Development |
-| 12 | ~300ms | Standard production |
-| 14 | ~1s | High security |
-
----
-
-## OIDC Strategy (Social Login)
-
-Support Google, GitHub, Microsoft, and any OIDC provider.
-
-```go
-configs := map[string]config.OIDCProvider{
-    "google": {
-        Issuer:       "https://accounts.google.com",
-        ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
-        ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-        RedirectURL:  "http://localhost:8080/api/v1/oidc/google/callback",
-        Scopes:       []string{"openid", "email", "profile"},
-    },
-    "github": {
-        Issuer:       "https://github.com",
-        ClientID:     os.Getenv("GITHUB_CLIENT_ID"),
-        ClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
-        RedirectURL:  "http://localhost:8080/api/v1/oidc/github/callback",
-    },
+type RegistrationStrategy interface {
+	ID() string
+	Register(ctx context.Context, traits identity.JSON, secret string) (any, error)
 }
 
-oidcManager, _ := flow.NewOIDCManager(repo, configs, factory)
-```
-
-### Flow
-
-```
-1. GET /api/v1/oidc/google      → Redirect to Google
-2. User authenticates at Google
-3. GET /api/v1/oidc/google/callback  → Exchange code, create session
-```
-
----
-
-## WebAuthn Strategy (Passkeys)
-
-Passwordless authentication using biometrics or security keys.
-
-```go
-config := flow.WebAuthnConfig{
-    RPDisplayName: "My App",
-    RPID:          "example.com",
-    RPOrigins:     []string{"https://example.com"},
-    SessionTTL:    5 * time.Minute,
+type LoginStrategy interface {
+	ID() string
+	Authenticate(ctx context.Context, identifier, secret string) (any, error)
 }
-
-webauthn, _ := flow.NewWebAuthnStrategy(repo, config, factory, sessionStore)
 ```
 
-### Ceremony Flow
+Additional strategy capabilities are exposed by optional interfaces:
 
-```
-Registration:
-1. POST /webauthn/registration/begin  → Get challenge
-2. Browser creates credential
-3. POST /webauthn/registration/finish → Save credential
+- `Initiator`: first step of multi-stage methods such as magic link or OTP
+- `Attacher`: links new credentials to an existing identity during account unification
 
-Login:
-1. POST /webauthn/login/begin  → Get challenge
-2. Browser signs challenge
-3. POST /webauthn/login/finish → Verify & create session
-```
+## Managers
 
----
+### Registration manager
 
-## Magic Link Strategy
+`flow.NewRegistrationManager` handles:
 
-Passwordless email authentication.
+- strategy dispatch by method ID
+- pre and post hooks
+- schema validation
+- optional account linking and implicit unification
+- audit event emission
+- event dispatch through `core/events`
 
-```go
-config := flow.MagicLinkConfig{
-    TokenTTL:    15 * time.Minute,
-    TokenLength: 32,
-    BaseURL:     "https://example.com",
-}
+### Login manager
 
-magicStrategy := flow.NewMagicLinkStrategy(repo, config, factory)
-magicStrategy.MapIdentifierField("Email")
-```
+`flow.NewLoginManager` handles:
 
-### Flow
+- strategy dispatch by method ID
+- optional initiation for multi-step methods
+- pre and post hooks
+- automatic audit and event emission
+- MFA-required signaling via `flow.ErrMFARequired`
+- dynamic strategy reloads through `domain.StrategyStore`
 
-```
-1. User enters email
-2. Server generates token, sends email
-3. User clicks link: /auth/verify?token=xxx
-4. Server validates token, creates session
-```
+Managers are thread-safe and use `sync.RWMutex` internally for registration and lookup.
 
----
+## Built-in Strategy Patterns
 
-## TOTP Strategy (2FA)
+### Password
 
-Time-based one-time passwords for MFA.
+Use when you control credential storage and want standard email or username plus secret authentication.
 
-```go
-totpStrategy := flow.NewTOTPStrategy(repo)
+Key features:
 
-// Enrollment
-secret, qrCode, _ := totpStrategy.Enroll(ctx, userID)
-// Show QR code to user
+- bcrypt hashing
+- identifier field mapping
+- password policy enforcement
+- ID generation for new identities
+- compatibility with BYOS models
 
-// Verification
-valid, _ := totpStrategy.Verify(ctx, userID, "123456")
-```
+### Magic link
 
----
+Use for passwordless email workflows. These strategies typically support `Initiate` for request creation and then `Authenticate` for the completion step.
 
-## Combining Strategies
+### OTP and TOTP
 
-Register multiple strategies with the same manager:
+Use for one-time codes or step-up verification. OTP strategies fit transport-delivered codes. TOTP is suited to app-based authenticators.
 
-```go
-regManager.RegisterStrategy(passwordStrategy)
-regManager.RegisterStrategy(magicStrategy)
-loginManager.RegisterStrategy(oidcStrategy)
-loginManager.RegisterStrategy(webauthnStrategy)
-```
+### WebAuthn
 
-The strategy is selected by the `method` parameter:
+Use when you want phishing-resistant passkeys or hardware-backed login factors. Kayan keeps the strategy pluggable so the credential and ceremony state can be backed by your storage layer.
 
-```go
-regManager.Submit(ctx, "password", traits, secret)
-loginManager.Authenticate(ctx, "webauthn", identifier, "")
-```
+### OIDC and SAML-linked login
 
----
+Federated methods can be represented as strategies or composed at the handler layer using the protocol packages. Keep protocol handling separate from core flow orchestration where possible.
 
-## See Also
+## Hooks
 
-- [Example: webauthn_passkeys](../../../kayan-examples/webauthn_passkeys/)
-- [Example: magic_link](../../../kayan-examples/magic_link/)
+Hooks are the main extension mechanism when you need application-specific behavior without forking strategy code.
+
+Registration hooks:
+
+- validate traits before persistence
+- enrich tenant or audit context
+- reject registration based on business rules
+- trigger async welcome or verification workflows
+
+Login hooks:
+
+- perform pre-auth risk checks
+- attach device metadata
+- update last-login fields
+- emit domain events into your own event bus
+
+## Dynamic Strategy Configuration
+
+`LoginManager` can reload strategies from `domain.StrategyStore` and a `StrategyRegistry`. This is useful when enabled methods are controlled by admin configuration or tenant-level rollout data.
+
+Use that path when:
+
+- strategies can be enabled or disabled at runtime
+- tenant plans control which methods are active
+- you need a database-backed registry of auth methods
+
+Use static registration when the method set is fixed at process start.
+
+## Strategy ID Rules
+
+Strategy IDs are part of the public contract. Keep them:
+
+- lowercase
+- alphanumeric with underscores
+- stable once published
+
+Examples: `password`, `magic_link`, `otp`, `webauthn`
+
+## Recommended Composition
+
+- Start with `flow.PasswordAuth` if you only need password auth.
+- Switch to explicit managers when you need multi-method auth, hooks, or custom linking.
+- Wrap strategies with rate limiting and lockout before exposing them to the network.
+- Keep transport concerns outside the strategy implementation.

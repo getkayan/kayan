@@ -11,36 +11,69 @@ import (
 )
 
 type RecoveryManager struct {
-	repo       IdentityRepository // To find user and update credential
-	tokenStore domain.TokenStore
-	hasher     domain.Hasher
-	auditStore audit.AuditStore
-	ttl        time.Duration
+	repo        IdentityRepository // To find user and update credential
+	tokenStore  domain.TokenStore
+	hasher      domain.Hasher
+	auditStore  audit.AuditStore
+	ttl         time.Duration
+	rateLimiter RateLimiter
+	rateLimit   int
+	rateWindow  time.Duration
 }
 
-func NewRecoveryManager(repo IdentityRepository, store domain.TokenStore, hasher domain.Hasher) *RecoveryManager {
+// RecoveryOption configures the RecoveryManager.
+type RecoveryOption func(*RecoveryManager)
+
+// WithRecoveryRateLimit adds rate limiting to recovery initiation and reset.
+func WithRecoveryRateLimit(limiter RateLimiter, limit int, window time.Duration) RecoveryOption {
+	return func(m *RecoveryManager) {
+		m.rateLimiter = limiter
+		m.rateLimit = limit
+		m.rateWindow = window
+	}
+}
+
+// WithRecoveryTTL sets the token time-to-live. Default is 1 hour.
+func WithRecoveryTTL(ttl time.Duration) RecoveryOption {
+	return func(m *RecoveryManager) { m.ttl = ttl }
+}
+
+func NewRecoveryManager(repo IdentityRepository, store domain.TokenStore, hasher domain.Hasher, opts ...RecoveryOption) *RecoveryManager {
 	storeAudit, ok := repo.(audit.AuditStore)
 	var auditStore audit.AuditStore
 	if ok {
 		auditStore = storeAudit
 	}
-	return &RecoveryManager{
+	m := &RecoveryManager{
 		repo:       repo,
 		tokenStore: store,
 		hasher:     hasher,
 		auditStore: auditStore,
 		ttl:        1 * time.Hour,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // Initiate generates a recovery token.
 func (m *RecoveryManager) Initiate(ctx context.Context, identifier string) (*domain.AuthToken, error) {
+	// Rate limit check
+	if m.rateLimiter != nil {
+		allowed, _, err := m.rateLimiter.Allow(ctx, "recovery:initiate:"+identifier, m.rateLimit, m.rateWindow)
+		if err != nil {
+			return nil, fmt.Errorf("recovery: rate limiter error: %w", err)
+		}
+		if !allowed {
+			return nil, ErrRecoveryRateLimited
+		}
+	}
+
 	// 1. Find Credential (password type usually)
-	// We want to recover the 'password' credential.
 	cred, err := m.repo.GetCredentialByIdentifier(identifier, "password")
 	if err != nil {
 		// Security: Don't leak user existence.
-		// Return fake success or specific error internal logic can handle.
 		return nil, fmt.Errorf("recovery: user not found or no password credential")
 	}
 
@@ -72,6 +105,17 @@ func (m *RecoveryManager) Initiate(ctx context.Context, identifier string) (*dom
 
 // ResetPassword consumes the token and updates the password.
 func (m *RecoveryManager) ResetPassword(ctx context.Context, tokenStr string, newPassword string) error {
+	// Rate limit check
+	if m.rateLimiter != nil {
+		allowed, _, err := m.rateLimiter.Allow(ctx, "recovery:reset:"+tokenStr, m.rateLimit, m.rateWindow)
+		if err != nil {
+			return fmt.Errorf("recovery: rate limiter error: %w", err)
+		}
+		if !allowed {
+			return ErrRecoveryRateLimited
+		}
+	}
+
 	// 1. Get Token
 	token, err := m.tokenStore.GetToken(ctx, tokenStr)
 	if err != nil {
@@ -94,13 +138,6 @@ func (m *RecoveryManager) ResetPassword(ctx context.Context, tokenStr string, ne
 	}
 
 	// 3. Update Credential
-	// We assume typical "password" credential update.
-	// PROBLEM: repo interface might not expose "UpdateCredential".
-	// createCredential replaces? Or we need UpdateCredential method.
-	// IdentityRepository (Storage) usually has CreateIdentity, CreateCredential?
-	// Let's assume we can fetch, modify, and save? But 'Create' usually fails on duplicate.
-
-	// We need to add UpdateCredential to CredentialStorage interface.
 	updater, ok := m.repo.(interface {
 		UpdateCredentialSecret(ctx context.Context, identityID, method, secret string) error
 	})

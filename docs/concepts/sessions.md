@@ -1,192 +1,107 @@
 # Session Management
 
-Kayan provides flexible session management with both stateless (JWT) and stateful (database) options.
+`core/session` separates authentication from session issuance. A flow authenticates an identity. A session strategy decides how that authenticated identity becomes a reusable login state.
 
-## Session Strategies
-
-| Strategy | Pros | Cons | Use Case |
-|----------|------|------|----------|
-| JWT | No DB lookup, scalable | Can't revoke early | Microservices, APIs |
-| Database | Revocable, auditable | DB lookup per request | Web apps, admin panels |
-
----
-
-## JWT Strategy (Stateless)
-
-Sessions are encoded into the token itself.
+## Session Strategy Interface
 
 ```go
-import "github.com/getkayan/kayan/core/session"
-
-// Create strategy
-jwtStrategy := session.NewHS256Strategy(
-    "your-secret-key",   // JWT signing key
-    24 * time.Hour,      // Token expiry
-)
-
-// Initialize manager
-sessManager := session.NewManager(jwtStrategy)
-
-// Create session
-sess, _ := sessManager.Create("session_id", "user_123")
-fmt.Println(sess.ID) // JWT token
-
-// Validate
-sess, err := sessManager.Validate(token)
-if err != nil {
-    // Invalid or expired
+type Strategy interface {
+	Create(sessionID, identityID any) (*identity.Session, error)
+	Validate(sessionID any) (*identity.Session, error)
+	Refresh(refreshToken string) (*identity.Session, error)
+	Delete(sessionID any) error
 }
 ```
 
-### JWT Claims
+The built-in manager wraps this interface and provides a stable application-facing API.
 
-```json
-{
-  "sub": "user_123",
-  "sid": "session_id",
-  "exp": 1706745600,
-  "iat": 1706659200
-}
-```
+## Database Strategy
 
-### Delete Behavior
+`session.NewDatabaseStrategy(repo)` is stateful and revocable.
 
-```go
-// No-op for JWT - tokens remain valid until expiry
-sessManager.Delete(token)
-```
+Characteristics:
 
----
+- persists sessions through `domain.SessionStorage`
+- generates refresh tokens automatically
+- rotates both session ID and refresh token on refresh
+- invalidates the old session after successful rotation
+- is the best default when you need admin-driven session termination
 
-## Database Strategy (Stateful)
+Use it when you need:
 
-Sessions are stored in the database for full control.
+- hard revocation guarantees
+- session analytics
+- per-session metadata and auditability
+- easy admin visibility into active sessions
 
-```go
-// Create strategy with repository
-dbStrategy := session.NewDatabaseStrategy(repo)
+## JWT Strategy
 
-sessManager := session.NewManager(dbStrategy)
+`session.NewJWTStrategy` and `session.NewHS256Strategy` support stateless access tokens plus refresh tokens.
 
-// Create session
-sess, _ := sessManager.Create("session_id", "user_123")
+Characteristics:
 
-// Revoke immediately
-sessManager.Delete(sess.ID)
+- configurable signing and verification keys
+- configurable access and refresh expiries
+- optional refresh-token validation hook
+- optional revocation store for distributed invalidation
 
-// Now validation fails
-_, err := sessManager.Validate(sess.ID) // Error!
-```
+Use it when you need:
 
-### Session Table
+- horizontally scalable validation without database reads on every request
+- interoperability with standard JWT tooling
+- short-lived access tokens backed by a revocation channel
 
-```sql
-CREATE TABLE sessions (
-    id VARCHAR(255) PRIMARY KEY,
-    identity_id VARCHAR(255) NOT NULL,
-    expires_at TIMESTAMP NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+## Revocation Stores
 
----
+JWT sessions are only truly operationally safe in multi-instance deployments when revocation is backed by shared storage. The built-in memory store is suitable for tests and local development. Use Redis or another distributed backend in production.
 
-## Session Rotation
+Recommended pattern:
 
-Implement access/refresh token patterns:
+- short access-token TTL
+- refresh-token rotation
+- Redis-backed revocation for logout and emergency invalidation
 
-```go
-config := session.RotationConfig{
-    AccessTTL:  15 * time.Minute,
-    RefreshTTL: 7 * 24 * time.Hour,
-}
+## Session Shape
 
-rotator := session.NewRotator(sessManager, config)
+The default session model contains:
 
-// Initial login
-tokens, _ := rotator.CreatePair("user_123")
-// tokens.AccessToken, tokens.RefreshToken
+- session ID
+- identity ID
+- access token or session identifier
+- refresh token
+- issued, access expiry, and refresh expiry timestamps
+- active flag
 
-// Refresh (rotates both tokens)
-newTokens, _ := rotator.Refresh(tokens.RefreshToken)
-```
+Identity ID is distinct from session ID. Preserve that distinction in your own stores and handlers.
 
-### Rotation Flow
+## Refresh Semantics
 
-```
-1. Login → Get access + refresh tokens
-2. Access token expires (15 min)
-3. POST /refresh with refresh token
-4. Get new access + new refresh tokens
-5. Old refresh token invalidated
-```
+Kayan intentionally treats refresh as a security-sensitive state transition.
 
----
+For database sessions, refresh issues a new session identity and invalidates the old one. For JWT sessions, refresh issues new signed tokens and can be augmented with custom token validation.
 
-## Middleware Integration
+Design your clients to replace both access and refresh tokens atomically.
 
-### Echo
+## Recommended Deployment Modes
 
-```go
-authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
-    return func(c echo.Context) error {
-        token := c.Request().Header.Get("Authorization")
-        token = strings.TrimPrefix(token, "Bearer ")
-        
-        sess, err := sessManager.Validate(token)
-        if err != nil {
-            return c.JSON(401, map[string]string{"error": "Unauthorized"})
-        }
-        
-        c.Set("session", sess)
-        c.Set("user_id", sess.IdentityID)
-        return next(c)
-    }
-}
+### Monolith or single instance
 
-e.GET("/protected", handler, authMiddleware)
-```
+- database sessions are simplest
+- memory revocation is acceptable for local-only JWT experiments
 
-### Generic HTTP
+### Distributed API fleet
 
-```go
-func AuthMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        token := r.Header.Get("Authorization")
-        
-        sess, err := sessManager.Validate(token)
-        if err != nil {
-            http.Error(w, "Unauthorized", 401)
-            return
-        }
-        
-        ctx := context.WithValue(r.Context(), "session", sess)
-        next.ServeHTTP(w, r.WithContext(ctx))
-    })
-}
-```
+- JWT access tokens for read-heavy request validation
+- Redis-backed revocation and refresh-token persistence
+- centralized audit and telemetry
 
----
+### Strict admin-control environments
 
-## Session Hooks
+- database sessions with admin listing and forced termination
+- strong audit correlation on issue, refresh, and revoke operations
 
-Execute logic on session events:
+## Related Features
 
-```go
-sessManager.OnCreate(func(sess *session.Session) {
-    log.Printf("New session: %s for user %s", sess.ID, sess.IdentityID)
-})
-
-sessManager.OnDelete(func(sessionID string) {
-    log.Printf("Session revoked: %s", sessionID)
-    // Clear cache, notify user, etc.
-})
-```
-
----
-
-## See Also
-
-- [Example: session_jwt](../../../kayan-examples/session_jwt/)
-- [Example: session_database](../../../kayan-examples/session_database/)
-- [Example: session_rotation](../../../kayan-examples/session_rotation/)
+- `core/flow/stepup.go` supports elevated authentication requirements around sensitive actions.
+- `core/device` and `core/risk` can influence whether a session should be issued or challenged.
+- `core/admin` exposes session querying and revocation patterns for back-office tools.

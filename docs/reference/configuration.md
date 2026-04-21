@@ -1,178 +1,70 @@
 # Configuration Reference
 
-Environment variables and code configuration for Kayan.
+This page documents the configuration surfaces that exist directly in the repository. Many deployments will wrap these values inside a broader host application configuration system.
 
-## Environment Variables
+## core/config
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Server port | `8080` |
-| `DB_TYPE` | Database: `sqlite`, `postgres`, `mysql` | `sqlite` |
-| `DSN` | Database connection string | - |
-| `JWT_SECRET` | JWT signing key (required for JWT sessions) | - |
-| `LOG_LEVEL` | Logging level: `debug`, `info`, `warn`, `error` | `info` |
+`core/config.LoadConfig()` currently supports these environment variables:
 
-### Database Connection Strings
+| Variable | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `DB_TYPE` | string | `sqlite` | Selects the primary database type |
+| `DSN` | string | `kayan.db` | Connection string or database DSN |
+| `SKIP_AUTO_MIGRATE` | bool | `false` | Disables adapter-driven automatic migrations |
+| `LOG_LEVEL` | string | `info` | Logging verbosity |
 
-```bash
-# SQLite
-DB_TYPE=sqlite
-DSN=./data/auth.db
+OIDC providers are also loaded into the `OIDC_PROVIDERS` map using keys shaped like:
 
-# PostgreSQL
-DB_TYPE=postgres
-DSN=postgres://user:pass@localhost:5432/kayan?sslmode=disable
-
-# MySQL
-DB_TYPE=mysql
-DSN=user:pass@tcp(localhost:3306)/kayan?parseTime=true
+```text
+OIDC_PROVIDERS_GOOGLE_ISSUER=https://accounts.google.com
+OIDC_PROVIDERS_GOOGLE_CLIENT_ID=...
+OIDC_PROVIDERS_GOOGLE_CLIENT_SECRET=...
+OIDC_PROVIDERS_GOOGLE_REDIRECT_URL=https://app.example.com/callback
 ```
 
----
+## Session Configuration
 
-## OIDC Configuration
+`core/session.JWTConfig` is code-driven, not environment-driven by default. You configure:
 
-```bash
-OIDC_PROVIDERS='
-{
-  "google": {
-    "issuer": "https://accounts.google.com",
-    "client_id": "xxx.apps.googleusercontent.com",
-    "client_secret": "xxx",
-    "redirect_url": "http://localhost:8080/api/v1/oidc/google/callback"
-  },
-  "github": {
-    "issuer": "https://github.com",
-    "client_id": "xxx",
-    "client_secret": "xxx",
-    "redirect_url": "http://localhost:8080/api/v1/oidc/github/callback"
-  }
-}'
-```
+- signing method
+- signing key
+- verifying key
+- access-token expiry
+- refresh-token signing configuration
+- refresh-token expiry
+- optional refresh-token validator
 
----
+Keep this configuration near your secret-loading layer so keys are never hardcoded.
 
-## Code Configuration
+## Telemetry Configuration
 
-### Password Strategy
+`core/telemetry.Config` includes:
 
-```go
-// Hash cost (4-31, higher = slower but more secure)
-hasher := flow.NewBcryptHasher(12)
+- `ServiceName`
+- `ServiceVersion`
+- `Environment`
+- `OTLPEndpoint`
+- `InsecureOTLP`
+- `SamplingRate`
+- `Enabled`
 
-// Identifier field(s)
-pwStrategy := flow.NewPasswordStrategy(repo, hasher, "email", factory)
-// Or multiple fields
-pwStrategy.MapFields([]string{"Email", "Username"}, "PasswordHash")
-```
+Use `InsecureOTLP` only for local development or explicitly trusted internal environments.
 
-### Session Strategy
+## Health Configuration
 
-```go
-// JWT (stateless)
-jwtStrategy := session.NewHS256Strategy(
-    os.Getenv("JWT_SECRET"),
-    24 * time.Hour, // Expiry
-)
+`core/health.NewManager(version, opts...)` currently supports timeout customization through `health.WithTimeout`. Keep this timeout low enough that readiness checks do not pile up under incident conditions.
 
-// Database (stateful)
-dbStrategy := session.NewDatabaseStrategy(repo)
-```
+## Tenant Configuration
 
-### WebAuthn
+`core/tenant` is configured in code through resolver choice and options such as:
 
-```go
-config := flow.WebAuthnConfig{
-    RPDisplayName: "My App",
-    RPID:          "example.com",       // Domain (no port)
-    RPOrigins:     []string{            // Allowed origins
-        "https://example.com",
-        "https://www.example.com",
-    },
-    SessionTTL:    5 * time.Minute,     // Challenge validity
-}
-```
+- `WithDefaultTenant`
+- `WithOptionalTenant`
+- `WithLightweight`
+- `WithHooks`
 
-### Rate Limiting
+Treat resolver choice as part of your external API contract. Changing from header to subdomain resolution is a breaking operational change.
 
-```go
-config := flow.RateLimitConfig{
-    MaxAttempts:  5,              // Max requests
-    Window:       1 * time.Minute, // Per time window
-    LockoutTime:  5 * time.Minute, // Lockout duration
-}
-```
+## Consent and Compliance Configuration
 
-### Account Lockout
-
-```go
-config := flow.LockoutConfig{
-    MaxFailedAttempts: 3,              // Failed attempts before lock
-    LockoutDuration:   15 * time.Minute,
-    ResetOnSuccess:    true,           // Reset counter on success
-}
-```
-
----
-
-## Storage Initialization
-
-```go
-// Using kgorm helper
-storage, err := kgorm.NewStorage(
-    "postgres",                    // Driver
-    os.Getenv("DSN"),              // Connection string
-    nil,                           // Optional GORM config
-    &User{}, &Session{}, &Tenant{}, // Models to migrate
-)
-
-// Manual GORM setup
-db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-repo := kgorm.NewRepository(db)
-repo.AutoMigrate()
-```
-
----
-
-## Logging
-
-```go
-import "github.com/getkayan/kayan/core/logger"
-
-// Configure logger
-logger.SetLevel(logger.LevelDebug)
-logger.SetOutput(os.Stdout)
-
-// Structured logging
-logger.Info("User registered",
-    "user_id", user.ID,
-    "email", user.Email,
-)
-```
-
----
-
-## Telemetry
-
-### OpenTelemetry
-
-```go
-import "github.com/getkayan/kayan/core/telemetry"
-
-// Initialize tracing
-tp := telemetry.InitTracer("kayan-auth", "http://jaeger:14268/api/traces")
-defer tp.Shutdown(context.Background())
-```
-
-### Prometheus Metrics
-
-```go
-// Metrics are automatically exposed
-e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
-```
-
-Available metrics:
-- `kayan_registrations_total`
-- `kayan_logins_total`
-- `kayan_login_failures_total`
-- `kayan_sessions_active`
+These packages are mostly configured in code through manager options and policy structs. Keep policy versions, retention windows, and essential-purpose definitions under change control alongside your privacy or security documentation.

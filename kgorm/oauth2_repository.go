@@ -67,3 +67,17 @@ func (r *OAuth2Repository) GetRefreshToken(ctx context.Context, token string) (*
 func (r *OAuth2Repository) DeleteRefreshToken(ctx context.Context, token string) error {
 	return r.db.WithContext(ctx).Delete(&gormRefreshToken{}, "token = ?", token).Error
 }
+
+// ListClients returns all registered OAuth2 clients.
+// Implements the oidc.ClientLister interface for backchannel logout support.
+func (r *OAuth2Repository) ListClients(ctx context.Context) ([]*oauth2.Client, error) {
+	var clients []gormClient
+	if err := r.db.WithContext(ctx).Find(&clients).Error; err != nil {
+		return nil, err
+	}
+	result := make([]*oauth2.Client, len(clients))
+	for i := range clients {
+		result[i] = toCoreClient(&clients[i])
+	}
+	return result, nil
+}

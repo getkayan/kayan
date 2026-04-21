@@ -1,151 +1,91 @@
 # BYOS: Bring Your Own Schema
 
-BYOS (Bring Your Own Schema) is Kayan's flagship feature that allows you to use your existing database models without modification.
+Kayan is designed around the assumption that your identity model already exists, or will be designed around your product needs rather than around a library's required struct shape. BYOS is implemented through a narrow minimum interface plus reflection-based field mapping at the edges.
 
-## Why BYOS?
+## Minimum Contract
 
-Most IAM solutions require you to:
-- Use their predefined table structures
-- Embed their base models
-- Migrate existing data to their schema
-
-Kayan takes a different approach: **your models, your way**.
-
----
-
-## Two Approaches
-
-### 1. Field Mapping (Recommended)
-
-Map Kayan's requirements directly to your existing struct fields:
+Authentication flows require only:
 
 ```go
-type MyUser struct {
-    ID           uuid.UUID `gorm:"primaryKey"`
-    Email        string    `gorm:"uniqueIndex"`
-    Username     string    `gorm:"uniqueIndex"`
-    PasswordHash string    // Your own field name
-    DisplayName  string
-}
-
-// Required: FlowIdentity interface
-func (u *MyUser) GetID() any   { return u.ID }
-func (u *MyUser) SetID(id any) { u.ID = id.(uuid.UUID) }
-
-// Setup with field mapping
-pwStrategy := flow.NewPasswordStrategy(repo, hasher, "", factory)
-pwStrategy.MapFields(
-    []string{"Email", "Username"},  // Identifier fields
-    "PasswordHash",                  // Secret field
-)
-```
-
-**Benefits:**
-- No schema changes required
-- Works with any existing table
-- Multiple identifier fields (email, username, phone)
-
-### 2. Optional Interfaces
-
-For advanced features, implement optional interfaces:
-
-```go
-// TraitSource - Dynamic JSON traits
-type TraitSource interface {
-    GetTraits() identity.JSON
-    SetTraits(identity.JSON)
-}
-
-// CredentialSource - Multiple credentials (WebAuthn + Password)
-type CredentialSource interface {
-    GetCredentials() []identity.Credential
-    SetCredentials([]identity.Credential)
+type FlowIdentity interface {
+	GetID() any
+	SetID(any)
 }
 ```
 
----
+That is the only mandatory identity contract in `core/flow`. Your ID can be a UUID, ULID, integer, string, composite wrapper, or application-specific type.
 
-## Complete Example
+## Optional Capability Interfaces
 
-```go
-package main
+Kayan enables additional behavior through narrow optional interfaces instead of forcing a large base model:
 
-import (
-    "github.com/getkayan/kayan/core/flow"
-    "github.com/getkayan/kayan/kgorm"
-)
+- `flow.TraitSource`: exposes flexible `identity.JSON` traits
+- `flow.CredentialSource`: exposes discrete credentials when you manage credential records on the model
+- `flow.MFAIdentity`: tells the login manager whether MFA is enabled and which secret to use
+- `flow.VerificationIdentity`: supports verification and recovery workflows
+- `rbac.RoleSource` and `rbac.PermissionSource`: supply roles and permissions
 
-// Your existing user model
-type User struct {
-    ID           string `gorm:"primaryKey"`
-    Email        string `gorm:"uniqueIndex"`
-    PasswordHash string
-    Profile      Profile `gorm:"foreignKey:UserID"`
-}
+The design goal is additive capability. You opt into only the surfaces you need.
 
-func (u *User) GetID() any   { return u.ID }
-func (u *User) SetID(id any) { u.ID = id.(string) }
+## Traits and Field Mapping
 
-func main() {
-    // Initialize with your model
-    storage, _ := kgorm.NewStorage("sqlite", "app.db", nil, &User{})
-    
-    factory := func() any { return &User{} }
-    regManager := flow.NewRegistrationManager(storage, factory)
-    
-    hasher := flow.NewBcryptHasher(10)
-    pwStrategy := flow.NewPasswordStrategy(storage, hasher, "", factory)
-    pwStrategy.MapFields([]string{"Email"}, "PasswordHash")
-    
-    regManager.RegisterStrategy(pwStrategy)
-    
-    // Register returns *User, not identity.Identity!
-    ident, _ := regManager.Submit(ctx, "password", traits, password)
-    user := ident.(*User)
-}
-```
+Password and recovery flows often need to extract fields such as `email`, `phone`, `username`, or `password_hash` from custom models. Kayan handles this by mapping fields instead of requiring fixed names.
 
----
-
-## ID Generation
-
-Kayan supports any ID type:
+Typical pattern:
 
 ```go
-// UUID
-pwStrategy.SetIDGenerator(func() any { return uuid.New() })
-
-// Snowflake
-pwStrategy.SetIDGenerator(func() any { return snowflake.Generate() })
-
-// ULID
-pwStrategy.SetIDGenerator(func() any { return ulid.Make() })
-
-// Auto-increment (let database handle it)
-pwStrategy.SetIDGenerator(nil)
+strategy := flow.NewPasswordStrategy(repo, hasher, "email", factory)
+strategy.MapFields([]string{"Email", "PrimaryEmail"}, "PasswordHash")
 ```
 
----
+This lets you point Kayan at your model's actual fields while preserving your schema. The library uses these mappings at boundaries, not throughout the core domain.
 
-## Multi-Field Lookup
+## Factories, Not Type Parameters
 
-Support login by email OR username:
+Storage interfaces use `func() any` factories when Kayan needs a fresh model instance:
 
 ```go
-pwStrategy.MapFields(
-    []string{"Email", "Username", "Phone"}, // Any of these work
-    "PasswordHash",
-)
-
-// All of these will work:
-loginManager.Authenticate(ctx, "password", "user@example.com", "pass")
-loginManager.Authenticate(ctx, "password", "johndoe", "pass")
-loginManager.Authenticate(ctx, "password", "+1234567890", "pass")
+factory := func() any { return &User{} }
+ident, err := repo.FindIdentity(factory, map[string]any{"email": email})
 ```
 
----
+This is the mechanism that makes BYOS work without generics. A storage adapter receives a concrete instance it can populate, while `core/` remains decoupled from your type.
 
-## See Also
+## Storage Responsibilities
 
-- [Example: byos_schema](../../../kayan-examples/byos_schema/)
-- [Example: full_custom_schema](../../../kayan-examples/full_custom_schema/)
+Your storage implementation should translate between Kayan operations and your schema:
+
+- `CreateIdentity` persists your identity record.
+- `FindIdentity` resolves an identity from queries such as identifier lookups.
+- `CreateCredential` and `GetCredentialByIdentifier` persist and resolve auth credentials.
+- `UpdateCredentialSecret` rotates secrets for password resets, TOTP, or similar flows.
+
+If you use `kgorm`, these patterns are already implemented for the default models and common BYOS mappings. If you build a custom adapter, keep that adapter in the storage layer rather than leaking database logic into `core/` packages.
+
+## Identity Shapes That Work Well
+
+### Single-table identity
+
+Use a single table when your app stores password hash, verification state, roles, and profile traits in one row.
+
+### Identity plus credentials
+
+Use a separate credentials table when you need multiple factors or multiple identifiers per identity, for example password plus WebAuthn plus TOTP.
+
+### Tenant-scoped identity
+
+Store tenant ID in your application schema or storage adapter. Kayan's tenant package handles resolution and scoping, but it does not force a tenant field into the core default identity type.
+
+## Practical Recommendations
+
+- Keep your identity model small and expose capability interfaces only where needed.
+- Put field mapping logic in strategy setup, not deep inside handlers.
+- Use traits for flexible profile and protocol claim data, not for every first-class domain field.
+- If your IDs are not strings, ensure your repository and handlers preserve the type instead of stringifying too early.
+- Test your BYOS model with the same flows you use in production. The tests in `core/flow/byos_test.go` are the right pattern to copy.
+
+## Failure Modes to Avoid
+
+- Do not cast everything to `*identity.Identity` in application code. Treat the default model as an example, not a requirement.
+- Do not add generics to core extensions. The repository rules explicitly reject that design.
+- Do not make optional interfaces mandatory in your custom adapters unless your own application architecture requires them.

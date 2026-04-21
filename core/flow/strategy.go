@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"time"
 
 	"github.com/getkayan/kayan/core/identity"
 )
@@ -22,6 +23,17 @@ type TraitSource interface {
 type CredentialSource interface {
 	GetCredentials() []identity.Credential
 	SetCredentials([]identity.Credential)
+}
+
+// MFAIdentity is an optional interface for identities that support MFA checks.
+type MFAIdentity interface {
+	MFAConfig() (enabled bool, secret string)
+}
+
+// VerificationIdentity is an optional interface for identities that support verification flows.
+type VerificationIdentity interface {
+	IsVerified() bool
+	MarkVerified(time.Time)
 }
 
 // RegistrationStrategy defines how an identity is created for a specific method.

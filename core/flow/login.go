@@ -10,7 +10,6 @@ import (
 	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/events"
-	"github.com/getkayan/kayan/core/identity"
 )
 
 // Attacher is an optional interface for strategies that support linking to an existing identity.
@@ -34,24 +33,55 @@ type LoginManager struct {
 	factory    func() any
 }
 
+// LoginOption configures a LoginManager.
+type LoginOption func(*LoginManager)
+
+// WithLoginDispatcher sets the event dispatcher.
+func WithLoginDispatcher(d events.Dispatcher) LoginOption {
+	return func(m *LoginManager) { m.dispatcher = d }
+}
+
+// WithStrategyStore sets the dynamic strategy configuration store.
+func WithStrategyStore(s domain.StrategyStore) LoginOption {
+	return func(m *LoginManager) { m.strategyStore = s }
+}
+
+// WithLoginPreHook adds a pre-authentication hook.
+func WithLoginPreHook(h Hook) LoginOption {
+	return func(m *LoginManager) { m.preHooks = append(m.preHooks, h) }
+}
+
+// WithLoginPostHook adds a post-authentication hook.
+func WithLoginPostHook(h Hook) LoginOption {
+	return func(m *LoginManager) { m.postHooks = append(m.postHooks, h) }
+}
+
 var ErrMFARequired = errors.New("login: mfa required")
 
-func NewLoginManager(repo IdentityRepository) *LoginManager {
+func NewLoginManager(repo IdentityRepository, factory func() any, opts ...LoginOption) *LoginManager {
 	store, ok := repo.(audit.AuditStore)
 	var auditStore audit.AuditStore
 	if ok {
 		auditStore = store
 	}
 
-	return &LoginManager{
+	m := &LoginManager{
 		repo:             repo,
 		auditStore:       auditStore,
 		strategies:       make(map[string]LoginStrategy),
 		strategyRegistry: NewStrategyRegistry(),
+		factory:          factory,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
+// Deprecated: Use WithStrategyStore option instead.
 func (m *LoginManager) SetStrategyStore(store domain.StrategyStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.strategyStore = store
 }
 
@@ -59,17 +89,24 @@ func (m *LoginManager) Registry() *StrategyRegistry {
 	return m.strategyRegistry
 }
 
+// Deprecated: Use WithLoginDispatcher option instead.
 func (m *LoginManager) SetDispatcher(d events.Dispatcher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.dispatcher = d
 }
 
 // ReloadStrategies fetches configs from the store and rebuilds strategies.
 func (m *LoginManager) ReloadStrategies(ctx context.Context) error {
-	if m.strategyStore == nil {
+	m.mu.RLock()
+	store := m.strategyStore
+	m.mu.RUnlock()
+
+	if store == nil {
 		return nil
 	}
 
-	configs, err := m.strategyStore.GetStrategies(ctx)
+	configs, err := store.GetStrategies(ctx)
 	if err != nil {
 		return err
 	}
@@ -98,8 +135,6 @@ func (m *LoginManager) ReloadStrategies(ctx context.Context) error {
 	return nil
 }
 
-func (m *LoginManager) SetFactory(f func() any) { m.factory = f }
-
 func (m *LoginManager) FindIdentity(ctx context.Context, identifier string) (any, error) {
 	if m.factory == nil {
 		return nil, fmt.Errorf("login: factory not set")
@@ -109,17 +144,18 @@ func (m *LoginManager) FindIdentity(ctx context.Context, identifier string) (any
 
 // VerifyMFA checks the second factor (e.g. TOTP) for an identity.
 func (m *LoginManager) VerifyMFA(ctx context.Context, ident any, code string) (bool, error) {
-	i, ok := ident.(*identity.Identity)
+	mfaIdent, ok := ident.(MFAIdentity)
 	if !ok {
 		return false, fmt.Errorf("login: invalid identity type for MFA")
 	}
 
-	if !i.MFAEnabled {
+	enabled, secret := mfaIdent.MFAConfig()
+	if !enabled {
 		return true, nil
 	}
 
 	strategy := &TOTPStrategy{}
-	return strategy.Verify(i.MFASecret, code), nil
+	return strategy.Verify(secret, code), nil
 }
 
 func (m *LoginManager) RegisterStrategy(s LoginStrategy) {
@@ -128,16 +164,26 @@ func (m *LoginManager) RegisterStrategy(s LoginStrategy) {
 	m.strategies[s.ID()] = s
 }
 
-func (m *LoginManager) AddPreHook(h Hook)  { m.preHooks = append(m.preHooks, h) }
-func (m *LoginManager) AddPostHook(h Hook) { m.postHooks = append(m.postHooks, h) }
+func (m *LoginManager) AddPreHook(h Hook) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.preHooks = append(m.preHooks, h)
+}
+
+func (m *LoginManager) AddPostHook(h Hook) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.postHooks = append(m.postHooks, h)
+}
 
 func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier string) (any, error) {
 	m.mu.RLock()
 	strategy, ok := m.strategies[method]
+	auditStore := m.auditStore
+	dispatcher := m.dispatcher
 	m.mu.RUnlock()
 
 	if !ok {
-		// Try to reload just in case? Or rely on periodic/startup reload.
 		return nil, fmt.Errorf("login: unknown method %q", method)
 	}
 
@@ -151,8 +197,8 @@ func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier str
 		return nil, err
 	}
 
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if auditStore != nil {
+		auditStore.SaveEvent(ctx, &audit.AuditEvent{
 			Type:    string(events.TopicLoginInitiated),
 			ActorID: identifier,
 			Status:  "success",
@@ -160,10 +206,10 @@ func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier str
 		})
 	}
 
-	if m.dispatcher != nil {
+	if dispatcher != nil {
 		event := events.NewEvent(events.TopicLoginInitiated, events.CodeAccepted)
 		event.ActorID = identifier
-		m.dispatcher.Dispatch(ctx, event)
+		dispatcher.Dispatch(ctx, event)
 	}
 
 	return result, nil
@@ -172,6 +218,10 @@ func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier str
 func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, secret string) (any, error) {
 	m.mu.RLock()
 	strategy, ok := m.strategies[method]
+	preHooks := append([]Hook(nil), m.preHooks...)
+	postHooks := append([]Hook(nil), m.postHooks...)
+	auditStore := m.auditStore
+	dispatcher := m.dispatcher
 	m.mu.RUnlock()
 
 	if !ok {
@@ -179,7 +229,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	}
 
 	// 1. Pre-hooks
-	for _, h := range m.preHooks {
+	for _, h := range preHooks {
 		if err := h(ctx, nil); err != nil {
 			return nil, err
 		}
@@ -188,43 +238,45 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	// 2. Delegate to strategy
 	ident, err := strategy.Authenticate(ctx, identifier, secret)
 	if err != nil {
-		if m.auditStore != nil {
-			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+		if auditStore != nil {
+			auditStore.SaveEvent(ctx, &audit.AuditEvent{
 				Type:    string(events.TopicLoginFailure),
 				ActorID: identifier,
 				Status:  "failure",
 				Message: err.Error(),
 			})
 		}
-		if m.dispatcher != nil {
+		if dispatcher != nil {
 			event := events.NewEvent(events.TopicLoginFailure, events.CodeUnauthorized)
 			event.ActorID = identifier
-			m.dispatcher.Dispatch(ctx, event)
+			dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
 	}
 
-	// Check if MFA required... (same as before)
-	i, ok := ident.(*identity.Identity)
-	if ok && i.MFAEnabled {
-		if m.auditStore != nil {
-			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
-				Type:    string(events.TopicLoginMFARequired),
-				ActorID: identifier,
-				Status:  "success",
-				Message: "First step success, MFA required",
-			})
+	// Check if MFA required
+	if mfaIdent, ok := ident.(MFAIdentity); ok {
+		enabled, _ := mfaIdent.MFAConfig()
+		if enabled {
+			if auditStore != nil {
+				auditStore.SaveEvent(ctx, &audit.AuditEvent{
+					Type:    string(events.TopicLoginMFARequired),
+					ActorID: identifier,
+					Status:  "success",
+					Message: "First step success, MFA required",
+				})
+			}
+			if dispatcher != nil {
+				event := events.NewEvent(events.TopicLoginMFARequired, events.CodeAccepted)
+				event.ActorID = identifier
+				dispatcher.Dispatch(ctx, event)
+			}
+			return ident, ErrMFARequired
 		}
-		if m.dispatcher != nil {
-			event := events.NewEvent(events.TopicLoginMFARequired, events.CodeAccepted)
-			event.ActorID = identifier
-			m.dispatcher.Dispatch(ctx, event)
-		}
-		return ident, ErrMFARequired
 	}
 
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if auditStore != nil {
+		auditStore.SaveEvent(ctx, &audit.AuditEvent{
 			Type:    string(events.TopicLoginSuccess),
 			ActorID: identifier,
 			Status:  "success",
@@ -232,15 +284,17 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 		})
 	}
 
-	if m.dispatcher != nil {
+	if dispatcher != nil {
 		event := events.NewEvent(events.TopicLoginSuccess, events.CodeOK)
 		event.ActorID = identifier
-		event.SubjectID = i.GetID()
-		m.dispatcher.Dispatch(ctx, event)
+		if fi, ok := ident.(FlowIdentity); ok {
+			event.SubjectID = fi.GetID()
+		}
+		dispatcher.Dispatch(ctx, event)
 	}
 
 	// 3. Post-hooks
-	for _, h := range m.postHooks {
+	for _, h := range postHooks {
 		if err := h(ctx, ident); err != nil {
 			return nil, err
 		}

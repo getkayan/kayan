@@ -72,14 +72,14 @@ func WithLightweight() ManagerOption {
 	}
 }
 
-// ResolveFromRequest resolves and validates the tenant from an HTTP request.
+// Resolve resolves and validates the tenant from transport-agnostic input.
 // Returns the tenant and a new context with tenant info.
-func (m *Manager) ResolveFromRequest(ctx context.Context, r *http.Request) (*Tenant, context.Context, error) {
+func (m *Manager) Resolve(ctx context.Context, info ResolveInfo) (*Tenant, context.Context, error) {
 	var tenantID string
 
 	// 1. Check BeforeResolve hook
 	if m.hooks.BeforeResolve != nil {
-		if id, handled := m.hooks.BeforeResolve(ctx, r); handled {
+		if id, handled := m.hooks.BeforeResolve(ctx, info); handled {
 			tenantID = id
 		}
 	}
@@ -87,10 +87,10 @@ func (m *Manager) ResolveFromRequest(ctx context.Context, r *http.Request) (*Ten
 	// 2. Use resolver if not handled by hook
 	if tenantID == "" {
 		var err error
-		tenantID, err = m.resolver.Resolve(ctx, r)
+		tenantID, err = m.resolver.Resolve(ctx, info)
 		if err != nil {
 			if m.hooks.OnResolveFailed != nil {
-				m.hooks.OnResolveFailed(ctx, r, err)
+				m.hooks.OnResolveFailed(ctx, info, err)
 			}
 			return nil, ctx, fmt.Errorf("tenant resolution failed: %w", err)
 		}
@@ -106,7 +106,7 @@ func (m *Manager) ResolveFromRequest(ctx context.Context, r *http.Request) (*Ten
 		if m.RequireTenant {
 			err := fmt.Errorf("tenant required but not found")
 			if m.hooks.OnResolveFailed != nil {
-				m.hooks.OnResolveFailed(ctx, r, err)
+				m.hooks.OnResolveFailed(ctx, info, err)
 			}
 			return nil, ctx, err
 		}
@@ -117,7 +117,7 @@ func (m *Manager) ResolveFromRequest(ctx context.Context, r *http.Request) (*Ten
 	tenant, err := m.store.Get(ctx, tenantID)
 	if err != nil {
 		if m.hooks.OnResolveFailed != nil {
-			m.hooks.OnResolveFailed(ctx, r, err)
+			m.hooks.OnResolveFailed(ctx, info, err)
 		}
 		return nil, ctx, fmt.Errorf("tenant not found: %s", tenantID)
 	}
@@ -140,10 +140,16 @@ func (m *Manager) ResolveFromRequest(ctx context.Context, r *http.Request) (*Ten
 
 	// 8. Call AfterResolve hook
 	if m.hooks.AfterResolve != nil {
-		m.hooks.AfterResolve(ctx, tenant, r)
+		m.hooks.AfterResolve(ctx, tenant, info)
 	}
 
 	return tenant, ctx, nil
+}
+
+// ResolveFromRequest resolves and validates the tenant from an HTTP request.
+// Returns the tenant and a new context with tenant info.
+func (m *Manager) ResolveFromRequest(ctx context.Context, r *http.Request) (*Tenant, context.Context, error) {
+	return m.Resolve(ctx, ResolveInfoFromRequest(r))
 }
 
 // Create creates a new tenant.

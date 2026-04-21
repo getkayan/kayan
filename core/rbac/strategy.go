@@ -2,11 +2,7 @@ package rbac
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-
-	"github.com/getkayan/kayan/core/domain"
-	"github.com/getkayan/kayan/core/identity"
 )
 
 // Strategy defines the interface for authorization checks.
@@ -23,48 +19,40 @@ type RoleSource interface {
 	GetRoles() []string
 }
 
-// BasicStrategy implements RBAC by reading roles directly from the Identity model.
-// It uses the provided IdentityStorage to fetch the identity.
-type BasicStrategy struct {
-	storage domain.IdentityStorage
+// PermissionSource is an interface for objects that can provide their own permissions.
+type PermissionSource interface {
+	GetPermissions() []string
 }
 
-func NewBasicStrategy(storage domain.IdentityStorage) *BasicStrategy {
-	return &BasicStrategy{storage: storage}
+// IdentityLoader loads an identity or subject object by ID.
+type IdentityLoader func(identityID any) (any, error)
+
+// BasicStrategy implements RBAC by reading roles and permissions from local interfaces.
+// It can optionally load a subject object when only an identity ID is available.
+type BasicStrategy struct {
+	loader IdentityLoader
+}
+
+func NewBasicStrategy(loader IdentityLoader) *BasicStrategy {
+	return &BasicStrategy{loader: loader}
 }
 
 func (s *BasicStrategy) GetRoles(identityID any) ([]string, error) {
-	// Optimization: Check if identityID implements RoleSource
 	if rs, ok := identityID.(RoleSource); ok {
 		return rs.GetRoles(), nil
 	}
 
-	if s.storage == nil {
-		return nil, fmt.Errorf("rbac: storage is nil and identity does not implement RoleSource")
-	}
-
-	// For BasicStrategy, we assume the identity model has a Roles field
-	// which is a JSON array of strings.
-	ident, err := s.storage.GetIdentity(func() any { return &identity.Identity{} }, identityID)
+	ident, err := s.load(identityID)
 	if err != nil {
 		return nil, err
 	}
 
-	i, ok := ident.(*identity.Identity)
+	rs, ok := ident.(RoleSource)
 	if !ok {
-		return nil, fmt.Errorf("invalid identity type")
+		return nil, fmt.Errorf("rbac: identity does not implement RoleSource")
 	}
 
-	if len(i.Roles) == 0 {
-		return []string{}, nil
-	}
-
-	var roles []string
-	if err := json.Unmarshal(i.Roles, &roles); err != nil {
-		return nil, fmt.Errorf("failed to parse roles: %v", err)
-	}
-
-	return roles, nil
+	return rs.GetRoles(), nil
 }
 
 func (s *BasicStrategy) HasRole(identityID any, role string) (bool, error) {
@@ -83,26 +71,21 @@ func (s *BasicStrategy) HasRole(identityID any, role string) (bool, error) {
 }
 
 func (s *BasicStrategy) GetPermissions(identityID any) ([]string, error) {
-	ident, err := s.storage.GetIdentity(func() any { return &identity.Identity{} }, identityID)
+	if ps, ok := identityID.(PermissionSource); ok {
+		return ps.GetPermissions(), nil
+	}
+
+	ident, err := s.load(identityID)
 	if err != nil {
 		return nil, err
 	}
 
-	i, ok := ident.(*identity.Identity)
+	ps, ok := ident.(PermissionSource)
 	if !ok {
-		return nil, fmt.Errorf("invalid identity type")
+		return nil, fmt.Errorf("rbac: identity does not implement PermissionSource")
 	}
 
-	if len(i.Permissions) == 0 {
-		return []string{}, nil
-	}
-
-	var perms []string
-	if err := json.Unmarshal(i.Permissions, &perms); err != nil {
-		return nil, fmt.Errorf("failed to parse permissions: %v", err)
-	}
-
-	return perms, nil
+	return ps.GetPermissions(), nil
 }
 
 func (s *BasicStrategy) HasPermission(identityID any, permission string) (bool, error) {
@@ -125,13 +108,21 @@ func (s *BasicStrategy) HasPermission(identityID any, permission string) (bool, 
 // The 'resource' parameter is ignored for basic RBAC.
 // Example: Can(ctx, identityID, "admin", nil) checks if identity has "admin" role.
 func (s *BasicStrategy) Can(ctx context.Context, subject any, action string, resource any) (bool, error) {
-	// Extract identity ID from subject
-	var identityID any
-	switch v := subject.(type) {
-	case *identity.Identity:
-		identityID = v.ID
-	default:
-		identityID = subject
+	return s.HasRole(subject, action)
+}
+
+func (s *BasicStrategy) load(identityID any) (any, error) {
+	if s.loader == nil {
+		return nil, fmt.Errorf("rbac: loader is nil and identity does not implement the required interfaces")
 	}
-	return s.HasRole(identityID, action)
+
+	ident, err := s.loader(identityID)
+	if err != nil {
+		return nil, err
+	}
+	if ident == nil {
+		return nil, fmt.Errorf("rbac: identity not found")
+	}
+
+	return ident, nil
 }

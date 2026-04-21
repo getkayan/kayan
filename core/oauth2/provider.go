@@ -41,9 +41,12 @@ package oauth2
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -60,6 +63,15 @@ type Provider struct {
 	issuer            string
 	signingKey        any // RSA or ECDSA key
 	keyID             string
+	revocationStore   RevocationStore
+}
+
+// ProviderOption configures optional Provider behavior.
+type ProviderOption func(*Provider)
+
+// WithRevocationStore enables token revocation via the supplied store.
+func WithRevocationStore(rs RevocationStore) ProviderOption {
+	return func(p *Provider) { p.revocationStore = rs }
 }
 
 // IntrospectionResponse represents the response according to RFC 7662.
@@ -84,9 +96,9 @@ type TokenResponse struct {
 	Sub          string `json:"sub,omitempty"`
 }
 
-func NewProvider(cs ClientStore, acs AuthCodeStore, rts RefreshTokenStore, issuer string, signingKey any, keyID string) *Provider {
+func NewProvider(cs ClientStore, acs AuthCodeStore, rts RefreshTokenStore, issuer string, signingKey any, keyID string, opts ...ProviderOption) *Provider {
 	store, _ := cs.(audit.AuditStore)
-	return &Provider{
+	p := &Provider{
 		clientStore:       cs,
 		authCodeStore:     acs,
 		refreshTokenStore: rts,
@@ -95,6 +107,10 @@ func NewProvider(cs ClientStore, acs AuthCodeStore, rts RefreshTokenStore, issue
 		signingKey:        signingKey,
 		keyID:             keyID,
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // GenerateAuthCode generates a temporary code for the authorization flow with optional PKCE support.
@@ -305,7 +321,7 @@ func (p *Provider) ValidateClient(ctx context.Context, clientID, clientSecret st
 // Introspect validates a token and returns its metadata.
 func (p *Provider) Introspect(ctx context.Context, tokenString string) (*IntrospectionResponse, error) {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		return p.signingKey, nil // Simplified, should use public key if verifying external
+		return verificationKey(p.signingKey), nil
 	})
 
 	if err != nil || !token.Valid {
@@ -317,31 +333,158 @@ func (p *Provider) Introspect(ctx context.Context, tokenString string) (*Introsp
 		return &IntrospectionResponse{Active: false}, nil
 	}
 
-	resp := &IntrospectionResponse{
-		Active:   true,
-		ClientID: claims["aud"].(string),
-		Sub:      claims["sub"].(string),
-		Exp:      int64(claims["exp"].(float64)),
-		Iat:      int64(claims["iat"].(float64)),
-		Iss:      claims["iss"].(string),
+	// Check revocation
+	if p.revocationStore != nil {
+		if jti, ok := claimString(claims, "jti"); ok {
+			revoked, err := p.revocationStore.IsRevoked(ctx, jti)
+			if err == nil && revoked {
+				return &IntrospectionResponse{Active: false}, nil
+			}
+		}
 	}
 
-	if scp, ok := claims["scp"].([]any); ok {
-		scopes := make([]string, len(scp))
-		for i, s := range scp {
-			scopes[i] = s.(string)
-		}
+	clientID, ok := claimString(claims, "aud")
+	if !ok {
+		return &IntrospectionResponse{Active: false}, nil
+	}
+	sub, ok := claimString(claims, "sub")
+	if !ok {
+		return &IntrospectionResponse{Active: false}, nil
+	}
+	iss, ok := claimString(claims, "iss")
+	if !ok {
+		return &IntrospectionResponse{Active: false}, nil
+	}
+	exp, ok := claimInt64(claims, "exp")
+	if !ok {
+		return &IntrospectionResponse{Active: false}, nil
+	}
+	iat, ok := claimInt64(claims, "iat")
+	if !ok {
+		return &IntrospectionResponse{Active: false}, nil
+	}
+
+	resp := &IntrospectionResponse{
+		Active:   true,
+		ClientID: clientID,
+		Sub:      sub,
+		Exp:      exp,
+		Iat:      iat,
+		Iss:      iss,
+	}
+
+	if scopes, ok := claimStringSlice(claims, "scp"); ok {
 		resp.Scope = strings.Join(scopes, " ")
 	}
 
 	return resp, nil
 }
 
-// Revoke invalidates a token.
+func verificationKey(signingKey any) any {
+	switch key := signingKey.(type) {
+	case *rsa.PrivateKey:
+		return &key.PublicKey
+	case *ecdsa.PrivateKey:
+		return &key.PublicKey
+	default:
+		return signingKey
+	}
+}
+
+func claimString(claims jwt.MapClaims, key string) (string, bool) {
+	value, ok := claims[key]
+	if !ok {
+		return "", false
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed, true
+	case []any:
+		if len(typed) == 0 {
+			return "", false
+		}
+		first, ok := typed[0].(string)
+		return first, ok
+	default:
+		return "", false
+	}
+}
+
+func claimInt64(claims jwt.MapClaims, key string) (int64, bool) {
+	value, ok := claims[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case float64:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case int:
+		return int64(typed), true
+	default:
+		return 0, false
+	}
+}
+
+func claimStringSlice(claims jwt.MapClaims, key string) ([]string, bool) {
+	value, ok := claims[key]
+	if !ok {
+		return nil, false
+	}
+	switch typed := value.(type) {
+	case []string:
+		return typed, true
+	case []any:
+		scopes := make([]string, 0, len(typed))
+		for _, item := range typed {
+			str, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			scopes = append(scopes, str)
+		}
+		return scopes, true
+	default:
+		return nil, false
+	}
+}
+
+// Revoke invalidates a token by storing its JTI in the revocation store.
+// Per RFC 7009, the token is parsed without full verification to extract claims.
 func (p *Provider) Revoke(ctx context.Context, tokenString string) error {
-	// In a stateless JWT implementation, revocation requires a blacklist.
-	// In a stateful implementation, we would delete the token from the store.
-	// For now, this is a placeholder. A full implementation would involve
-	// a RevocationStore or BlacklistStore.
+	if p.revocationStore == nil {
+		return nil // no-op when revocation is not configured
+	}
+
+	// Parse without verification to extract jti and exp (RFC 7009 allows this).
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, _, err := parser.ParseUnverified(tokenString, jwt.MapClaims{})
+	if err != nil {
+		return errors.New("oauth2: invalid token format")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return errors.New("oauth2: invalid token claims")
+	}
+
+	jti, ok := claimString(claims, "jti")
+	if !ok || jti == "" {
+		return errors.New("oauth2: token missing jti claim")
+	}
+
+	var expiresAt time.Time
+	if exp, ok := claimInt64(claims, "exp"); ok {
+		expiresAt = time.Unix(exp, 0)
+	} else {
+		expiresAt = time.Now().Add(24 * time.Hour) // fallback: keep revocation for 24h
+	}
+
+	if err := p.revocationStore.RevokeToken(ctx, jti, expiresAt); err != nil {
+		return fmt.Errorf("oauth2: revocation failed: %w", err)
+	}
+
+	p.logAudit(ctx, "oauth2.revoke.success", "", "", "success", "token revoked")
 	return nil
 }

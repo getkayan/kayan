@@ -10,6 +10,7 @@ import (
 
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/identity"
+	"github.com/google/uuid"
 )
 
 type PasswordStrategy struct {
@@ -19,6 +20,7 @@ type PasswordStrategy struct {
 	passwordField    string
 	generator        domain.IDGenerator
 	factory          func() any
+	policy           *PasswordPolicy
 }
 
 func NewPasswordStrategy(repo IdentityRepository, hasher domain.Hasher, identifierField string, factory func() any) *PasswordStrategy {
@@ -42,11 +44,25 @@ func (s *PasswordStrategy) SetIDGenerator(g domain.IDGenerator) {
 	s.generator = g
 }
 
+// SetPasswordPolicy sets the password validation policy. If nil, DefaultPasswordPolicy is used.
+func (s *PasswordStrategy) SetPasswordPolicy(p *PasswordPolicy) {
+	s.policy = p
+}
+
 func (s *PasswordStrategy) ID() string { return "password" }
 
 func (s *PasswordStrategy) Register(ctx context.Context, traits identity.JSON, password string) (any, error) {
 	if len(traits) == 0 {
 		return nil, errors.New("traits are required")
+	}
+
+	policy := s.policy
+	if policy == nil {
+		p := DefaultPasswordPolicy
+		policy = &p
+	}
+	if err := policy.Validate(password); err != nil {
+		return nil, err
 	}
 
 	ident := s.factory()
@@ -78,9 +94,12 @@ func (s *PasswordStrategy) Register(ctx context.Context, traits identity.JSON, p
 
 	// Always handle ID if generator exists and ID methods are available
 	if fi, ok := ident.(FlowIdentity); ok {
-		id := fi.GetID()
-		if s.generator != nil && (id == nil || id == "") {
-			fi.SetID(s.generator())
+		if isZeroIdentityID(fi.GetID()) {
+			if s.generator != nil {
+				fi.SetID(s.generator())
+			} else {
+				fi.SetID(uuid.NewString())
+			}
 		}
 	}
 
@@ -152,6 +171,15 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, identifier, passwor
 }
 
 func (s *PasswordStrategy) Attach(ctx context.Context, ident any, identifier, secret string) error {
+	policy := s.policy
+	if policy == nil {
+		p := DefaultPasswordPolicy
+		policy = &p
+	}
+	if err := policy.Validate(secret); err != nil {
+		return err
+	}
+
 	hashed, err := s.hasher.Hash(secret)
 	if err != nil {
 		return err
@@ -212,4 +240,13 @@ func (s *PasswordStrategy) getField(obj any, field string) any {
 		return nil
 	}
 	return f.Interface()
+}
+
+func isZeroIdentityID(id any) bool {
+	if id == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(id)
+	return !v.IsValid() || v.IsZero()
 }

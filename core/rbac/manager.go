@@ -32,12 +32,10 @@
 //	// Get all permissions for a user
 //	perms, err := manager.GetPermissions(userID)
 //
-// # Middleware
+// # Headless Integration
 //
-// Use the provided middleware for HTTP handlers:
-//
-//	e.GET("/admin", adminHandler, rbac.RequireRole(manager, "admin"))
-//	e.DELETE("/users/:id", deleteHandler, rbac.RequirePermission(manager, "users:delete"))
+// The rbac package stays transport-agnostic. Use Manager methods from your own
+// HTTP or RPC adapter layer instead of importing framework middleware from core.
 //
 // See also: policy package for ABAC, rebac package for relationship-based access.
 package rbac

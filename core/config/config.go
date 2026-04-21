@@ -2,7 +2,7 @@
 //
 // Configuration is loaded from environment variables using Viper, with sensible
 // defaults for development. This package handles database connection settings,
-// logging levels, server ports, and OIDC provider configurations.
+// logging levels, and OIDC provider configurations.
 //
 // # Environment Variables
 //
@@ -10,7 +10,6 @@
 //   - DSN: Database connection string. Default: kayan.db
 //   - SKIP_AUTO_MIGRATE: Skip automatic database migrations. Default: false
 //   - LOG_LEVEL: Logging level (debug, info, warn, error). Default: info
-//   - PORT: HTTP server port. Default: 8080
 //
 // # OIDC Provider Configuration
 //
@@ -26,7 +25,7 @@
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//	fmt.Printf("Starting on port %d with %s database\n", cfg.Port, cfg.DBType)
+//	fmt.Printf("Using %s database at %s\n", cfg.DBType, cfg.DSN)
 package config
 
 import (
@@ -39,9 +38,8 @@ type Config struct {
 	DBType          string                  `mapstructure:"DB_TYPE"` // sqlite, postgres, mysql
 	DSN             string                  `mapstructure:"DSN"`
 	SkipAutoMigrate bool                    `mapstructure:"SKIP_AUTO_MIGRATE"`
-	LogLevel        string                  `mapstructure:"LOG_LEVEL"`
-	Port            int                     `mapstructure:"PORT"`
-	OIDCProviders   map[string]OIDCProvider `mapstructure:"OIDC_PROVIDERS"`
+	LogLevel      string                  `mapstructure:"LOG_LEVEL"`
+	OIDCProviders map[string]OIDCProvider `mapstructure:"OIDC_PROVIDERS"`
 }
 
 type OIDCProvider struct {
@@ -53,7 +51,6 @@ type OIDCProvider struct {
 
 func LoadConfig() (*Config, error) {
 	viper.SetDefault("LOG_LEVEL", "info")
-	viper.SetDefault("PORT", 8080)
 	viper.SetDefault("DB_TYPE", "sqlite")
 	viper.SetDefault("DSN", "kayan.db") // Default to sqlite if not provided
 	viper.SetDefault("SKIP_AUTO_MIGRATE", false)

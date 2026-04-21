@@ -1,68 +1,57 @@
-# SCIM 2.0 (Automated Provisioning)
+# SCIM 2.0 Provisioning
 
-Kayan implements the SCIM 2.0 protocol (RFC 7644) to automate the management of users and groups from external systems like Okta, Azure AD, or Workday.
+`core/scim` provides the provisioning layer for user and group lifecycle synchronization.
 
-## Standard Usage: Provisioning Setup
+## Package Scope
 
-### 1. Initialize the SCIM Manager
-```go
-config := scim.MapperConfig{
-    // Map SCIM 'userName' to internal 'Email' field
-    FieldMappings: map[string]string{"userName": "Email"},
-}
-mapper := scim.NewMapper(userFactory, nil, config)
-manager := scim.NewManager(scimStorage, mapper)
-```
+The package includes:
 
-### 2. Handling Requests
-```go
-// Create a user from incoming SCIM JSON
-user, err := manager.CreateUser(ctx, &scim.User{
-    UserName: "bob@example.com",
-    Active:   true,
-    Emails:   []scim.Email{{Value: "bob@example.com", Primary: true}},
-})
+- SCIM resource types
+- validation and error model
+- manager APIs for user and group operations
+- mapper utilities between SCIM payloads and internal identities
+- storage interfaces for persistence
 
-// Search users using a SCIM filter
-list, err := manager.ListUsers(ctx, `userName eq "bob@example.com"`, 1, 10)
-```
+It is intentionally not a full HTTP server. Your application exposes SCIM endpoints and delegates the business logic to the manager.
 
----
+## Manager Responsibilities
 
-## Custom Implementation: External Provisioning System
+`scim.NewManager(storage, mapper)` handles:
 
-By default, SCIM operations go through the `ScimStorage` interface. You can implement this to proxy SCIM requests to a legacy system that doesn't support SCIM natively.
+- creating and updating SCIM users
+- listing users and groups with pagination
+- group membership operations
+- input validation and SCIM-style errors
+- mapping between protocol data and your internal model
 
-### Example: Custom Legacy SCIM Proxy
-```go
-type LegacyScimStorage struct {
-    legacyApi *LegacyClient
-}
+## Mapper Strategy
 
-func (s *LegacyScimStorage) CreateScimUser(ctx context.Context, u *scim.User) error {
-    // Convert SCIM User to Legacy API format and Save
-    return s.legacyApi.CreateUser(u.UserName, u.Active)
-}
+The mapper is the critical BYOS bridge in SCIM integrations. It should define how fields such as:
 
-func (s *LegacyScimStorage) ListScimUsers(ctx context.Context, filter scim.Filter, start, count int) ([]*scim.User, int, error) {
-    // 1. Traverse the 'filter' tree (e.g., userName eq "...")
-    // 2. Map it to Legacy API query parameters
-    return nil, 0, nil
-}
-```
+- `userName`
+- emails
+- display name
+- active state
+- external ID
 
----
+map into your identity schema.
 
-## Common Mistakes
+If your identity model is tenant-scoped, make tenant rules explicit in the mapper or in the HTTP layer before calling the manager.
 
-> [!CAUTION]
-> **Inefficient Filter Processing**
-> SCIM filters like `emails[type eq "work" and value sw "admin"]` can be complex. If you implement a custom storage, avoid processing these in-memory. Instead, use the `filter.Visit(visitor)` pattern to convert the SCIM filter directly into a SQL `WHERE` clause.
+## Storage Expectations
 
-> [!WARNING]
-> **Naming Conflicts**
-> SCIM `userName` and `id` are distinct. `id` must be stable even if the `userName` (e.g., email) changes. If you use email as the ID, a user changing their email will break the SCIM sync from the IdP. Always use a UUID or internal surrogate key for the SCIM `id`.
+SCIM storage should support:
 
-> [!TIP]
-> **Discovery is Mandatory**
-> Most enterprise IdPs require a `/ServiceProviderConfig` endpoint to be available for automated setup. Ensure your SCIM server exposes the schema and resource type endpoints provided by Kayan.
+- identity lookup by SCIM identifier or mapped fields
+- create and update semantics
+- filtering and pagination
+- group lifecycle and membership persistence
+
+Use relational storage when provisioning must be strongly consistent with the rest of your IAM data.
+
+## Deployment Guidance
+
+- make SCIM idempotency rules explicit
+- audit provisioning events, especially deactivation and group membership changes
+- document which attributes your tenant-specific integrations support
+- test pagination and filtering against real IdP clients such as Okta or Azure AD

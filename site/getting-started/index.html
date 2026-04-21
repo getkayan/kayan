@@ -1,0 +1,2042 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Headless IAM library for Go">
+      
+      
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../concepts/byos/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Getting Started - Kayan</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#getting-started" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Kayan" class="md-header__button md-logo" aria-label="Kayan" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kayan
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Getting Started
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/getkayan/kayan" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Kayan" class="md-nav__button md-logo" aria-label="Kayan" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kayan
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/getkayan/kayan" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-install-kayan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Install Kayan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-define-your-identity-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Define Your Identity Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-wire-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Wire Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-choose-an-authentication-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Choose an Authentication Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Choose an Authentication Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fast-path-one-call-password-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fast path: one-call password setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-control-path-explicit-managers-and-strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full-control path: explicit managers and strategies
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-register-and-authenticate-users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Register and Authenticate Users
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-create-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Create Sessions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Create Sessions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#database-backed-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database-backed sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jwt-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JWT sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-add-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Add Authorization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Add Authorization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rbac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RBAC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#abac-or-hybrid-policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ABAC or hybrid policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#relationship-based-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationship-based authorization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-add-multi-tenancy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Add Multi-Tenancy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-production-hardening-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Production Hardening Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/byos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    BYOS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authentication Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/authorization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authorization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/multi-tenancy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-Tenancy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/authentication-flows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authentication Flows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/authorization-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authorization Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/storage-layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/strategy-internals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategy Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/extending-kayan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending Kayan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Packages
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Packages
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/oidc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OIDC and OAuth 2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/saml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SAML 2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/scim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SCIM 2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adapters
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Adapters
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adapters/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime Guidance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDKs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    SDKs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/javascript/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JavaScript and TypeScript
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-install-kayan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Install Kayan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-define-your-identity-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Define Your Identity Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-wire-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Wire Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-choose-an-authentication-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Choose an Authentication Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Choose an Authentication Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fast-path-one-call-password-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fast path: one-call password setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-control-path-explicit-managers-and-strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full-control path: explicit managers and strategies
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-register-and-authenticate-users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Register and Authenticate Users
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-create-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Create Sessions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Create Sessions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#database-backed-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database-backed sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jwt-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JWT sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-add-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Add Authorization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Add Authorization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rbac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RBAC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#abac-or-hybrid-policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ABAC or hybrid policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#relationship-based-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationship-based authorization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-add-multi-tenancy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Add Multi-Tenancy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-production-hardening-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Production Hardening Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
+<p>This guide shows the minimum production-grade Kayan integration: your own identity model, a repository implementation, password authentication, revocable or stateless sessions, and optional tenancy and authorization.</p>
+<h2 id="1-install-kayan">1. Install Kayan<a class="headerlink" href="#1-install-kayan" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>go<span class="w"> </span>get<span class="w"> </span>github.com/getkayan/kayan
+</code></pre></div>
+<p>If you want the built-in GORM adapter and Redis-backed helpers:</p>
+<div class="highlight"><pre><span></span><code>go<span class="w"> </span>get<span class="w"> </span>github.com/getkayan/kayan/kgorm
+go<span class="w"> </span>get<span class="w"> </span>github.com/getkayan/kayan/kredis
+</code></pre></div>
+<h2 id="2-define-your-identity-model">2. Define Your Identity Model<a class="headerlink" href="#2-define-your-identity-model" title="Permanent link">&para;</a></h2>
+<p>The only hard requirement for authentication flows is <code>flow.FlowIdentity</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">app</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="s">&quot;github.com/getkayan/kayan/core/identity&quot;</span>
+
+<span class="kd">type</span><span class="w"> </span><span class="nx">User</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">ID</span><span class="w">           </span><span class="kt">string</span><span class="w">         </span><span class="s">`gorm:&quot;primaryKey&quot;`</span>
+<span class="w">    </span><span class="nx">Email</span><span class="w">        </span><span class="kt">string</span><span class="w">         </span><span class="s">`gorm:&quot;uniqueIndex&quot;`</span>
+<span class="w">    </span><span class="nx">PasswordHash</span><span class="w"> </span><span class="kt">string</span>
+<span class="w">    </span><span class="nx">Traits</span><span class="w">       </span><span class="nx">identity</span><span class="p">.</span><span class="nx">JSON</span>
+<span class="w">    </span><span class="nx">Roles</span><span class="w">        </span><span class="p">[]</span><span class="kt">string</span><span class="w">       </span><span class="s">`gorm:&quot;-&quot;`</span>
+<span class="w">    </span><span class="nx">Permissions</span><span class="w">  </span><span class="p">[]</span><span class="kt">string</span><span class="w">       </span><span class="s">`gorm:&quot;-&quot;`</span>
+<span class="w">    </span><span class="nx">VerifiedAt</span><span class="w">   </span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+<span class="w">    </span><span class="nx">MFAEnabled</span><span class="w">   </span><span class="kt">bool</span>
+<span class="w">    </span><span class="nx">MFASecret</span><span class="w">    </span><span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">GetID</span><span class="p">()</span><span class="w"> </span><span class="kt">any</span><span class="w">   </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">ID</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">SetID</span><span class="p">(</span><span class="nx">id</span><span class="w"> </span><span class="kt">any</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">ID</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">id</span><span class="p">.(</span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">GetTraits</span><span class="p">()</span><span class="w"> </span><span class="nx">identity</span><span class="p">.</span><span class="nx">JSON</span><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">Traits</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">SetTraits</span><span class="p">(</span><span class="nx">v</span><span class="w"> </span><span class="nx">identity</span><span class="p">.</span><span class="nx">JSON</span><span class="p">)</span><span class="w">     </span><span class="p">{</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">Traits</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">v</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">MFAConfig</span><span class="p">()</span><span class="w"> </span><span class="p">(</span><span class="kt">bool</span><span class="p">,</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w">     </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">MFAEnabled</span><span class="p">,</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">MFASecret</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">IsVerified</span><span class="p">()</span><span class="w"> </span><span class="kt">bool</span><span class="w">              </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">VerifiedAt</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">MarkVerified</span><span class="p">(</span><span class="nx">ts</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span><span class="w">     </span><span class="p">{</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">VerifiedAt</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">ts</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">GetRoles</span><span class="p">()</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="w">            </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">Roles</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">u</span><span class="w"> </span><span class="o">*</span><span class="nx">User</span><span class="p">)</span><span class="w"> </span><span class="nx">GetPermissions</span><span class="p">()</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">u</span><span class="p">.</span><span class="nx">Permissions</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>Optional interfaces unlock additional features without coupling your model to every package:</p>
+<ul>
+<li><code>flow.TraitSource</code> for trait-aware flows and OIDC claims</li>
+<li><code>flow.MFAIdentity</code> for MFA enforcement during login</li>
+<li><code>flow.VerificationIdentity</code> for verification and recovery flows</li>
+<li><code>rbac.RoleSource</code> and <code>rbac.PermissionSource</code> for RBAC</li>
+</ul>
+<h2 id="3-wire-storage">3. Wire Storage<a class="headerlink" href="#3-wire-storage" title="Permanent link">&para;</a></h2>
+<p>Kayan core logic depends on <code>core/domain</code> interfaces, not a concrete database.</p>
+<p>Using GORM:</p>
+<div class="highlight"><pre><span></span><code><span class="nx">db</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">gorm</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="nx">sqlite</span><span class="p">.</span><span class="nx">Open</span><span class="p">(</span><span class="s">&quot;kayan.db&quot;</span><span class="p">),</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">gorm</span><span class="p">.</span><span class="nx">Config</span><span class="p">{})</span>
+<span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="nx">repo</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">kgorm</span><span class="p">.</span><span class="nx">NewRepository</span><span class="p">(</span><span class="nx">db</span><span class="p">)</span>
+</code></pre></div>
+<p>For BYOS, your adapter must satisfy only the interfaces you need. Password registration and login typically require:</p>
+<ul>
+<li><code>domain.IdentityStorage</code></li>
+<li><code>domain.CredentialStorage</code></li>
+<li><code>audit.AuditStore</code> if you want automatic audit logging</li>
+</ul>
+<h2 id="4-choose-an-authentication-setup">4. Choose an Authentication Setup<a class="headerlink" href="#4-choose-an-authentication-setup" title="Permanent link">&para;</a></h2>
+<h3 id="fast-path-one-call-password-setup">Fast path: one-call password setup<a class="headerlink" href="#fast-path-one-call-password-setup" title="Permanent link">&para;</a></h3>
+<p>Use <code>flow.PasswordAuth</code> when you want a complete password registration and login pair:</p>
+<div class="highlight"><pre><span></span><code><span class="nx">factory</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="kt">any</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">User</span><span class="p">{}</span><span class="w"> </span><span class="p">}</span>
+
+<span class="nx">reg</span><span class="p">,</span><span class="w"> </span><span class="nx">login</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">flow</span><span class="p">.</span><span class="nx">PasswordAuth</span><span class="p">(</span>
+<span class="w">    </span><span class="nx">repo</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">factory</span><span class="p">,</span>
+<span class="w">    </span><span class="s">&quot;email&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">flow</span><span class="p">.</span><span class="nx">WithHasherCost</span><span class="p">(</span><span class="mi">12</span><span class="p">),</span>
+<span class="w">    </span><span class="nx">flow</span><span class="p">.</span><span class="nx">WithIDGenerator</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="kt">any</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">uuid</span><span class="p">.</span><span class="nx">NewString</span><span class="p">()</span><span class="w"> </span><span class="p">}),</span>
+<span class="w">    </span><span class="nx">flow</span><span class="p">.</span><span class="nx">WithPasswordPolicy</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">flow</span><span class="p">.</span><span class="nx">PasswordPolicy</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">MinLength</span><span class="p">:</span><span class="w">        </span><span class="mi">12</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">RequireUppercase</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">RequireLowercase</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">RequireDigit</span><span class="p">:</span><span class="w">     </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="p">}),</span>
+<span class="p">)</span>
+</code></pre></div>
+<h3 id="full-control-path-explicit-managers-and-strategies">Full-control path: explicit managers and strategies<a class="headerlink" href="#full-control-path-explicit-managers-and-strategies" title="Permanent link">&para;</a></h3>
+<p>Use explicit managers when you need more than password auth:</p>
+<div class="highlight"><pre><span></span><code><span class="nx">factory</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="kt">any</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">User</span><span class="p">{}</span><span class="w"> </span><span class="p">}</span>
+
+<span class="nx">regMgr</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">flow</span><span class="p">.</span><span class="nx">NewRegistrationManager</span><span class="p">(</span>
+<span class="w">    </span><span class="nx">repo</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">factory</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">flow</span><span class="p">.</span><span class="nx">WithRegPreHook</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">ident</span><span class="w"> </span><span class="kt">any</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">    </span><span class="p">}),</span>
+<span class="p">)</span>
+
+<span class="nx">loginMgr</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">flow</span><span class="p">.</span><span class="nx">NewLoginManager</span><span class="p">(</span>
+<span class="w">    </span><span class="nx">repo</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">factory</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">flow</span><span class="p">.</span><span class="nx">WithLoginPostHook</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">ident</span><span class="w"> </span><span class="kt">any</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">    </span><span class="p">}),</span>
+<span class="p">)</span>
+
+<span class="nx">hasher</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">flow</span><span class="p">.</span><span class="nx">NewBcryptHasher</span><span class="p">(</span><span class="mi">12</span><span class="p">)</span>
+<span class="nx">password</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">flow</span><span class="p">.</span><span class="nx">NewPasswordStrategy</span><span class="p">(</span><span class="nx">repo</span><span class="p">,</span><span class="w"> </span><span class="nx">hasher</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;email&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">factory</span><span class="p">)</span>
+<span class="nx">magic</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">flow</span><span class="p">.</span><span class="nx">NewMagicLinkStrategy</span><span class="p">(</span><span class="nx">repo</span><span class="p">,</span><span class="w"> </span><span class="nx">tokenStore</span><span class="p">)</span>
+<span class="nx">otp</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">flow</span><span class="p">.</span><span class="nx">NewOTPStrategy</span><span class="p">(</span><span class="nx">repo</span><span class="p">,</span><span class="w"> </span><span class="nx">tokenStore</span><span class="p">,</span><span class="w"> </span><span class="nx">otpSender</span><span class="p">)</span>
+
+<span class="nx">regMgr</span><span class="p">.</span><span class="nx">RegisterStrategy</span><span class="p">(</span><span class="nx">password</span><span class="p">)</span>
+<span class="nx">loginMgr</span><span class="p">.</span><span class="nx">RegisterStrategy</span><span class="p">(</span><span class="nx">password</span><span class="p">)</span>
+<span class="nx">loginMgr</span><span class="p">.</span><span class="nx">RegisterStrategy</span><span class="p">(</span><span class="nx">magic</span><span class="p">)</span>
+<span class="nx">loginMgr</span><span class="p">.</span><span class="nx">RegisterStrategy</span><span class="p">(</span><span class="nx">otp</span><span class="p">)</span>
+</code></pre></div>
+<p>Use this mode when you need hooks, event dispatch, account linking, dynamic strategy reloads, or mixed methods such as password plus magic link.</p>
+<h2 id="5-register-and-authenticate-users">5. Register and Authenticate Users<a class="headerlink" href="#5-register-and-authenticate-users" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nx">traits</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">identity</span><span class="p">.</span><span class="nx">JSON</span><span class="p">(</span><span class="s">`{&quot;email&quot;:&quot;dev@example.com&quot;,&quot;name&quot;:&quot;Dev User&quot;}`</span><span class="p">)</span>
+
+<span class="nx">user</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">reg</span><span class="p">.</span><span class="nx">Submit</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;password&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">traits</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;StrongPass123!&quot;</span><span class="p">)</span>
+<span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="p">}</span>
+
+<span class="nx">authenticated</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">login</span><span class="p">.</span><span class="nx">Authenticate</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;password&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;dev@example.com&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;StrongPass123!&quot;</span><span class="p">)</span>
+<span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="p">}</span>
+
+<span class="nx">registeredUser</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">user</span><span class="p">.(</span><span class="o">*</span><span class="nx">User</span><span class="p">)</span>
+<span class="nx">authenticatedUser</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">authenticated</span><span class="p">.(</span><span class="o">*</span><span class="nx">User</span><span class="p">)</span>
+
+<span class="nx">_</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">registeredUser</span>
+<span class="w">    </span><span class="nx">_</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">authenticatedUser</span>
+</code></pre></div>
+<p>Authentication method strings are strategy IDs. Built-ins include <code>password</code>, <code>magic_link</code>, <code>otp</code>, and additional strategies implemented in <code>core/flow</code> such as TOTP and WebAuthn.</p>
+<h2 id="6-create-sessions">6. Create Sessions<a class="headerlink" href="#6-create-sessions" title="Permanent link">&para;</a></h2>
+<h3 id="database-backed-sessions">Database-backed sessions<a class="headerlink" href="#database-backed-sessions" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nx">sessionManager</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">session</span><span class="p">.</span><span class="nx">NewManager</span><span class="p">(</span><span class="nx">session</span><span class="p">.</span><span class="nx">NewDatabaseStrategy</span><span class="p">(</span><span class="nx">repo</span><span class="p">))</span>
+<span class="nx">sess</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sessionManager</span><span class="p">.</span><span class="nx">Create</span><span class="p">(</span><span class="nx">uuid</span><span class="p">.</span><span class="nx">NewString</span><span class="p">(),</span><span class="w"> </span><span class="nx">authenticatedUser</span><span class="p">.</span><span class="nx">GetID</span><span class="p">())</span>
+</code></pre></div>
+<p>Database sessions are revocable and rotate session and refresh tokens on refresh. Use them when you need strict server-side invalidation.</p>
+<h3 id="jwt-sessions">JWT sessions<a class="headerlink" href="#jwt-sessions" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nx">jwtStrategy</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">session</span><span class="p">.</span><span class="nx">NewHS256Strategy</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Getenv</span><span class="p">(</span><span class="s">&quot;SESSION_SECRET&quot;</span><span class="p">),</span><span class="w"> </span><span class="mi">15</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Minute</span><span class="p">)</span>
+<span class="nx">jwtStrategy</span><span class="p">.</span><span class="nx">WithRevocationStore</span><span class="p">(</span><span class="nx">session</span><span class="p">.</span><span class="nx">NewMemoryRevocationStore</span><span class="p">())</span>
+
+<span class="nx">sessionManager</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">session</span><span class="p">.</span><span class="nx">NewManager</span><span class="p">(</span><span class="nx">jwtStrategy</span><span class="p">)</span>
+<span class="nx">sess</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">sessionManager</span><span class="p">.</span><span class="nx">Create</span><span class="p">(</span><span class="nx">uuid</span><span class="p">.</span><span class="nx">NewString</span><span class="p">(),</span><span class="w"> </span><span class="nx">authenticatedUser</span><span class="p">.</span><span class="nx">GetID</span><span class="p">())</span>
+</code></pre></div>
+<p>JWT sessions are stateless for validation, but can still support revocation when backed by a revocation store such as Redis.</p>
+<h2 id="7-add-authorization">7. Add Authorization<a class="headerlink" href="#7-add-authorization" title="Permanent link">&para;</a></h2>
+<h3 id="rbac">RBAC<a class="headerlink" href="#rbac" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nx">rbacManager</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">rbac</span><span class="p">.</span><span class="nx">NewManager</span><span class="p">(</span><span class="nx">rbac</span><span class="p">.</span><span class="nx">NewBasicStrategy</span><span class="p">(</span><span class="kc">nil</span><span class="p">))</span>
+<span class="nx">allowed</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">rbacManager</span><span class="p">.</span><span class="nx">AuthorizePermission</span><span class="p">(</span><span class="nx">authenticatedUser</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;billing:read&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="abac-or-hybrid-policies">ABAC or hybrid policies<a class="headerlink" href="#abac-or-hybrid-policies" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nx">engine</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">policy</span><span class="p">.</span><span class="nx">NewABACStrategy</span><span class="p">()</span>
+<span class="nx">engine</span><span class="p">.</span><span class="nx">AddRule</span><span class="p">(</span><span class="s">&quot;invoice:read&quot;</span><span class="p">,</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">subject</span><span class="p">,</span><span class="w"> </span><span class="nx">resource</span><span class="w"> </span><span class="kt">any</span><span class="p">,</span><span class="w"> </span><span class="nx">pctx</span><span class="w"> </span><span class="nx">policy</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">bool</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">})</span>
+</code></pre></div>
+<h3 id="relationship-based-authorization">Relationship-based authorization<a class="headerlink" href="#relationship-based-authorization" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nx">rebacManager</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">rebac</span><span class="p">.</span><span class="nx">NewManager</span><span class="p">(</span><span class="nx">store</span><span class="p">,</span><span class="w"> </span><span class="nx">rebac</span><span class="p">.</span><span class="nx">WithSchema</span><span class="p">(</span><span class="nx">schema</span><span class="p">))</span>
+<span class="nx">ok</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">rebacManager</span><span class="p">.</span><span class="nx">Check</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">subject</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;viewer&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">object</span><span class="p">)</span>
+</code></pre></div>
+<p>Use RBAC for simple role gates, ABAC for contextual rules, and ReBAC for hierarchical or graph-based access.</p>
+<h2 id="8-add-multi-tenancy">8. Add Multi-Tenancy<a class="headerlink" href="#8-add-multi-tenancy" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nx">tenantManager</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tenant</span><span class="p">.</span><span class="nx">NewManager</span><span class="p">(</span>
+<span class="w">    </span><span class="nx">tenantStore</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">tenant</span><span class="p">.</span><span class="nx">NewHeaderResolver</span><span class="p">(</span><span class="s">&quot;X-Tenant-ID&quot;</span><span class="p">),</span>
+<span class="w">    </span><span class="nx">tenant</span><span class="p">.</span><span class="nx">WithOptionalTenant</span><span class="p">(),</span>
+<span class="p">)</span>
+
+<span class="nx">resolvedTenant</span><span class="p">,</span><span class="w"> </span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">tenantManager</span><span class="p">.</span><span class="nx">Resolve</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">tenant</span><span class="p">.</span><span class="nx">ResolveInfo</span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Headers</span><span class="p">:</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">{</span><span class="s">&quot;X-Tenant-ID&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;acme&quot;</span><span class="p">},</span>
+<span class="p">})</span>
+</code></pre></div>
+<p>The tenant manager resolves a tenant, validates it, and stores either the full tenant or just the tenant ID in context.</p>
+<h2 id="9-production-hardening-checklist">9. Production Hardening Checklist<a class="headerlink" href="#9-production-hardening-checklist" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Use bcrypt cost values appropriate for your deployment profile.</li>
+<li>Enforce <code>flow.PasswordPolicy</code> instead of relying on UI-only checks.</li>
+<li>Enable rate limiting and lockout for credential flows.</li>
+<li>Use RSA or ECDSA keys for OAuth 2.0 and OIDC JWT signing.</li>
+<li>Back JWT revocation, session refresh rotation, and rate limiting with Redis in distributed deployments.</li>
+<li>Emit audit events and export telemetry.</li>
+<li>Resolve tenant context before invoking authentication or admin flows in multi-tenant systems.</li>
+<li>Use the package-specific docs before enabling SAML, OIDC, SCIM, MFA, or device trust in production.</li>
+</ul>
+<h2 id="10-next-steps">10. Next Steps<a class="headerlink" href="#10-next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../concepts/byos/">BYOS</a> explains the schema contract in detail.</li>
+<li><a href="../concepts/strategies/">Authentication Strategies</a> covers strategy registration, hooks, and multi-method flows.</li>
+<li><a href="../concepts/sessions/">Session Management</a> compares JWT and database strategies in depth.</li>
+<li><a href="../adapters/storage/">Storage Adapters</a> shows how <code>kgorm</code> and <code>kredis</code> fit into a full deployment.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "search.highlight", "search.share"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

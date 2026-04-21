@@ -1,209 +1,86 @@
-# Authorization: RBAC & ABAC
+# Authorization
 
-Kayan provides multiple authorization models that can be used independently or combined.
+Kayan ships three complementary authorization models. They are not mutually exclusive.
 
-## Overview
+- `core/rbac` for direct role and permission checks
+- `core/policy` for ABAC and hybrid policy evaluation
+- `core/rebac` for graph-based relationship authorization
 
-| Model | Description | Best For |
-|-------|-------------|----------|
-| **RBAC** | Role-Based Access Control | Simple permission checks |
-| **ABAC** | Attribute-Based Access Control | Complex, dynamic rules |
-| **Hybrid** | RBAC + ABAC combined | Enterprise requirements |
+Choose based on the shape of your permissions, not on library preference.
 
----
+## RBAC
 
-## RBAC (Role-Based Access Control)
+RBAC is the simplest option.
 
-Users have roles, roles grant access.
+Use `core/rbac` when:
 
-### Setup
+- identities already contain role or permission lists
+- you need straightforward role gates such as `admin`, `editor`, `support`
+- you want transport-agnostic checks inside service methods
 
-```go
-import "github.com/getkayan/kayan/core/rbac"
+The built-in strategy reads roles and permissions from optional identity interfaces. That makes it a good fit for BYOS models with role arrays, JSON traits, or adapter-managed lookups.
 
-// Create strategy with storage
-strategy := rbac.NewBasicStrategy(repo)
-manager := rbac.NewManager(strategy)
+Typical checks:
 
-// Check authorization
-isAdmin, _ := manager.Authorize("user_123", "admin")
+- `HasRole`
+- `HasPermission`
+- `Authorize`
+- `AuthorizePermission`
 
-// Require role (returns error if denied)
-err := manager.RequireRole("user_123", "admin")
-```
+## ABAC
 
-### Storing Roles
+Use `core/policy` when authorization depends on attributes rather than just named roles.
 
-Roles are stored as JSON in the identity:
+Common examples:
 
-```go
-type User struct {
-    ID    string `gorm:"primaryKey"`
-    Roles json.RawMessage // ["admin", "editor"]
-}
+- a user can read an invoice only if they belong to the same tenant
+- a support agent can access a ticket only during business hours
+- a login may be blocked when geo risk is high and the device is unknown
 
-// Or implement RoleSource interface
-func (u *User) GetRoles() []string {
-    return u.roles
-}
-```
+Rules are ordinary Go functions. That keeps policy logic close to your domain model and avoids forcing a DSL into the core library.
 
-### HTTP Middleware
+## Hybrid Policies
 
-```go
-rbacMw := rbac.NewMiddleware(manager, sessManager)
+Use hybrid policy when neither pure role checks nor pure attribute checks are enough.
 
-// Require specific role
-e.GET("/admin", handler, authMw, rbacMw.RequireRole("admin"))
+Typical pattern:
 
-// Require specific permission
-e.POST("/posts", handler, authMw, rbacMw.RequirePermission("blog:create"))
-```
+- RBAC decides broad capability, for example `billing_admin`
+- ABAC decides scope, for example same tenant and owned account
 
----
+`core/policy` includes a hybrid strategy for composing both decisions.
 
-## ABAC (Attribute-Based Access Control)
+## ReBAC
 
-Rules based on user attributes, resource attributes, and context.
+Use `core/rebac` when access depends on graph relationships:
 
-### Setup
+- users belong to groups
+- groups grant access to projects
+- documents inherit access from folders
+- organizations, workspaces, teams, and resources form a hierarchy
 
-```go
-import "github.com/getkayan/kayan/core/policy"
+ReBAC supports:
 
-abac := policy.NewABACStrategy()
+- direct tuples
+- computed relations
+- tuple-to-userset expansion
+- cycle protection and bounded traversal depth
 
-// Define rules
-abac.AddRule("document:read", func(ctx context.Context, subject, resource any, pctx policy.Context) (bool, error) {
-    user := subject.(*User)
-    doc := resource.(*Document)
-    
-    // Owner can always read
-    if doc.OwnerID == user.ID {
-        return true, nil
-    }
-    // Public docs readable by all
-    if doc.IsPublic {
-        return true, nil
-    }
-    return false, nil
-})
+This is the right model when permissions cannot be expressed cleanly as a flat role list.
 
-// Check
-allowed, _ := abac.Can(ctx, user, "document:read", document)
-```
+## Combining Models
 
-### Passing Context
+A common production architecture is:
 
-```go
-// Add extra context for rule evaluation
-ctx := policy.WithContext(ctx, policy.Context{
-    "time_of_day": "business_hours",
-    "ip_address":  "10.0.0.1",
-})
+- RBAC for coarse-grained internal roles
+- ReBAC for customer-facing resource graphs
+- ABAC for request-time conditions such as tenant, time, device, or risk score
 
-allowed, _ := abac.Can(ctx, user, "action", resource)
-```
+Keep those layers explicit. Avoid hiding graph checks inside flat permission strings where the real access model becomes hard to reason about.
 
-### Rule Examples
+## Enforcement Guidance
 
-```go
-// Time-based access
-abac.AddRule("report:access", func(ctx, subject, resource any, pctx policy.Context) (bool, error) {
-    timeOfDay := pctx["time_of_day"].(string)
-    if timeOfDay != "business_hours" {
-        return false, nil
-    }
-    return true, nil
-})
-
-// Clearance level
-abac.AddRule("classified:access", func(ctx, subject, resource any, pctx policy.Context) (bool, error) {
-    user := subject.(*User)
-    doc := resource.(*Document)
-    return user.ClearanceLevel >= doc.RequiredClearance, nil
-})
-```
-
----
-
-## Hybrid (RBAC + ABAC)
-
-Combine role checks with attribute checks for defense-in-depth.
-
-```go
-hybrid := policy.NewHybridEngine(rbacStrategy, abacStrategy)
-
-// Check both layers
-// 1. RBAC: Does user have required role?
-// 2. ABAC: Do attributes satisfy rules?
-allowed := hybrid.Authorize(ctx, userID, "document:edit", document)
-```
-
-### Typical Flow
-
-```
-Request: User wants to edit document
-    │
-    ▼
-┌───────────────┐
-│   RBAC Check  │ → Does user have "editor" role?
-└───────────────┘
-    │ yes
-    ▼
-┌───────────────┐
-│   ABAC Check  │ → Is user the owner OR same department?
-└───────────────┘
-    │ yes
-    ▼
-   ALLOWED
-```
-
----
-
-## Integration Patterns
-
-### Echo Middleware
-
-```go
-// Combined RBAC + custom check
-func RequireDocumentAccess(abac *policy.ABACStrategy) echo.MiddlewareFunc {
-    return func(next echo.HandlerFunc) echo.HandlerFunc {
-        return func(c echo.Context) error {
-            user := c.Get("user").(*User)
-            docID := c.Param("id")
-            doc := loadDocument(docID)
-            
-            allowed, _ := abac.Can(c.Request().Context(), user, "document:access", doc)
-            if !allowed {
-                return c.JSON(403, map[string]string{"error": "Forbidden"})
-            }
-            return next(c)
-        }
-    }
-}
-```
-
-### Per-Resource Authorization
-
-```go
-// In handler
-func GetDocument(c echo.Context) error {
-    user := c.Get("user").(*User)
-    doc := loadDocument(c.Param("id"))
-    
-    if allowed, _ := abac.Can(ctx, user, "document:read", doc); !allowed {
-        return c.JSON(403, map[string]string{"error": "Access denied"})
-    }
-    
-    return c.JSON(200, doc)
-}
-```
-
----
-
-## See Also
-
-- [Example: rbac_basic](../../../kayan-examples/rbac_basic/)
-- [Example: abac_policy](../../../kayan-examples/abac_policy/)
-- [Example: hybrid_policy](../../../kayan-examples/hybrid_policy/)
+- Resolve tenant context before authorization in multi-tenant systems.
+- Use typed resource references in ReBAC rather than ad hoc string concatenation.
+- Keep policy engines in the service layer, not in handlers only.
+- Treat authorization denial reasons as internal diagnostics. Surface minimal user-facing error messages.

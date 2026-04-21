@@ -19,7 +19,9 @@ func NewDefaultRegistrationManager(db *gorm.DB) *flow.RegistrationManager {
 // NewDefaultLoginManager creates a LoginManager using the default identity and GORM.
 func NewDefaultLoginManager(db *gorm.DB) *flow.LoginManager {
 	repo := NewRepository(db)
-	return flow.NewLoginManager(repo)
+	return flow.NewLoginManager(repo, func() any {
+		return &identity.Identity{}
+	})
 }
 
 // NewDefaultSessionManager creates a SessionManager using the default ID type and GORM.

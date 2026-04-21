@@ -1,69 +1,89 @@
-# SAML 2.0 (Service Provider & IdP)
+# SAML 2.0
 
-Kayan provides a robust SAML 2.0 implementation for enterprise Single Sign-On (SSO). It can act as both a **Service Provider (SP)** and an **Identity Provider (IdP)**.
+`core/saml` implements service-provider-side SAML 2.0 support for enterprise SSO scenarios.
 
-## Standard Usage: Service Provider (SP)
+## What the Package Owns
 
-Integrating with enterprise IdPs like Okta, Azure AD, or Ping Identity.
+- service-provider configuration
+- IdP registration and metadata loading
+- AuthnRequest generation
+- response parsing and validation hooks
+- pending login session tracking
+- attribute extraction and user reconciliation hooks
+- SP metadata generation
 
-### 1. Initialize the Service Provider
+## Basic Setup
+
 ```go
-config := saml.SPConfig{
-    EntityID: "https://myapp.com/saml/metadata",
-    ACSURL:   "https://myapp.com/saml/acs",
-}
-sp := saml.NewServiceProvider(config, sessionStore, identityRepo, userFactory)
-
-// Register an external IdP (e.g., Okta)
-sp.RegisterIdP(&saml.IdPConfig{
-    ID:       "okta",
-    EntityID: "https://okta.example.com/xxxx",
-    SSOUrl:   "https://okta.example.com/sso",
-})
+sp := saml.NewServiceProvider(
+	saml.Config{
+		EntityID:     "https://app.example.com/saml",
+		ACSUrl:       "https://app.example.com/saml/acs",
+		MetadataURL:  "https://app.example.com/saml/metadata",
+		PrivateKey:   privateKey,
+		Certificate:  certificate,
+		SignRequests: true,
+	},
+	sessionStore,
+	identityRepo,
+	func() any { return &User{} },
+)
 ```
 
-### 2. The SSO Flow
-```go
-// 1. Initiate Login (Redirect user to Okta)
-redirectURL, _ := sp.InitiateLogin(ctx, "okta", "/dashboard")
+Register IdPs separately so one service provider can support multiple tenants or enterprise customers.
 
-// 2. Handle Callback (In your ACS HTTP handler)
-user, relayState, err := sp.ProcessResponse(ctx, samlResponse)
-```
+## IdP Configuration
 
----
+Each `IdPConfig` captures:
 
-## Custom Implementation: Attribute Mapping
+- IdP identifier
+- entity ID
+- SSO and optional SLO URLs
+- IdP signing certificate
+- preferred NameID format
+- attribute mapping
+- optional tenant association
 
-IdPs often send custom XML attributes. You can implement a custom `UserFactory` to map these to your internal user model.
+This lets your application map enterprise identity providers to tenant or customer boundaries cleanly.
 
-### Example: Custom Attribute Mapper
-```go
-hooks := saml.Hooks{
-    UserFactory: func(ctx context.Context, sUser *saml.SAMLUser) (identity.FlowIdentity, error) {
-        // Map custom SAML attributes to your User struct
-        return &User{
-            Email:      sUser.GetAttribute("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"),
-            Department: sUser.GetAttribute("department"),
-            MemberID:   sUser.GetAttribute("custom_member_id"),
-        }, nil
-    },
-}
-sp.SetHooks(hooks)
-```
+## Sessions and Relay State
 
----
+SAML login is not a single request. The package persists pending session state so that:
 
-## Common Mistakes
+- requests can be matched to responses
+- relay state can be validated and restored
+- login attempts can expire cleanly
 
-> [!CAUTION]
-> **Expired Certificates**
-> SAML relies on certificates for signing. Always monitor the expiration dates of both your SP certificate and the IdP certificates. Kayan provides `sp.ValidateCertificates()` which you should run periodically in a health check.
+Treat the session store as part of the security boundary. It should not be ephemeral in multi-instance production.
 
-> [!WARNING]
-> **Clock Skew**
-> SAML responses are time-sensitive. If your server's clock is out of sync with the IdP's clock, all login attempts will fail with a "not yet valid" or "expired" error. Use NTP to keep your server time accurate within seconds.
+## Hooks
 
-> [!TIP]
-> **Allow IdP-Initiated SSO**
-> By default, Kayan blocks IdP-initiated SSO for security (to prevent login CSRF). If your customers need to log in directly from their Okta dashboard, you must explicitly enable `AllowIdPInitiated: true` in the `SPConfig`.
+Hooks exist around the key lifecycle points:
+
+- before request creation
+- after request creation
+- before response processing
+- after successful response processing
+- error handling
+- custom user creation, loading, and linking
+
+This is where you integrate application-specific reconciliation logic without modifying the protocol parser itself.
+
+## User Reconciliation
+
+Most SAML deployments need deterministic rules for matching an incoming SAML identity to an internal account. Use the provided hooks to define whether matching is based on:
+
+- NameID
+- email
+- immutable external employee ID
+- tenant-scoped identifier
+
+Be explicit here. Ambiguous linking is one of the highest-risk parts of SAML integration.
+
+## Security Guidance
+
+- sign requests when your IdP requires or benefits from it
+- validate certificates and metadata provenance
+- treat IdP-initiated SSO as an explicit security decision
+- keep assertion and relay-state lifetimes short
+- audit all SAML login and linking outcomes

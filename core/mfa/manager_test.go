@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // --- Mock MFA Method ---
@@ -204,6 +205,22 @@ func TestMFAManager_RecoveryCodes(t *testing.T) {
 		t.Fatalf("expected 5 codes, got %d", len(codes))
 	}
 
+	storedCodes, err := store.GetRecoveryCodes(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("stored recovery codes: %v", err)
+	}
+	if len(storedCodes) != len(codes) {
+		t.Fatalf("expected %d stored codes, got %d", len(codes), len(storedCodes))
+	}
+	for i, stored := range storedCodes {
+		if stored == codes[i] {
+			t.Fatalf("expected stored recovery code %d to be hashed", i)
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(stored), []byte(normalizeRecoveryCode(codes[i]))); err != nil {
+			t.Fatalf("expected stored recovery code %d to match bcrypt hash: %v", i, err)
+		}
+	}
+
 	// Verify codes are in XXXX-XXXX format
 	for _, code := range codes {
 		parts := strings.Split(code, "-")
@@ -247,6 +264,31 @@ func TestMFAManager_RecoveryCodes_InvalidCode(t *testing.T) {
 	ok, _ := mgr.VerifyRecoveryCode(ctx, "user-1", "ZZZZ-ZZZZ")
 	if ok {
 		t.Error("expected invalid recovery code to fail")
+	}
+}
+
+func TestMFAManager_RecoveryCodes_LegacyPlaintextSupport(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	if err := store.SaveRecoveryCodes(ctx, "user-1", []string{"ABCD-EF12"}); err != nil {
+		t.Fatalf("save legacy recovery code: %v", err)
+	}
+
+	mgr := NewManager(store)
+	ok, err := mgr.VerifyRecoveryCode(ctx, "user-1", "abcd-ef12")
+	if err != nil {
+		t.Fatalf("verify legacy code: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected legacy plaintext recovery code to verify")
+	}
+
+	ok, err = mgr.VerifyRecoveryCode(ctx, "user-1", "ABCD-EF12")
+	if err != nil {
+		t.Fatalf("replay legacy code: %v", err)
+	}
+	if ok {
+		t.Fatal("expected consumed legacy recovery code to fail on replay")
 	}
 }
 

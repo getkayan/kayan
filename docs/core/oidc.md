@@ -1,63 +1,85 @@
-# OIDC (OpenID Connect)
+# OAuth 2.0 and OpenID Connect
 
-Kayan supports the OIDC protocol, allowing you to act as an OIDC Provider (OP) or integrate as a Relying Party (RP).
+Kayan splits token issuance and OIDC identity assertions into two packages:
 
-## Standard Usage: OIDC Provider (OP)
+- `core/oauth2` for authorization codes, access tokens, refresh tokens, introspection, and revocation
+- `core/oidc` for ID tokens, discovery metadata, JWKS-oriented integration, and logout helpers
 
-Expose your Kayan instance as a centralized identity provider for your own microservices or external partners.
+## OAuth 2.0 Provider
 
-### 1. Initialize the Provider
+The provider constructor is:
+
 ```go
-keys := oidc.NewStaticKeyProvider(privateKey) // Load from PKCS8
-server := oidc.NewServer(keys, sessionManager, identityRepo)
-
-// Serve the Discovery document automatically at 
-// .well-known/openid-configuration
+provider := oauth2.NewProvider(
+	clientStore,
+	authCodeStore,
+	refreshTokenStore,
+	"https://auth.example.com",
+	privateKey,
+	"kid-1",
+)
 ```
 
-### 2. Authorization Code Flow
-```go
-// 1. Authorize (Redirect UI)
-authURL, _ := server.Authorize(ctx, clientID, "code", scope, state, "http://app.com/callback")
+Main responsibilities:
 
-// 2. Exchange Code for Tokens (POST /token)
-tokens, _ := server.Exchange(ctx, code, clientID, clientSecret)
-// Returns: Access Token, ID Token (JWT), Refresh Token
+- generate authorization codes
+- exchange codes for access and refresh tokens
+- refresh access tokens with refresh-token rotation
+- validate client credentials
+- introspect tokens
+- optionally track revocation
+
+## PKCE
+
+PKCE is supported during authorization-code exchange. Public clients should use a `code_verifier` and `S256` challenge by default.
+
+## Token Storage Model
+
+The provider depends on store interfaces instead of a monolithic repository. That lets you place auth codes, refresh tokens, and clients in the storage backend that matches your deployment.
+
+Use cases:
+
+- relational database for client metadata
+- Redis for short-lived auth codes
+- shared durable storage for refresh tokens
+
+## OIDC Server
+
+The OIDC server is initialized independently:
+
+```go
+server := oidc.NewServer("https://auth.example.com", privateKey, "kid-1")
 ```
 
----
+Responsibilities:
 
-## Custom Implementation: Custom ID Token Claims
+- generate ID tokens
+- publish discovery metadata
+- support userinfo-oriented integrations
+- surface logout and end-session metadata
 
-You can inject custom application-specific claims (e.g., `subscription_plan`, `preferred_color`) into the generated OIDC ID Token.
+The package is intentionally focused on protocol artifacts. Your application still owns the actual HTTP handlers and endpoint routing.
 
-### Example: Custom Claims Provider
-```go
-type MyClaimsProvider struct{}
+## Recommended Handler Split
 
-func (p *MyClaimsProvider) Provide(ctx context.Context, ident identity.FlowIdentity) (map[string]any, error) {
-    user := ident.(*User)
-    return map[string]any{
-        "plan": user.SubscriptionPlan,
-        "org":  user.OrganizationUnit,
-    }, nil
-}
+- handler layer parses requests and authenticates clients
+- `oauth2.Provider` handles code, token, refresh, revocation, and introspection behavior
+- `oidc.Server` handles discovery, ID token generation, and metadata documents
+- your app decides how userinfo claims are assembled from your identity model
 
-server.SetClaimsProvider(&MyClaimsProvider{})
-```
+## Claims Strategy
 
----
+Keep claims deliberate. The default OIDC token path can include traits, but in production you should define exactly which identity fields and traits are safe and stable enough to expose to clients.
 
-## Common Mistakes
+## Key Management Guidance
 
-> [!CAUTION]
-> **Leaking the Authorization Code**
-> Authorization codes must be short-lived (usually < 5 minutes) and can only be used **once**. If a code is re-used, Kayan's `oidc.Server` will automatically invalidate all tokens issued from the original code to prevent replay attacks.
+- prefer RSA or ECDSA keys managed outside source control
+- assign stable `kid` values and rotate keys deliberately
+- keep verifying keys available to resource servers and discovery clients
+- test introspection and token verification during rotation windows
 
-> [!WARNING]
-> **Insecure Callback URLs**
-> Always validate that the `redirect_uri` provided in the request matches one of the pre-registered URLs for the `client_id`. Allowing arbitrary redirect URLs is a critical security vulnerability that leads to token theft.
+## Interaction with Other Packages
 
-> [!TIP]
-> **Use Discovery**
-> Don't hardcode OIDC endpoints in your client applications. Instead, point them to Kayan's `.well-known/openid-configuration` endpoint. This allows you to rotate keys and change URLs without updating client configuration.
+- `core/flow/oidc.go` helps integrate external OIDC providers into auth flows
+- `core/session` may still be used for your application sessions even if OAuth 2.0 is enabled
+- `core/audit` should receive token-issue and token-revocation events for regulated deployments

@@ -1,0 +1,1183 @@
+openapi: 3.0.3
+info:
+  title: Kayan IAM API
+  description: |
+    Kayan is a headless, non-generic, and highly extensible authentication service.
+    
+    ## Features
+    - **BYOS (Bring Your Own Schema)** - Works with any identity model
+    - **Strategy-Based Auth** - Password, OIDC, WebAuthn, SAML, Magic Link, TOTP
+    - **Multi-Tenancy** - Full tenant isolation support
+    - **Policy Engine** - RBAC, ABAC, and Hybrid authorization
+    
+    ## Authentication
+    Most endpoints require a valid session token passed via:
+    - `Authorization: Bearer <token>` header
+    - `X-Session-Token: <token>` header
+    - `kayan_session` cookie
+  version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    name: Kayan Team
+    url: https://github.com/getkayan/kayan
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://auth.example.com
+    description: Production
+
+tags:
+  - name: Registration
+    description: User registration endpoints
+  - name: Login
+    description: Authentication endpoints
+  - name: Session
+    description: Session management
+  - name: OIDC
+    description: OpenID Connect social login
+  - name: WebAuthn
+    description: Passkey/WebAuthn authentication
+  - name: SAML
+    description: SAML 2.0 SSO
+  - name: MFA
+    description: Multi-factor authentication
+  - name: Recovery
+    description: Account recovery
+  - name: OAuth2
+    description: OAuth2 Authorization Server
+  - name: Admin
+    description: Administrative endpoints
+  - name: Health
+    description: Health check endpoints
+
+paths:
+  # ==================== Registration ====================
+  /api/v1/registration:
+    post:
+      tags: [Registration]
+      summary: Register a new identity
+      description: Creates a new identity with the provided traits and credentials
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationRequest'
+      responses:
+        '201':
+          description: Identity created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Identity already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  # ==================== Login ====================
+  /api/v1/login:
+    post:
+      tags: [Login]
+      summary: Authenticate with credentials
+      description: Authenticates using password strategy and returns a session
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Account locked due to too many failed attempts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockoutError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  # ==================== Session ====================
+  /api/v1/whoami:
+    get:
+      tags: [Session]
+      summary: Get current identity
+      description: Returns the identity associated with the current session
+      operationId: whoami
+      security:
+        - bearerAuth: []
+        - sessionToken: []
+      responses:
+        '200':
+          description: Current identity details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/logout:
+    post:
+      tags: [Session]
+      summary: End current session
+      description: Invalidates the current session
+      operationId: logout
+      security:
+        - bearerAuth: []
+        - sessionToken: []
+      responses:
+        '204':
+          description: Session terminated
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/sessions/refresh:
+    post:
+      tags: [Session]
+      summary: Refresh session token
+      description: Exchanges a refresh token for a new access token
+      operationId: refreshSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: New session tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== OIDC ====================
+  /api/v1/oidc/{provider}:
+    get:
+      tags: [OIDC]
+      summary: Initiate OIDC login
+      description: Redirects to the OIDC provider for authentication
+      operationId: oidcInit
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            example: google
+        - name: return_to
+          in: query
+          schema:
+            type: string
+            description: URL to redirect after authentication
+      responses:
+        '302':
+          description: Redirect to OIDC provider
+        '404':
+          description: Provider not configured
+
+  /api/v1/oidc/{provider}/callback:
+    get:
+      tags: [OIDC]
+      summary: OIDC callback
+      description: Handles the callback from OIDC provider
+      operationId: oidcCallback
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to application with session
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== WebAuthn ====================
+  /api/v1/webauthn/registration/begin:
+    post:
+      tags: [WebAuthn]
+      summary: Begin WebAuthn registration
+      description: Starts the WebAuthn credential registration ceremony
+      operationId: webauthnRegisterBegin
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_name:
+                  type: string
+                  description: Display name for the credential
+      responses:
+        '200':
+          description: Registration options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnRegistrationOptions'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/webauthn/registration/finish:
+    post:
+      tags: [WebAuthn]
+      summary: Complete WebAuthn registration
+      description: Finishes the WebAuthn credential registration ceremony
+      operationId: webauthnRegisterFinish
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegistrationResponse'
+      responses:
+        '200':
+          description: Credential registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credential_id:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/webauthn/login/begin:
+    post:
+      tags: [WebAuthn]
+      summary: Begin WebAuthn login
+      description: Starts the WebAuthn authentication ceremony
+      operationId: webauthnLoginBegin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier]
+              properties:
+                identifier:
+                  type: string
+                  description: User email or username
+      responses:
+        '200':
+          description: Login options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnLoginOptions'
+        '404':
+          description: User not found or no credentials registered
+
+  /api/v1/webauthn/login/finish:
+    post:
+      tags: [WebAuthn]
+      summary: Complete WebAuthn login
+      description: Finishes the WebAuthn authentication ceremony
+      operationId: webauthnLoginFinish
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnLoginResponse'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== SAML ====================
+  /api/v1/saml/{idp}/login:
+    get:
+      tags: [SAML]
+      summary: Initiate SAML login
+      description: Redirects to the SAML IdP for authentication
+      operationId: samlLogin
+      parameters:
+        - name: idp
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: RelayState
+          in: query
+          schema:
+            type: string
+            description: Return URL after authentication
+      responses:
+        '302':
+          description: Redirect to SAML IdP
+
+  /api/v1/saml/{idp}/acs:
+    post:
+      tags: [SAML]
+      summary: SAML ACS endpoint
+      description: Assertion Consumer Service - receives SAML responses
+      operationId: samlACS
+      parameters:
+        - name: idp
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                SAMLResponse:
+                  type: string
+                RelayState:
+                  type: string
+      responses:
+        '302':
+          description: Redirect to application with session
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/saml/{idp}/metadata:
+    get:
+      tags: [SAML]
+      summary: SP Metadata
+      description: Returns SAML Service Provider metadata XML
+      operationId: samlMetadata
+      parameters:
+        - name: idp
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SAML metadata XML
+          content:
+            application/xml:
+              schema:
+                type: string
+
+  # ==================== MFA ====================
+  /api/v1/mfa/totp/enroll:
+    post:
+      tags: [MFA]
+      summary: Enroll TOTP
+      description: Generates a TOTP secret and QR code for enrollment
+      operationId: totpEnroll
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: TOTP enrollment data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                  qr_code:
+                    type: string
+                    format: uri
+                    description: Data URI for QR code image
+                  uri:
+                    type: string
+                    description: otpauth:// URI
+
+  /api/v1/mfa/totp/verify:
+    post:
+      tags: [MFA]
+      summary: Verify TOTP
+      description: Verifies TOTP code and completes MFA enrollment or login
+      operationId: totpVerify
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+      responses:
+        '200':
+          description: TOTP verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== Recovery ====================
+  /api/v1/recovery/request:
+    post:
+      tags: [Recovery]
+      summary: Request password reset
+      description: Sends a password reset link to the user's email
+      operationId: recoveryRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '202':
+          description: Recovery email sent (always returns success to prevent enumeration)
+
+  /api/v1/recovery/complete:
+    post:
+      tags: [Recovery]
+      summary: Complete password reset
+      description: Resets the password using the recovery token
+      operationId: recoveryComplete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Password reset successful
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Invalid or expired token
+
+  # ==================== OAuth2 Provider ====================
+  /oauth2/authorize:
+    get:
+      tags: [OAuth2]
+      summary: Authorization endpoint
+      description: OAuth2 authorization endpoint (RFC 6749)
+      operationId: oauth2Authorize
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [code]
+        - name: client_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: scope
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: code_challenge
+          in: query
+          schema:
+            type: string
+            description: PKCE code challenge
+        - name: code_challenge_method
+          in: query
+          schema:
+            type: string
+            enum: [S256, plain]
+      responses:
+        '302':
+          description: Redirect to login or consent page
+
+  /oauth2/token:
+    post:
+      tags: [OAuth2]
+      summary: Token endpoint
+      description: OAuth2 token endpoint (RFC 6749)
+      operationId: oauth2Token
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [authorization_code, refresh_token]
+                code:
+                  type: string
+                redirect_uri:
+                  type: string
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+                refresh_token:
+                  type: string
+                code_verifier:
+                  type: string
+                  description: PKCE code verifier
+      responses:
+        '200':
+          description: Token response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuth2TokenResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid client credentials
+
+  /oauth2/introspect:
+    post:
+      tags: [OAuth2]
+      summary: Token introspection
+      description: OAuth2 token introspection endpoint (RFC 7662)
+      operationId: oauth2Introspect
+      security:
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Introspection response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntrospectionResponse'
+
+  /oauth2/revoke:
+    post:
+      tags: [OAuth2]
+      summary: Token revocation
+      description: OAuth2 token revocation endpoint (RFC 7009)
+      operationId: oauth2Revoke
+      security:
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Token revoked
+
+  # ==================== Health ====================
+  /health/live:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Returns 200 if service is running (Kubernetes liveness)
+      operationId: healthLive
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Returns 200 if service is ready (Kubernetes readiness)
+      operationId: healthReady
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        '503':
+          description: Service not ready
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Full health check
+      description: Returns detailed health status of all components
+      operationId: healthFull
+      responses:
+        '200':
+          description: Health report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReport'
+
+  # ==================== Admin ====================
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List users
+      description: Returns paginated list of users
+      operationId: adminListUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Search query
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Identity'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+    post:
+      tags: [Admin]
+      summary: Create user
+      description: Creates a new user (admin)
+      operationId: adminCreateUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateUserRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+
+  /admin/users/{id}:
+    get:
+      tags: [Admin]
+      summary: Get user
+      description: Returns a specific user
+      operationId: adminGetUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+        '404':
+          description: User not found
+
+    patch:
+      tags: [Admin]
+      summary: Update user
+      description: Updates a user's properties
+      operationId: adminUpdateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateUserRequest'
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+
+    delete:
+      tags: [Admin]
+      summary: Delete user
+      description: Deletes a user
+      operationId: adminDeleteUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: User deleted
+
+  /admin/users/{id}/sessions:
+    get:
+      tags: [Admin]
+      summary: List user sessions
+      description: Returns all active sessions for a user
+      operationId: adminListUserSessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+
+    delete:
+      tags: [Admin]
+      summary: Revoke all user sessions
+      description: Terminates all sessions for a user
+      operationId: adminRevokeUserSessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Sessions revoked
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    sessionToken:
+      type: apiKey
+      in: header
+      name: X-Session-Token
+    basicAuth:
+      type: http
+      scheme: basic
+
+  parameters:
+    TenantId:
+      name: X-Tenant-ID
+      in: header
+      schema:
+        type: string
+      description: Tenant identifier for multi-tenant operations
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until rate limit resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+    LockoutError:
+      type: object
+      properties:
+        code:
+          type: string
+          example: account_locked
+        message:
+          type: string
+        locked_until:
+          type: string
+          format: date-time
+        retry_after:
+          type: integer
+          description: Seconds until account unlocks
+
+    RegistrationRequest:
+      type: object
+      required: [traits, password]
+      properties:
+        traits:
+          type: object
+          description: Identity traits (email, name, etc.)
+          properties:
+            email:
+              type: string
+              format: email
+          required: [email]
+        password:
+          type: string
+          minLength: 8
+
+    RegistrationResponse:
+      type: object
+      properties:
+        identity:
+          $ref: '#/components/schemas/Identity'
+        session:
+          $ref: '#/components/schemas/SessionResponse'
+
+    LoginRequest:
+      type: object
+      required: [identifier, password]
+      properties:
+        identifier:
+          type: string
+          description: Email, username, or other identifier
+        password:
+          type: string
+
+    SessionResponse:
+      type: object
+      properties:
+        session_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        identity:
+          $ref: '#/components/schemas/Identity'
+
+    Identity:
+      type: object
+      properties:
+        id:
+          type: string
+        traits:
+          type: object
+          properties:
+            email:
+              type: string
+            name:
+              type: string
+        state:
+          type: string
+          enum: [active, inactive, locked]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+        identity_id:
+          type: string
+        active:
+          type: boolean
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        authenticator_assurance_level:
+          type: string
+          enum: [aal1, aal2, aal3]
+        authentication_methods:
+          type: array
+          items:
+            type: object
+            properties:
+              method:
+                type: string
+              completed_at:
+                type: string
+                format: date-time
+
+    WebAuthnRegistrationOptions:
+      type: object
+      description: PublicKeyCredentialCreationOptions
+      properties:
+        session_id:
+          type: string
+        publicKey:
+          type: object
+
+    WebAuthnRegistrationResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        response:
+          type: object
+          description: AuthenticatorAttestationResponse
+
+    WebAuthnLoginOptions:
+      type: object
+      description: PublicKeyCredentialRequestOptions
+      properties:
+        session_id:
+          type: string
+        publicKey:
+          type: object
+
+    WebAuthnLoginResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        response:
+          type: object
+          description: AuthenticatorAssertionResponse
+
+    OAuth2TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+        refresh_token:
+          type: string
+        id_token:
+          type: string
+
+    IntrospectionResponse:
+      type: object
+      properties:
+        active:
+          type: boolean
+        scope:
+          type: string
+        client_id:
+          type: string
+        sub:
+          type: string
+        exp:
+          type: integer
+        iat:
+          type: integer
+
+    HealthReport:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+                enum: [healthy, degraded, unhealthy]
+              latency_ms:
+                type: integer
+              message:
+                type: string
+
+    AdminCreateUserRequest:
+      type: object
+      required: [traits]
+      properties:
+        traits:
+          type: object
+          properties:
+            email:
+              type: string
+              format: email
+            name:
+              type: string
+        password:
+          type: string
+        state:
+          type: string
+          enum: [active, inactive]
+
+    AdminUpdateUserRequest:
+      type: object
+      properties:
+        traits:
+          type: object
+        state:
+          type: string
+          enum: [active, inactive, locked]

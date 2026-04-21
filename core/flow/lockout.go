@@ -88,6 +88,7 @@ type LockoutConfig struct {
 
 // LockoutStrategy is a decorator that adds brute-force protection to a LoginStrategy.
 type LockoutStrategy struct {
+	mu     sync.RWMutex
 	next   LoginStrategy
 	store  LockoutStore
 	config LockoutConfig
@@ -117,6 +118,8 @@ func NewLockoutStrategyWithConfig(next LoginStrategy, store LockoutStore, config
 
 // SetHooks allows updating hooks after creation.
 func (s *LockoutStrategy) SetHooks(hooks LockoutHooks) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.config.Hooks = hooks
 }
 
@@ -125,8 +128,11 @@ func (s *LockoutStrategy) ID() string {
 }
 
 func (s *LockoutStrategy) getKey(ctx context.Context, identifier string) string {
-	if s.config.Hooks.KeyFunc != nil {
-		return s.config.Hooks.KeyFunc(ctx, identifier)
+	s.mu.RLock()
+	keyFunc := s.config.Hooks.KeyFunc
+	s.mu.RUnlock()
+	if keyFunc != nil {
+		return keyFunc(ctx, identifier)
 	}
 	return identifier
 }
@@ -134,15 +140,23 @@ func (s *LockoutStrategy) getKey(ctx context.Context, identifier string) string 
 func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
 	key := s.getKey(ctx, identifier)
 
+	// Snapshot hooks and config under read lock
+	s.mu.RLock()
+	hooks := s.config.Hooks
+	failOpen := s.config.FailOpen
+	maxFailures := s.config.MaxFailures
+	lockoutDuration := s.config.LockoutDuration
+	failureWindow := s.config.FailureWindow
+	s.mu.RUnlock()
+
 	// 1. Check if locked
 	var locked bool
 	var until time.Time
 	var err error
 
-	// Allow hook to override lock check
-	if s.config.Hooks.OnLockoutCheck != nil {
+	if hooks.OnLockoutCheck != nil {
 		var handled bool
-		locked, until, handled = s.config.Hooks.OnLockoutCheck(ctx, key)
+		locked, until, handled = hooks.OnLockoutCheck(ctx, key)
 		if !handled {
 			locked, until, err = s.store.IsLocked(ctx, key)
 		}
@@ -151,7 +165,7 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 	}
 
 	if err != nil {
-		if s.config.FailOpen {
+		if failOpen {
 			// Continue despite error
 		} else {
 			return nil, fmt.Errorf("lockout check failed: %v", err)
@@ -163,8 +177,8 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 			Identifier:  identifier,
 			LockedUntil: until,
 		}
-		if s.config.Hooks.CreateLockError != nil {
-			return nil, s.config.Hooks.CreateLockError(info)
+		if hooks.CreateLockError != nil {
+			return nil, hooks.CreateLockError(info)
 		}
 		return nil, fmt.Errorf("account is locked until %v", until.Format(time.RFC822))
 	}
@@ -175,13 +189,13 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 	// 3. Handle Success
 	if authErr == nil {
 		shouldClear := true
-		if s.config.Hooks.ShouldClearOnSuccess != nil {
-			shouldClear = s.config.Hooks.ShouldClearOnSuccess(ctx, key)
+		if hooks.ShouldClearOnSuccess != nil {
+			shouldClear = hooks.ShouldClearOnSuccess(ctx, key)
 		}
 		if shouldClear {
 			_ = s.store.ClearFailures(ctx, key)
-			if s.config.Hooks.OnUnlocked != nil {
-				s.config.Hooks.OnUnlocked(ctx, identifier)
+			if hooks.OnUnlocked != nil {
+				hooks.OnUnlocked(ctx, identifier)
 			}
 		}
 		return res, nil
@@ -189,15 +203,15 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 
 	// 4. Handle Failure
 	shouldRecord := true
-	if s.config.Hooks.ShouldRecordFailure != nil {
-		shouldRecord = s.config.Hooks.ShouldRecordFailure(ctx, identifier, authErr)
+	if hooks.ShouldRecordFailure != nil {
+		shouldRecord = hooks.ShouldRecordFailure(ctx, identifier, authErr)
 	}
 
 	if !shouldRecord {
 		return nil, authErr
 	}
 
-	count, rErr := s.store.RecordFailure(ctx, key, s.config.FailureWindow)
+	count, rErr := s.store.RecordFailure(ctx, key, failureWindow)
 	if rErr != nil {
 		return nil, authErr
 	}
@@ -205,24 +219,22 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 	info := &LockoutInfo{
 		Identifier:      identifier,
 		FailureCount:    count,
-		MaxFailures:     s.config.MaxFailures,
-		LockoutDuration: s.config.LockoutDuration,
+		MaxFailures:     maxFailures,
+		LockoutDuration: lockoutDuration,
 	}
 
-	// Call OnFailure hook
-	if s.config.Hooks.OnFailure != nil {
-		if hookErr := s.config.Hooks.OnFailure(ctx, info); hookErr != nil {
+	if hooks.OnFailure != nil {
+		if hookErr := hooks.OnFailure(ctx, info); hookErr != nil {
 			return nil, hookErr
 		}
 	}
 
-	if count >= s.config.MaxFailures {
-		// Lock the account
-		_ = s.store.Lock(ctx, key, s.config.LockoutDuration)
-		info.LockedUntil = time.Now().Add(s.config.LockoutDuration)
+	if count >= maxFailures {
+		_ = s.store.Lock(ctx, key, lockoutDuration)
+		info.LockedUntil = time.Now().Add(lockoutDuration)
 
-		if s.config.Hooks.OnLocked != nil {
-			s.config.Hooks.OnLocked(ctx, info)
+		if hooks.OnLocked != nil {
+			hooks.OnLocked(ctx, info)
 		}
 	}
 

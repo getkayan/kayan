@@ -18,8 +18,7 @@ func TestMFAFlow(t *testing.T) {
 	}
 	factory := func() any { return &identity.Identity{} }
 	regMgr := NewRegistrationManager(repo, factory)
-	logMgr := NewLoginManager(repo)
-	logMgr.SetFactory(factory)
+	logMgr := NewLoginManager(repo, factory)
 
 	pwStrategy := NewPasswordStrategy(repo, NewBcryptHasher(14), "email", factory)
 	pwStrategy.SetIDGenerator(func() any { return uuid.New() })

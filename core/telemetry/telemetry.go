@@ -71,6 +71,10 @@ type Config struct {
 	// Leave empty to disable trace export.
 	OTLPEndpoint string
 
+	// InsecureOTLP allows plaintext OTLP transport for local development only.
+	// Production deployments should leave this disabled so the exporter uses TLS.
+	InsecureOTLP bool
+
 	// SamplingRate is the trace sampling rate (0.0-1.0).
 	SamplingRate float64
 
@@ -164,11 +168,14 @@ func (p *Provider) setupTracing(res *resource.Resource) error {
 
 	// Add OTLP exporter if configured
 	if p.config.OTLPEndpoint != "" {
-		exporter, err := otlptracegrpc.New(
-			context.Background(),
+		opts := []otlptracegrpc.Option{
 			otlptracegrpc.WithEndpoint(p.config.OTLPEndpoint),
-			otlptracegrpc.WithInsecure(),
-		)
+		}
+		if p.config.InsecureOTLP {
+			opts = append(opts, otlptracegrpc.WithInsecure())
+		}
+
+		exporter, err := otlptracegrpc.New(context.Background(), opts...)
 		if err != nil {
 			return err
 		}

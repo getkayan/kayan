@@ -1,356 +1,87 @@
-# Kayan Security Model
+# Security Model
 
-This document describes the security architecture, threat model, and security controls implemented in Kayan.
+Kayan includes multiple security controls, but the library expects the integrating application to compose them deliberately. This document explains the intended security posture of the core packages.
 
----
+## Credential Security
 
-## Threat Model
+### Password hashing
 
-### Assets Protected
-1. **User credentials** (password hashes, WebAuthn keys)
-2. **Session tokens** (access to authenticated resources)
-3. **Personal data** (email, profile, traits)
-4. **Authorization state** (roles, permissions)
+Password strategies use bcrypt by default and can be configured with cost-based tuning. The repository rules explicitly prohibit weak or legacy password hashing such as MD5, SHA-1, or plain SHA-256.
 
-### Threat Actors
-| Actor | Capability | Mitigation |
-|-------|------------|------------|
-| External attacker | Brute force, credential stuffing | Rate limiting, account lockout |
-| MITM | Traffic interception | TLS requirement, secure cookies |
-| Malicious admin | Privilege abuse | Audit logging, separation of duties |
-| Compromised database | Data exfiltration | Password hashing, encryption at rest |
+### Secret comparison
 
----
+Sensitive comparisons use constant-time techniques where appropriate. The MFA manager and related flows are designed to avoid naive string comparison on verification paths.
 
-## Authentication Security
+### Credential separation
 
-### Password Hashing
-
-Kayan uses **bcrypt** by default with configurable cost:
-
-```go
-// Default cost: 10 (~100ms per hash)
-hasher := flow.NewBcryptHasher(10)
-
-// Higher security (cost 14 = ~1s per hash)
-hasher := flow.NewBcryptHasher(14)
-```
-
-**Why bcrypt?**
-- Memory-hard, resistant to GPU attacks
-- Built-in salt generation
-- Adaptive cost factor
-
-**Custom Hasher Interface:**
-```go
-type Hasher interface {
-    Hash(password string) (string, error)
-    Verify(password, hash string) error
-}
-```
-
-### Password Policy Enforcement
-
-Per-tenant or global policies:
-
-```go
-type PasswordPolicy struct {
-    MinLength        int
-    MaxLength        int
-    RequireUppercase bool
-    RequireLowercase bool
-    RequireNumbers   bool
-    RequireSymbols   bool
-    DisallowCommon   bool      // Check against common passwords
-    DisallowPrevious int       // Prevent N previous passwords
-}
-```
-
-### Credential Storage
-
-| Credential Type | Storage Method |
-|-----------------|----------------|
-| Password | bcrypt hash in database |
-| WebAuthn | Public key in database, private key on device |
-| TOTP | Encrypted secret in database |
-| OAuth tokens | Encrypted, short-lived |
-
----
+When you need multiple factors or authenticators, use discrete credential records or MFA enrollments rather than overloading a single password field.
 
 ## Session Security
 
-### JWT Sessions
+### Rotation
 
-```go
-type JWTClaims struct {
-    Subject   string    `json:"sub"`  // Identity ID
-    SessionID string    `json:"sid"`  // Unique session ID
-    IssuedAt  time.Time `json:"iat"`
-    ExpiresAt time.Time `json:"exp"`
-    Issuer    string    `json:"iss"`
-}
-```
+Refresh operations rotate tokens. Database sessions rotate session identity and refresh token. OAuth 2.0 refresh operations rotate refresh tokens as well.
 
-**Security Properties:**
-- **Signing**: HS256 (shared secret) or RS256 (asymmetric)
-- **Expiry**: Configurable, typically 15min-24h
-- **Revocation**: Not possible (use short expiry + refresh tokens)
+### Revocation
 
-### Database Sessions
+JWT strategies support revocation stores. In multi-instance production, treat a shared revocation backend as mandatory if logout or emergency invalidation must be immediate.
 
-```sql
-CREATE TABLE sessions (
-    id VARCHAR(64) PRIMARY KEY,      -- Cryptographically random
-    identity_id VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP,
-    expires_at TIMESTAMP,
-    ip_address VARCHAR(45),
-    user_agent TEXT,
-    revoked_at TIMESTAMP             -- NULL = active
-);
-```
+### Expiry
 
-**Security Properties:**
-- **Immediate revocation**: Set `revoked_at`
-- **Audit trail**: Full session history
-- **Server-side control**: Limited exposure
+Keep access-token lifetimes short. Extend user experience with refresh tokens rather than long-lived bearer tokens.
 
-### Session Token Generation
+## Authentication Abuse Controls
 
-```go
-// 32 bytes of crypto/rand → 64 hex chars
-token := make([]byte, 32)
-rand.Read(token)
-sessionID := hex.EncodeToString(token)
-```
+### Rate limiting
 
-### Cookie Security
+Credential endpoints should be wrapped with a rate limiter. Use Redis-backed implementations in horizontally scaled environments.
 
-When using cookies:
-```go
-http.SetCookie(w, &http.Cookie{
-    Name:     "kayan_session",
-    Value:    token,
-    Path:     "/",
-    HttpOnly: true,              // No JavaScript access
-    Secure:   true,              // HTTPS only
-    SameSite: http.SameSiteStrictMode,
-    MaxAge:   int(expiry.Seconds()),
-})
-```
+### Account lockout
 
----
+Lockout should be based on failure windows, not only lifetime counts. Tune lockout windows so they slow attackers without permanently trapping legitimate users.
 
-## Brute Force Protection
+### Device and risk signals
 
-### Rate Limiting
+Device fingerprinting and adaptive risk scoring are meant to influence assurance level. Unknown device plus geo anomaly plus repeated failures should escalate to MFA or step-up, not simply be logged.
 
-```go
-type RateLimitConfig struct {
-    MaxAttempts  int           // Requests allowed
-    Window       time.Duration // Time window
-    LockoutTime  time.Duration // Lockout after exceeded
-}
+## OAuth 2.0 and OIDC
 
-// Per-IP login limiting
-loginLimiter := flow.NewMemoryRateLimiter()
-allowed, retryAfter := loginLimiter.Allow("login:"+ip, config)
-```
+### PKCE
 
-**Implementation:**
-- Sliding window algorithm
-- In-memory (default) or Redis-backed
-- Returns `Retry-After` header on limit
+Authorization code flows support PKCE. Public clients should use PKCE by default.
 
-### Account Lockout
+### JWT signing
 
-```go
-type LockoutConfig struct {
-    MaxFailedAttempts int           // Failures before lock
-    LockoutDuration   time.Duration // How long locked
-    ResetOnSuccess    bool          // Reset counter on success
-}
+OAuth 2.0 and OIDC tokens are designed for asymmetric signing with key IDs. Protect private keys externally and rotate them on a schedule appropriate for your compliance posture.
 
-// Per-identity lockout
-lockout := flow.NewLockoutManager(store, config)
-locked, unlockAt := lockout.IsLocked(ctx, identifier)
-```
+### Introspection and revocation
 
----
+Use introspection when a resource server cannot validate everything locally or when active revocation state is required.
 
-## OAuth2/OIDC Security
+## SAML Security
 
-### State Parameter
+SAML support includes request signing and response validation hooks. Because SAML deployments are highly environment-specific, treat certificate management, metadata ingestion, and allowed bindings as high-scrutiny operational controls.
 
-```go
-// Generate state for CSRF protection
-state := base64.URLEncoding.EncodeToString(randBytes(32))
-session.Set("oauth_state", state)
+Allow IdP-initiated flows only when the business need is explicit and the surrounding controls are understood.
 
-// Validate on callback
-if r.URL.Query().Get("state") != session.Get("oauth_state") {
-    return ErrInvalidState
-}
-```
+## Audit and Compliance
 
-### PKCE (Proof Key for Code Exchange)
+Authentication and authorization controls are only useful if you can prove how they behaved.
 
-```go
-// Generate verifier and challenge
-verifier := base64.URLEncoding.EncodeToString(randBytes(32))
-challenge := sha256.Sum256([]byte(verifier))
-challengeStr := base64.URLEncoding.EncodeToString(challenge[:])
+Use `core/audit` to store:
 
-// Send challenge in authorization request
-// Send verifier in token exchange
-```
+- actor and subject IDs
+- tenant IDs
+- event types and statuses
+- device, geo, and request metadata
+- state transitions for admin and consent changes
 
-### Token Storage
+Use `core/compliance` and `core/consent` when retention, deletion, export, and consent evidence are part of your contractual or regulatory requirements.
 
-- Access tokens: Memory only (never persisted)
-- Refresh tokens: Encrypted in database
-- ID tokens: Validated, claims extracted, token discarded
+## Integration Guidance
 
----
-
-## WebAuthn Security
-
-### Relying Party Configuration
-
-```go
-type WebAuthnConfig struct {
-    RPID      string   // Domain (no port, no protocol)
-    RPOrigins []string // Allowed origins
-}
-```
-
-**Critical**: `RPID` must exactly match the domain where passkeys are registered.
-
-### Ceremony Security
-
-| Check | Purpose |
-|-------|---------|
-| Origin validation | Prevent relay attacks |
-| Challenge freshness | Prevent replay |
-| User verification | Confirm biometric/PIN |
-| Counter increment | Detect cloned keys |
-
-### Credential Storage
-
-```go
-type WebAuthnCredential struct {
-    ID             []byte // Credential ID
-    PublicKey      []byte // COSE public key
-    AttestationType string
-    Transport      []string
-    Counter        uint32 // For clone detection
-}
-```
-
----
-
-## Data Protection
-
-### Encryption at Rest
-
-Sensitive fields can be encrypted:
-
-```go
-// Encrypt before storage
-encrypted := compliance.Encrypt(key, sensitiveData)
-
-// Decrypt on retrieval
-decrypted, _ := compliance.Decrypt(key, encrypted)
-```
-
-**Algorithm**: AES-256-GCM
-
-### PII Handling
-
-```go
-// Mark fields as PII for compliance
-type User struct {
-    Email     string `kayan:"pii"`         // Logged with masking
-    Password  string `kayan:"secret,omit"` // Never logged
-    SessionID string `kayan:"sensitive"`   // Logged as hash
-}
-```
-
-### Data Retention
-
-```go
-retention := compliance.NewRetentionPolicy(compliance.Config{
-    SessionMaxAge:    30 * 24 * time.Hour,  // 30 days
-    AuditLogMaxAge:   365 * 24 * time.Hour, // 1 year
-    DeletedUserGrace: 30 * 24 * time.Hour,  // 30 days
-})
-
-// Run cleanup
-retention.Cleanup(ctx, repo)
-```
-
----
-
-## Audit Logging
-
-### Event Format
-
-```json
-{
-    "timestamp": "2024-01-15T10:30:00Z",
-    "event_type": "authentication.success",
-    "identity_id": "user_abc123",
-    "ip_address": "192.168.1.100",
-    "user_agent": "Mozilla/5.0...",
-    "method": "password",
-    "tenant_id": "tenant_acme",
-    "metadata": {
-        "mfa_used": false
-    }
-}
-```
-
-### Event Types
-
-| Event | Description |
-|-------|-------------|
-| `registration.started` | Registration attempt |
-| `registration.success` | Account created |
-| `registration.failed` | Registration error |
-| `authentication.started` | Login attempt |
-| `authentication.success` | Successful login |
-| `authentication.failed` | Invalid credentials |
-| `session.created` | New session |
-| `session.revoked` | Session ended |
-| `password.changed` | Password update |
-| `mfa.enrolled` | MFA enabled |
-| `mfa.verified` | MFA check passed |
-
----
-
-## Security Checklist
-
-### Deployment
-
-- [ ] TLS/HTTPS enforced
-- [ ] Secure cookie flags enabled
-- [ ] Rate limiting configured
-- [ ] Bcrypt cost ≥ 12 for production
-- [ ] JWT secret ≥ 32 bytes
-- [ ] Database connections encrypted
-- [ ] Audit logging enabled
-
-### Configuration
-
-- [ ] Admin endpoints protected
-- [ ] CORS properly configured
-- [ ] Security headers set (CSP, HSTS, X-Frame-Options)
-- [ ] Session expiry configured
-- [ ] Password policy enforced
-
-### Monitoring
-
-- [ ] Failed login alerts
-- [ ] Brute force detection
-- [ ] Session anomaly detection
-- [ ] Admin action logging
+- Do not expose raw internal error details to public endpoints.
+- Do not hardcode secrets or signing keys in source.
+- Resolve tenant context before credential lookups when tenants partition identities.
+- Correlate audit, telemetry, and application request IDs.
+- Test rate limit, lockout, revocation, and step-up paths as first-class security behavior.

@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.22'
           cache: true
 
       - name: Run golangci-lint
@@ -24,6 +24,19 @@ jobs:
         with:
           version: latest
           working-directory: core
+
+      - name: Architecture Lint
+        run: |
+          # Ensure core/ never imports kgorm/
+          if grep -r 'getkayan/kayan/kgorm' core/; then
+            echo "ERROR: core/ must not import kgorm/"
+            exit 1
+          fi
+          # Ensure core/identity has zero internal deps
+          if grep -r 'getkayan/kayan/core/' core/identity/*.go | grep -v '_test.go'; then
+            echo "ERROR: core/identity must not import other core/ packages"
+            exit 1
+          fi
 
   build:
     name: Build
@@ -34,7 +47,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.22'
           cache: true
 
       - name: Build Core
@@ -45,6 +58,11 @@ jobs:
       - name: Build kgorm
         run: |
           cd kgorm
+          go build ./...
+
+      - name: Build kredis
+        run: |
+          cd kredis
           go build ./...
 
       - name: Build CLI

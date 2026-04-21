@@ -101,6 +101,28 @@ func (i *Identity) GetTraits() JSON               { return i.Traits }
 func (i *Identity) SetTraits(t JSON)              { i.Traits = t }
 func (i *Identity) GetCredentials() []Credential  { return i.Credentials }
 func (i *Identity) SetCredentials(c []Credential) { i.Credentials = c }
+func (i *Identity) MFAConfig() (bool, string)     { return i.MFAEnabled, i.MFASecret }
+func (i *Identity) IsVerified() bool              { return i.Verified }
+func (i *Identity) MarkVerified(at time.Time) {
+	i.Verified = true
+	i.VerifiedAt = &at
+}
+
+func (i *Identity) RoleNames() []string {
+	return unmarshalStringSlice(i.Roles)
+}
+
+func (i *Identity) PermissionNames() []string {
+	return unmarshalStringSlice(i.Permissions)
+}
+
+func (i *Identity) GetRoles() []string {
+	return i.RoleNames()
+}
+
+func (i *Identity) GetPermissions() []string {
+	return i.PermissionNames()
+}
 
 // IsEmailVerified checks if the identity has a verified email trait.
 func (i *Identity) IsEmailVerified() bool {
@@ -111,6 +133,19 @@ func (i *Identity) IsEmailVerified() bool {
 	}
 	// Fallback to searching for "email" if it's the primary identifier and verified status is stored elsewhere
 	return i.Verified
+}
+
+func unmarshalStringSlice(data JSON) []string {
+	if len(data) == 0 {
+		return []string{}
+	}
+
+	var values []string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return []string{}
+	}
+
+	return values
 }
 
 // Linkable defines methods for attaching credentials to an existing identity.

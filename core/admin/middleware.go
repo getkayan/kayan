@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -201,13 +202,14 @@ func (e *AdminError) Error() string { return e.Message }
 // ---- HTTP Helpers ----
 
 func writeError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write([]byte(`{"error":"` + http.StatusText(status) + `","message":"` + message + `"}`))
+	writeJSON(w, status, map[string]string{
+		"error":   http.StatusText(status),
+		"message": message,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// Simple encoding - for production use encoding/json
+	json.NewEncoder(w).Encode(data)
 }

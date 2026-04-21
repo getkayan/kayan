@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,29 +18,80 @@ type LogoutNotifier interface {
 	NotifyLogout(sid string, identityID string) error
 }
 
-// BackChannelLogoutNotifier implements the OIDC Back-Channel Logout notification.
-type BackChannelLogoutNotifier struct {
-	issuer      string
-	signingKey  any
-	keyID       string
-	clientStore oauth2.ClientStore
-	httpClient  *http.Client
+// ClientLister is a consumer-defined interface for listing OAuth2 clients.
+// The clientStore is type-asserted to this interface at runtime; if it is
+// not implemented, NotifyLogout is a no-op.
+type ClientLister interface {
+	ListClients(ctx context.Context) ([]*oauth2.Client, error)
 }
 
-func NewBackChannelLogoutNotifier(issuer string, signingKey any, keyID string, cs oauth2.ClientStore) *BackChannelLogoutNotifier {
-	return &BackChannelLogoutNotifier{
+var ErrClientListingUnavailable = errors.New("oidc: client store does not support client listing")
+
+// BackChannelLogoutOption configures optional notifier behavior.
+type BackChannelLogoutOption func(*BackChannelLogoutNotifier)
+
+// WithStrictClientListing makes NotifyLogout fail when the client store does not
+// implement ClientLister instead of silently skipping fan-out.
+func WithStrictClientListing() BackChannelLogoutOption {
+	return func(n *BackChannelLogoutNotifier) {
+		n.requireClientListing = true
+	}
+}
+
+// BackChannelLogoutNotifier implements the OIDC Back-Channel Logout notification.
+type BackChannelLogoutNotifier struct {
+	issuer               string
+	signingKey           any
+	keyID                string
+	clientStore          oauth2.ClientStore
+	httpClient           *http.Client
+	requireClientListing bool
+}
+
+func NewBackChannelLogoutNotifier(issuer string, signingKey any, keyID string, cs oauth2.ClientStore, opts ...BackChannelLogoutOption) *BackChannelLogoutNotifier {
+	n := &BackChannelLogoutNotifier{
 		issuer:      issuer,
 		signingKey:  signingKey,
 		keyID:       keyID,
 		clientStore: cs,
 		httpClient:  &http.Client{Timeout: 5 * time.Second},
 	}
+	for _, opt := range opts {
+		opt(n)
+	}
+	return n
 }
 
 func (n *BackChannelLogoutNotifier) NotifyLogout(sid string, identityID string) error {
-	// In a headless, flexible system, we don't want to enforce how clients are retrieved.
-	// For now, this is a placeholder where a developer can plug in their client logic.
-	// In a real Kayan implementation, we would likely have a session-to-client mapping.
+	lister, ok := n.clientStore.(ClientLister)
+	if !ok {
+		if n.requireClientListing {
+			return ErrClientListingUnavailable
+		}
+		return nil // store does not support listing; no-op
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	clients, err := lister.ListClients(ctx)
+	if err != nil {
+		return fmt.Errorf("oidc: failed to list clients: %w", err)
+	}
+
+	var errs []string
+	for _, c := range clients {
+		if c.BackChannelLogoutURI == "" {
+			continue
+		}
+		if err := n.NotifyClient(ctx, c.ID, c.BackChannelLogoutURI, sid, identityID); err != nil {
+			errs = append(errs, fmt.Sprintf("client %s: %v", c.ID, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("oidc: backchannel logout errors: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 

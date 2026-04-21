@@ -1,7 +1,9 @@
 package session
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/getkayan/kayan/core/domain"
@@ -110,12 +112,60 @@ type JWTConfig struct {
 
 // JWTStrategy implements the session strategy using JSON Web Tokens.
 type JWTStrategy struct {
-	config JWTConfig
+	config     JWTConfig
+	revocation RevocationStore
 }
 
 // NewJWTStrategy creates a new JWT strategy with the given configuration.
 func NewJWTStrategy(config JWTConfig) *JWTStrategy {
 	return &JWTStrategy{config: config}
+}
+
+// WithRevocationStore enables distributed JWT revocation.
+func (s *JWTStrategy) WithRevocationStore(store RevocationStore) *JWTStrategy {
+	s.revocation = store
+	return s
+}
+
+// RevocationStore persists revoked session IDs for stateless JWT invalidation.
+type RevocationStore interface {
+	// Revoke marks a session as revoked until its expiry.
+	Revoke(ctx context.Context, sessionID string, expiresAt time.Time) error
+	// IsRevoked checks whether a session is revoked.
+	IsRevoked(ctx context.Context, sessionID string) (bool, error)
+}
+
+// MemoryRevocationStore is an in-memory RevocationStore for testing/dev.
+type MemoryRevocationStore struct {
+	mu      sync.RWMutex
+	revoked map[string]time.Time // sessionID -> expiry
+}
+
+func NewMemoryRevocationStore() *MemoryRevocationStore {
+	return &MemoryRevocationStore{revoked: make(map[string]time.Time)}
+}
+
+func (s *MemoryRevocationStore) Revoke(ctx context.Context, sessionID string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revoked[sessionID] = expiresAt
+	return nil
+}
+
+func (s *MemoryRevocationStore) IsRevoked(ctx context.Context, sessionID string) (bool, error) {
+	s.mu.RLock()
+	exp, ok := s.revoked[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return false, nil
+	}
+	if exp.Before(time.Now()) {
+		s.mu.Lock()
+		delete(s.revoked, sessionID)
+		s.mu.Unlock()
+		return false, nil
+	}
+	return true, nil
 }
 
 // SetRefreshTokenValidator sets a custom validator for refresh tokens.
@@ -206,7 +256,6 @@ func (s *JWTStrategy) Validate(sessionID any) (*identity.Session, error) {
 	}
 
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// Verify method algorithm matches config
 		if token.Method.Alg() != s.config.SigningMethod.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -218,6 +267,16 @@ func (s *JWTStrategy) Validate(sessionID any) (*identity.Session, error) {
 	}
 
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
+		// Distributed revocation check
+		if s.revocation != nil {
+			revoked, err := s.revocation.IsRevoked(context.Background(), tokenString)
+			if err != nil {
+				return nil, fmt.Errorf("revocation check failed: %w", err)
+			}
+			if revoked {
+				return nil, fmt.Errorf("session revoked")
+			}
+		}
 		return &identity.Session{
 			ID:         tokenString,
 			IdentityID: claims.Subject,
@@ -267,6 +326,25 @@ func (s *JWTStrategy) Refresh(refreshToken string) (*identity.Session, error) {
 }
 
 func (s *JWTStrategy) Delete(sessionID any) error {
+	// Distributed revocation: mark as revoked if store is present.
+	if s.revocation != nil {
+		tokenString, ok := sessionID.(string)
+		if !ok {
+			return fmt.Errorf("invalid token format")
+		}
+		// Parse token to get expiry
+		token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+			return s.config.VerifyingKey, nil
+		})
+		if err != nil {
+			return err
+		}
+		claims, ok := token.Claims.(*JWTClaims)
+		if !ok || !token.Valid {
+			return fmt.Errorf("invalid token")
+		}
+		return s.revocation.Revoke(context.Background(), tokenString, claims.ExpiresAt.Time)
+	}
 	// Stateless, nothing to delete on server side.
 	return nil
 }

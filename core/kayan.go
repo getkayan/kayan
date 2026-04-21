@@ -22,6 +22,7 @@
 //   - rebac: Relationship-based access control
 //   - tenant: Multi-tenancy support
 //   - audit: Audit logging
+//   - risk: Adaptive risk scoring
 //   - saml: SAML 2.0 SSO support
 //   - oidc: OpenID Connect support
 //   - device: Device trust and fingerprinting

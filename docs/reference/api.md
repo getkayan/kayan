@@ -1,178 +1,243 @@
 # API Reference
 
-Kayan exposes a RESTful API for identity management. Full OpenAPI specification: [openapi.yaml](../openapi/openapi.yaml)
+This is a package-oriented reference for the primary constructors, interfaces, and extension points in the repository.
 
-## Base URL
+## core/flow
 
-```
-http://localhost:8080/api/v1
-```
+Primary constructors:
 
-## Authentication
+- `flow.PasswordAuth(repo, factory, identifierField, opts...)`
+- `flow.NewRegistrationManager(repo, factory, opts...)`
+- `flow.NewLoginManager(repo, factory, opts...)`
+- `flow.NewPasswordStrategy(repo, hasher, identifierField, factory)`
 
-Most endpoints require a session token:
+Important interfaces:
 
-```bash
-# Header
-Authorization: Bearer <token>
+- `FlowIdentity`
+- `RegistrationStrategy`
+- `LoginStrategy`
+- `Initiator`
+- `Attacher`
+- `Hook`
 
-# Alternative header
-X-Session-Token: <token>
+Important options:
 
-# Cookie
-kayan_session=<token>
-```
+- `WithRegDispatcher`
+- `WithSchema`
+- `WithLinker`
+- `WithRegPreHook`
+- `WithRegPostHook`
+- `WithPreventPasswordCapture`
+- `WithLoginDispatcher`
+- `WithStrategyStore`
+- `WithLoginPreHook`
+- `WithLoginPostHook`
+- `WithHasherCost`
+- `WithIDGenerator`
+- `WithQuickDispatcher`
+- `WithRegHook`
+- `WithLoginHook`
+- `WithPasswordPolicy`
 
----
+## core/session
 
-## Endpoints
+Primary constructors:
 
-### Registration
+- `session.NewManager(strategy)`
+- `session.NewDatabaseStrategy(repo)`
+- `session.NewJWTStrategy(config)`
+- `session.NewHS256Strategy(secret, expiry)`
+- `session.NewMemoryRevocationStore()`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/registration` | Register new identity |
+Important interfaces:
 
-```bash
-curl -X POST http://localhost:8080/api/v1/registration \
-  -H "Content-Type: application/json" \
-  -d '{"traits": {"email": "user@example.com"}, "password": "secret123"}'
-```
+- `session.Strategy`
+- `session.RevocationStore`
 
-**Response:**
-```json
-{
-  "id": "user_abc123",
-  "traits": {"email": "user@example.com"},
-  "created_at": "2024-01-15T10:30:00Z"
-}
-```
+## core/rbac
 
----
+Primary constructors:
 
-### Login
+- `rbac.NewManager(strategy)`
+- `rbac.NewBasicStrategy(loader)`
+- built-in strategies such as the in-memory and storage-backed variants in the package
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/login` | Authenticate with credentials |
+Important interfaces:
 
-```bash
-curl -X POST http://localhost:8080/api/v1/login \
-  -H "Content-Type: application/json" \
-  -d '{"identifier": "user@example.com", "password": "secret123"}'
-```
+- `rbac.Strategy`
+- `rbac.RoleSource`
+- `rbac.PermissionSource`
 
-**Response:**
-```json
-{
-  "session_token": "eyJhbGciOiJIUzI1NiIs...",
-  "expires_at": "2024-01-16T10:30:00Z"
-}
-```
+## core/rebac
 
----
+Primary constructors:
 
-### Session
+- `rebac.NewManager(store, opts...)`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/whoami` | Get current identity |
-| POST | `/logout` | End session |
-| POST | `/sessions/refresh` | Refresh session token |
+Important interfaces and types:
 
-```bash
-curl http://localhost:8080/api/v1/whoami \
-  -H "Authorization: Bearer $TOKEN"
-```
+- `rebac.Store`
+- `rebac.Schema`
+- `rebac.SubjectRef`
+- `rebac.ObjectRef`
 
----
+## core/policy
 
-### OIDC (Social Login)
+Primary constructors:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/oidc/{provider}` | Start OIDC flow |
-| GET | `/oidc/{provider}/callback` | OIDC callback |
+- `policy.NewABACStrategy()`
+- `policy.NewHybridStrategy(...)`
 
-```bash
-# Redirects to Google
-curl -L http://localhost:8080/api/v1/oidc/google
-```
+Important interface:
 
----
+- `policy.Engine`
 
-### WebAuthn
+## core/tenant
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/webauthn/registration/begin` | Start passkey registration |
-| POST | `/webauthn/registration/finish` | Complete registration |
-| POST | `/webauthn/login/begin` | Start passkey login |
-| POST | `/webauthn/login/finish` | Complete login |
+Primary constructors:
 
----
+- `tenant.NewManager(store, resolver, opts...)`
+- `tenant.NewHeaderResolver(name)`
+- `tenant.NewPathResolver(prefix, position)`
+- `tenant.NewSubdomainResolver(baseDomain)`
+- `tenant.NewScopedStore(inner, tenantID)`
 
-### MFA
+Important types:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/mfa/totp/enroll` | Start TOTP enrollment |
-| POST | `/mfa/totp/verify` | Verify TOTP code |
+- `tenant.Resolver`
+- `tenant.ResolveInfo`
+- `tenant.Hooks`
 
----
+## core/oauth2
 
-### Recovery
+Primary constructors:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/recovery/request` | Request password reset |
-| POST | `/recovery/complete` | Complete password reset |
+- `oauth2.NewProvider(clientStore, authCodeStore, refreshTokenStore, issuer, signingKey, keyID, opts...)`
 
----
+Important interfaces:
 
-### Health
+- `oauth2.ClientStore`
+- `oauth2.AuthCodeStore`
+- `oauth2.RefreshTokenStore`
+- `oauth2.RevocationStore`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health/live` | Liveness probe |
-| GET | `/health/ready` | Readiness probe |
-| GET | `/health` | Detailed health status |
+## core/oidc
 
----
+Primary constructors:
 
-## Admin API
+- `oidc.NewServer(issuer, signingKey, keyID)`
 
-Admin endpoints require elevated permissions.
+Important types:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/admin/users` | List users |
-| POST | `/admin/users` | Create user |
-| GET | `/admin/users/{id}` | Get user |
-| PATCH | `/admin/users/{id}` | Update user |
-| DELETE | `/admin/users/{id}` | Delete user |
-| GET | `/admin/users/{id}/sessions` | List user sessions |
-| DELETE | `/admin/users/{id}/sessions` | Revoke all sessions |
+- `oidc.Server`
+- `oidc.Discovery`
 
----
+## core/saml
 
-## Error Responses
+Primary constructors:
 
-```json
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Invalid credentials"
-  }
-}
-```
+- `saml.NewServiceProvider(config, sessionStore, identityRepo, factory)`
 
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `BAD_REQUEST` | 400 | Invalid input |
-| `UNAUTHORIZED` | 401 | Authentication required |
-| `FORBIDDEN` | 403 | Permission denied |
-| `NOT_FOUND` | 404 | Resource not found |
-| `CONFLICT` | 409 | Already exists |
-| `LOCKED` | 423 | Account locked |
-| `RATE_LIMITED` | 429 | Too many requests |
+Important types:
+
+- `saml.Config`
+- `saml.IdPConfig`
+- `saml.Hooks`
+- `saml.SessionStore`
+
+## core/scim
+
+Primary constructors:
+
+- `scim.NewManager(storage, mapper)`
+
+Important types:
+
+- `scim.ScimStorage`
+- `scim.Mapper`
+- `scim.User`
+- `scim.Group`
+
+## core/mfa
+
+Primary constructors:
+
+- `mfa.NewManager(store, opts...)`
+
+Important interfaces and types:
+
+- `mfa.Method`
+- `mfa.MFAStore`
+- `mfa.Enrollment`
+- `mfa.Challenge`
+
+## core/device
+
+Primary constructors:
+
+- `device.NewManager(store, opts...)`
+
+Important types:
+
+- `device.Store`
+- `device.Device`
+- `device.TrustLevel`
+
+## core/risk
+
+Primary constructors:
+
+- `risk.NewEngine(...)`
+
+Important types:
+
+- `risk.Rule`
+- `risk.Assessment`
+- `risk.Input`
+
+## core/consent
+
+Primary constructors:
+
+- `consent.NewManager(store, version, opts...)`
+
+Important types:
+
+- `consent.Purpose`
+- `consent.Consent`
+- `consent.Hooks`
+
+## core/health
+
+Primary constructors:
+
+- `health.NewManager(version, opts...)`
+- `health.NewDatabaseChecker(name, pingFn)`
+- `health.NewRedisChecker(name, pingFn)`
+
+Important interfaces:
+
+- `health.Checker`
+
+## core/admin
+
+Primary constructors:
+
+- `admin.NewManager(opts...)`
+
+Important options:
+
+- `admin.WithUserStore`
+- `admin.WithSessionStore`
+- `admin.WithTenantStore`
+- `admin.WithRoleStore`
+- `admin.WithAuditStore`
+- `admin.WithPasswordHasher`
+- `admin.WithIDGenerator`
+
+## Adapters
+
+- `kgorm.NewRepository(db)` for relational persistence
+- `kredis` package constructors for Redis-backed security state and session support
+
+For concrete usage patterns, prefer the package tests alongside this reference. The tests are the most precise source of expected behavior.

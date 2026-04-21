@@ -98,11 +98,32 @@ type ListOptions struct {
 	TenantID string `json:"tenant_id,omitempty"`
 }
 
-type ListResult[T any] struct {
-	Data   []T `json:"data"`
-	Total  int `json:"total"`
-	Limit  int `json:"limit"`
-	Offset int `json:"offset"`
+type UserListResult struct {
+	Data   []User `json:"data"`
+	Total  int    `json:"total"`
+	Limit  int    `json:"limit"`
+	Offset int    `json:"offset"`
+}
+
+type TenantListResult struct {
+	Data   []Tenant `json:"data"`
+	Total  int      `json:"total"`
+	Limit  int      `json:"limit"`
+	Offset int      `json:"offset"`
+}
+
+type RoleListResult struct {
+	Data   []Role `json:"data"`
+	Total  int    `json:"total"`
+	Limit  int    `json:"limit"`
+	Offset int    `json:"offset"`
+}
+
+type AuditEventListResult struct {
+	Data   []AuditEvent `json:"data"`
+	Total  int          `json:"total"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
 }
 
 type CreateUserInput struct {
@@ -152,7 +173,7 @@ type AuditQuery struct {
 
 // UserStore defines storage operations for users.
 type UserStore interface {
-	List(ctx context.Context, opts ListOptions) (*ListResult[User], error)
+	List(ctx context.Context, opts ListOptions) (*UserListResult, error)
 	Get(ctx context.Context, id any) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	Create(ctx context.Context, user *User) error
@@ -170,7 +191,7 @@ type SessionStore interface {
 
 // TenantStore defines storage operations for tenants.
 type TenantStore interface {
-	List(ctx context.Context, opts ListOptions) (*ListResult[Tenant], error)
+	List(ctx context.Context, opts ListOptions) (*TenantListResult, error)
 	Get(ctx context.Context, id string) (*Tenant, error)
 	Create(ctx context.Context, tenant *Tenant) error
 	Update(ctx context.Context, tenant *Tenant) error
@@ -179,7 +200,7 @@ type TenantStore interface {
 
 // RoleStore defines storage operations for roles.
 type RoleStore interface {
-	List(ctx context.Context, opts ListOptions) (*ListResult[Role], error)
+	List(ctx context.Context, opts ListOptions) (*RoleListResult, error)
 	Get(ctx context.Context, id string) (*Role, error)
 	Create(ctx context.Context, role *Role) error
 	Update(ctx context.Context, role *Role) error
@@ -191,7 +212,7 @@ type RoleStore interface {
 
 // AuditStore defines storage operations for audit logs.
 type AuditStore interface {
-	Query(ctx context.Context, query AuditQuery) (*ListResult[AuditEvent], error)
+	Query(ctx context.Context, query AuditQuery) (*AuditEventListResult, error)
 }
 
 // PasswordHasher defines password hashing operations.
@@ -241,7 +262,7 @@ func WithIDGenerator(g IDGenerator) ManagerOption       { return func(m *Manager
 // ---- User Operations ----
 
 // ListUsers returns paginated users.
-func (m *Manager) ListUsers(ctx context.Context, caller *Caller, opts ListOptions) (*ListResult[User], error) {
+func (m *Manager) ListUsers(ctx context.Context, caller *Caller, opts ListOptions) (*UserListResult, error) {
 	if err := m.authorize(caller, PermUsersRead); err != nil {
 		return nil, err
 	}
@@ -430,7 +451,7 @@ func (m *Manager) RevokeUserSessions(ctx context.Context, caller *Caller, userID
 // ---- Tenant Operations ----
 
 // ListTenants returns paginated tenants.
-func (m *Manager) ListTenants(ctx context.Context, caller *Caller, opts ListOptions) (*ListResult[Tenant], error) {
+func (m *Manager) ListTenants(ctx context.Context, caller *Caller, opts ListOptions) (*TenantListResult, error) {
 	if err := m.authorize(caller, PermTenantsRead); err != nil {
 		return nil, err
 	}
@@ -500,7 +521,7 @@ func (m *Manager) DeleteTenant(ctx context.Context, caller *Caller, id string) e
 // ---- Role Operations ----
 
 // ListRoles returns paginated roles.
-func (m *Manager) ListRoles(ctx context.Context, caller *Caller, opts ListOptions) (*ListResult[Role], error) {
+func (m *Manager) ListRoles(ctx context.Context, caller *Caller, opts ListOptions) (*RoleListResult, error) {
 	if err := m.authorize(caller, PermRolesRead); err != nil {
 		return nil, err
 	}
@@ -591,7 +612,7 @@ func (m *Manager) GetUserRoles(ctx context.Context, caller *Caller, userID any) 
 // ---- Audit Operations ----
 
 // QueryAudit queries audit logs.
-func (m *Manager) QueryAudit(ctx context.Context, caller *Caller, query AuditQuery) (*ListResult[AuditEvent], error) {
+func (m *Manager) QueryAudit(ctx context.Context, caller *Caller, query AuditQuery) (*AuditEventListResult, error) {
 	if err := m.authorize(caller, PermAuditRead); err != nil {
 		return nil, err
 	}

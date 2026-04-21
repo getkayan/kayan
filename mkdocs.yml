@@ -1,0 +1,59 @@
+site_name: Kayan
+site_description: Headless IAM library for Go
+repo_url: https://github.com/getkayan/kayan
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - search.highlight
+    - search.share
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: README.md
+  - Getting Started: getting-started.md
+  - Concepts:
+      - BYOS: concepts/byos.md
+      - Authentication Strategies: concepts/strategies.md
+      - Sessions: concepts/sessions.md
+      - Authorization: concepts/authorization.md
+      - Multi-Tenancy: concepts/multi-tenancy.md
+  - Architecture:
+      - Overview: architecture/README.md
+      - Authentication Flows: architecture/authentication-flows.md
+      - Authorization Models: architecture/authorization-models.md
+      - Security Model: architecture/security-model.md
+      - Storage Layer: architecture/storage-layer.md
+      - Strategy Internals: architecture/strategy-internals.md
+      - Extending Kayan: architecture/extending-kayan.md
+  - Core Packages:
+      - Infrastructure: core/infrastructure.md
+      - OIDC and OAuth 2.0: core/oidc.md
+      - SAML 2.0: core/saml.md
+      - SCIM 2.0: core/scim.md
+  - Adapters:
+      - Storage Adapters: adapters/storage.md
+  - Operations:
+      - Runtime Guidance: operations/README.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - API Reference: reference/api.md
+  - SDKs:
+      - JavaScript and TypeScript: sdk/javascript.md

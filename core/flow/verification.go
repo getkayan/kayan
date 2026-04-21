@@ -16,31 +16,40 @@ type VerificationManager struct {
 	tokenStore domain.TokenStore
 	auditStore audit.AuditStore
 	ttl        time.Duration
+	factory    func() any
 }
 
-func NewVerificationManager(repo IdentityRepository, store domain.TokenStore) *VerificationManager {
+func NewVerificationManager(repo IdentityRepository, store domain.TokenStore, factory func() any) *VerificationManager {
 	storeAudit, ok := repo.(audit.AuditStore)
 	var auditStore audit.AuditStore
 	if ok {
 		auditStore = storeAudit
+	}
+	if factory == nil {
+		factory = func() any { return &identity.Identity{} }
 	}
 	return &VerificationManager{
 		repo:       repo,
 		tokenStore: store,
 		auditStore: auditStore,
 		ttl:        24 * time.Hour,
+		factory:    factory,
 	}
 }
 
 // Initiate generates a verification token.
 func (m *VerificationManager) Initiate(ctx context.Context, ident any) (*domain.AuthToken, error) {
-	// 1. Validate Identity
-	i, ok := ident.(*identity.Identity)
+	fi, ok := ident.(FlowIdentity)
 	if !ok {
-		return nil, fmt.Errorf("verification: invalid identity model")
+		return nil, fmt.Errorf("verification: identity must implement FlowIdentity")
 	}
 
-	if i.Verified {
+	vi, ok := ident.(VerificationIdentity)
+	if !ok {
+		return nil, fmt.Errorf("verification: identity does not support verification state")
+	}
+
+	if vi.IsVerified() {
 		return nil, fmt.Errorf("verification: already verified")
 	}
 
@@ -48,7 +57,7 @@ func (m *VerificationManager) Initiate(ctx context.Context, ident any) (*domain.
 	tokenVal := uuid.New().String()
 	token := &domain.AuthToken{
 		Token:      tokenVal,
-		IdentityID: i.ID,
+		IdentityID: fmt.Sprintf("%v", fi.GetID()),
 		Type:       "verification",
 		ExpiresAt:  time.Now().Add(m.ttl),
 	}
@@ -62,7 +71,7 @@ func (m *VerificationManager) Initiate(ctx context.Context, ident any) (*domain.
 	if m.auditStore != nil {
 		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
 			Type:      "identity.verification.initiate",
-			SubjectID: i.ID,
+			SubjectID: fmt.Sprintf("%v", fi.GetID()),
 			Status:    "success",
 		})
 	}
@@ -88,22 +97,26 @@ func (m *VerificationManager) Verify(ctx context.Context, tokenStr string) error
 	}
 
 	// 2. Get Identity
-	identRaw, err := m.repo.GetIdentity(func() any { return &identity.Identity{} }, token.IdentityID)
+	identRaw, err := m.repo.GetIdentity(m.factory, token.IdentityID)
 	if err != nil {
 		return fmt.Errorf("verification: identity not found")
 	}
 
-	i, ok := identRaw.(*identity.Identity)
+	fi, ok := identRaw.(FlowIdentity)
 	if !ok {
-		return fmt.Errorf("verification: invalid identity model")
+		return fmt.Errorf("verification: identity must implement FlowIdentity")
+	}
+
+	vi, ok := identRaw.(VerificationIdentity)
+	if !ok {
+		return fmt.Errorf("verification: identity does not support verification state")
 	}
 
 	// 3. Update Status
 	now := time.Now()
-	i.Verified = true
-	i.VerifiedAt = &now
+	vi.MarkVerified(now)
 
-	if err := m.repo.UpdateIdentity(i); err != nil {
+	if err := m.repo.UpdateIdentity(identRaw); err != nil {
 		return err
 	}
 
@@ -114,7 +127,7 @@ func (m *VerificationManager) Verify(ctx context.Context, tokenStr string) error
 	if m.auditStore != nil {
 		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
 			Type:      "identity.verification.success",
-			SubjectID: i.ID,
+			SubjectID: fmt.Sprintf("%v", fi.GetID()),
 			Status:    "success",
 		})
 	}

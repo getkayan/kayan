@@ -1,319 +1,123 @@
-# Kayan Architecture Overview
+# Architecture Overview
 
-Kayan is a headless, non-generic, extensible Identity & Access Management (IAM) library for Go. This document describes the core architecture and design decisions.
+Kayan is intentionally split into small packages with explicit dependency direction. The architecture is designed to keep core IAM logic reusable across frameworks, storage backends, and schema designs.
 
----
+## Core Design Principles
 
-## Design Philosophy
+### Headless only
 
-### 1. Headless First
-Kayan provides no UI. It exposes pure Go APIs and optional HTTP handlers that you wire into your framework of choice (Echo, Gin, Chi, stdlib).
+Kayan is a library. The core packages do not own routers, templates, handlers, or frontend assets. HTTP middleware exists only where an operation is generic enough to remain transport-neutral, such as standard `net/http` helpers in health or tenant packages.
 
-### 2. Non-Generic Architecture
-Unlike many Go libraries, Kayan does **not** use Go generics. Instead, it uses:
-- **Interfaces** for contracts (`FlowIdentity`, `Repository`)
-- **Factory functions** for instantiation (`func() any { return &MyUser{} }`)
-- **Type assertions** at boundaries
+### Non-generic public APIs
 
-This enables any ID type (UUID, int64, string, snowflake) without compile-time constraints.
+Core extension points use interfaces, `any`, and factories. This keeps the public API compatible with arbitrary model shapes and identifier types.
 
-### 3. Bring Your Own Schema (BYOS)
-Your database schema is yours. Kayan adapts to your models through:
-- **Field mapping** (reflection-based trait/secret extraction)
-- **Optional interfaces** (implement only what you need)
+### BYOS
 
-### 4. Strategy Pattern
-All authentication methods (password, OIDC, WebAuthn, SAML) are pluggable strategies implementing common interfaces.
+The library adapts to your schema rather than forcing a canonical `users` table. Reflection and explicit field mapping are used at boundaries, while the core logic remains schema-agnostic.
 
----
+## Package Layers
 
-## Core Packages
+### Foundations
 
-```
-github.com/getkayan/kayan/
-├── core/
-│   ├── flow/          # Registration, Login, Strategies
-│   ├── session/       # Session management (JWT, Database)
-│   ├── identity/      # Identity types and interfaces
-│   ├── policy/        # Authorization engines (RBAC, ABAC)
-│   ├── rbac/          # Role-based access control
-│   ├── tenant/        # Multi-tenancy support
-│   ├── oauth2/        # OAuth2 provider implementation
-│   ├── oidc/          # OpenID Connect client
-│   ├── saml/          # SAML 2.0 SP
-│   ├── audit/         # Audit logging
-│   ├── compliance/    # Data retention, encryption
-│   └── telemetry/     # OpenTelemetry, Prometheus
-├── kgorm/             # GORM storage adapter
-└── cmd/               # CLI tools
-```
+- `core/identity`: default types and JSON helpers
+- `core/domain`: repository and token contracts
+- `core/audit`: audit model and persistence interface
+- `core/events`: event envelope and dispatcher abstractions
 
----
+### Authentication and session layer
 
-## Component Diagram
+- `core/flow`
+- `core/session`
+- `core/device`
+- `core/mfa`
+- `core/risk`
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           APPLICATION                                │
-├─────────────────────────────────────────────────────────────────────┤
-│  HTTP Framework (Echo/Gin/Chi)  ←→  kayan-echo (optional adapter)   │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐             │
-│  │  Registration │   │    Login     │   │   Session    │             │
-│  │    Manager    │   │   Manager    │   │   Manager    │             │
-│  └───────┬──────┘   └───────┬──────┘   └───────┬──────┘             │
-│          │                  │                   │                    │
-│          └─────────┬────────┴───────────┬──────┘                    │
-│                    ▼                    ▼                            │
-│  ┌────────────────────────────────────────────────────────────┐     │
-│  │                    STRATEGY LAYER                           │     │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │     │
-│  │  │ Password │ │   OIDC   │ │ WebAuthn │ │   SAML   │  ...  │     │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │     │
-│  └────────────────────────────────────────────────────────────┘     │
-│                                │                                     │
-│                    ┌───────────┴───────────┐                        │
-│                    ▼                       ▼                        │
-│  ┌──────────────────────────┐  ┌──────────────────────────┐        │
-│  │      HOOK SYSTEM         │  │     POLICY ENGINE        │        │
-│  │  Pre/Post Registration   │  │  RBAC / ABAC / Hybrid    │        │
-│  │  Pre/Post Login          │  │                          │        │
-│  └──────────────────────────┘  └──────────────────────────┘        │
-│                                                                      │
-├─────────────────────────────────────────────────────────────────────┤
-│                      STORAGE LAYER                                   │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                 IdentityRepository Interface                  │   │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐              │   │
-│  │  │   kgorm    │  │  MongoDB   │  │   Custom   │              │   │
-│  │  │  (GORM)    │  │  Adapter   │  │  Storage   │              │   │
-│  │  └────────────┘  └────────────┘  └────────────┘              │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  PostgreSQL  │  MySQL  │  SQLite  │  MongoDB  │  Redis       │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-```
+### Authorization and tenancy layer
 
----
+- `core/rbac`
+- `core/rebac`
+- `core/policy`
+- `core/tenant`
+- `core/admin`
 
-## Request Flow
+### Federation and provisioning layer
 
-### Registration Flow
+- `core/oauth2`
+- `core/oidc`
+- `core/saml`
+- `core/scim`
 
-```
-1. HTTP Request → POST /api/v1/registration
-        │
-        ▼
-2. RegistrationManager.Submit(ctx, method, traits, secret)
-        │
-        ├── Run PreHooks(ctx, nil)
-        │
-        ├── Validate traits against Schema (if set)
-        │
-        ├── Delegate to Strategy.Register(ctx, traits, secret)
-        │   │
-        │   ├── Generate ID (via IDGenerator)
-        │   ├── Hash secret (for password strategy)
-        │   ├── Map traits to model fields
-        │   └── repo.CreateIdentity(identity)
-        │
-        ├── Run PostHooks(ctx, identity)
-        │
-        └── Return created identity
-```
+### Operations and compliance layer
 
-### Authentication Flow
+- `core/compliance`
+- `core/consent`
+- `core/config`
+- `core/logger`
+- `core/telemetry`
+- `core/health`
 
-```
-1. HTTP Request → POST /api/v1/login
-        │
-        ▼
-2. LoginManager.Authenticate(ctx, method, identifier, secret)
-        │
-        ├── Run PreHooks(ctx, nil)
-        │
-        ├── Delegate to Strategy.Authenticate(ctx, identifier, secret)
-        │   │
-        │   ├── repo.FindIdentity(query)
-        │   ├── Verify secret (bcrypt compare, TOTP check, etc)
-        │   └── Return identity or error
-        │
-        ├── Run PostHooks(ctx, identity)
-        │
-        └── Return authenticated identity
-        │
-        ▼
-3. SessionManager.Create(sessionID, identityID)
-        │
-        ├── JWT Strategy: Sign claims, return token
-        └── Database Strategy: Insert session row, return ID
-```
+### Adapter layer
 
----
+- `kgorm`
+- `kredis`
 
-## Core Interfaces
+Adapters may depend on core packages. Core packages must not depend on adapters.
 
-### FlowIdentity (Required)
+## Dependency Direction
 
-Every identity model must implement this minimal interface:
+The repository rules matter here:
 
-```go
-type FlowIdentity interface {
-    GetID() any
-    SetID(any)
-}
-```
+- `core/identity` is effectively a leaf dependency and should not import other `core/` packages.
+- `core/domain` depends only on `core/identity` and `core/audit`.
+- `core/flow` depends on domain, identity, audit, and events.
+- `core/session` depends on domain and identity.
+- `core/rbac`, `core/rebac`, `core/policy`, and `core/tenant` are intended to stay independently reusable.
 
-### IdentityRepository
+This package graph is what prevents framework, storage, and protocol concerns from leaking into the rest of the library.
 
-Storage operations Kayan needs:
+## Main Architectural Patterns
 
-```go
-type IdentityRepository interface {
-    CreateIdentity(identity any) error
-    GetIdentity(factory func() any, id any) (any, error)
-    FindIdentity(factory func() any, query map[string]any) (any, error)
-    UpdateIdentity(identity any) error
-    DeleteIdentity(id any) error
-}
-```
+### Strategy pattern
 
-### RegistrationStrategy
+Authentication methods, MFA methods, authorization engines, and tenant resolvers all use pluggable strategies or methods.
 
-```go
-type RegistrationStrategy interface {
-    ID() string  // "password", "magic_link", etc.
-    Register(ctx context.Context, traits identity.JSON, secret string) (any, error)
-}
-```
+### Manager pattern
 
-### LoginStrategy
+Managers own registration, orchestration, hooks, and concurrency safety. They do not hardcode one auth method or one storage backend.
 
-```go
-type LoginStrategy interface {
-    ID() string
-    Authenticate(ctx context.Context, identifier, secret string) (any, error)
-}
-```
+### Consumer-defined interfaces
 
-### SessionStrategy
+Interfaces live where behavior is consumed. Storage contracts are declared in `core/domain`. Policy contracts are declared in `core/policy`. This keeps public dependencies narrow.
 
-```go
-type SessionStrategy interface {
-    Create(sessionID, identityID string) (*Session, error)
-    Validate(token string) (*Session, error)
-    Delete(token string) error
-}
-```
+### Hook-based extensibility
 
-### PolicyEngine
+Kayan favors hooks over inheritance. That keeps call paths explicit and composable in Go.
 
-```go
-type Engine interface {
-    Can(ctx context.Context, subject any, action string, resource any) (bool, error)
-}
-```
+## What Belongs Where
 
----
+Put logic in `core/` when it is:
 
-## Extension Points
+- headless
+- broadly reusable
+- framework-agnostic
+- expressible via stable interfaces
 
-| What | How |
-|------|-----|
-| Custom ID types | Implement `FlowIdentity`, set `IDGenerator` |
-| Custom storage | Implement `IdentityRepository` |
-| Custom auth method | Implement `RegistrationStrategy` / `LoginStrategy` |
-| Custom session storage | Implement `SessionStrategy` |
-| Custom authorization | Implement `policy.Engine` |
-| Pre/post processing | Add hooks to managers |
-| Custom tenant resolution | Implement `tenant.Resolver` |
+Put logic in an adapter when it is:
 
----
+- database-specific
+- cache-specific
+- HTTP framework-specific
+- tied to external SDKs or deployment assumptions
 
-## Security Model
+## Reading the Codebase
 
-### Password Hashing
-- **Default**: bcrypt with configurable cost (4-31)
-- **Alternative**: Implement `Hasher` interface for argon2, scrypt
+When navigating the repository, use this path:
 
-### Token Security
-- **JWT**: HS256/RS256 signing, configurable expiry
-- **Database sessions**: Cryptographically random IDs, server-side storage
+1. `core/domain` to understand persistence contracts
+2. `core/flow` and `core/session` to understand authentication lifecycle
+3. `core/rbac`, `core/policy`, and `core/rebac` for authorization choices
+4. `core/oauth2`, `core/oidc`, `core/saml`, `core/scim` for protocol integrations
+5. `kgorm` and `kredis` for concrete infrastructure patterns
 
-### Rate Limiting
-- In-memory or Redis-backed
-- Per-IP and per-identity limits
-- Progressive lockout after failures
-
-### CSRF Protection
-- State parameter in OIDC/OAuth flows
-- PKCE support for OAuth2
-
----
-
-## Multi-Tenancy Model
-
-```
-┌─────────────────────────────────────────────────┐
-│                  KAYAN INSTANCE                  │
-├─────────────────────────────────────────────────┤
-│  Tenant Resolver                                 │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐           │
-│  │ Header  │ │ Domain  │ │  Path   │           │
-│  └────┬────┘ └────┬────┘ └────┬────┘           │
-│       └──────────┬┴───────────┘                 │
-│                  ▼                               │
-│  ┌───────────────────────────────────────────┐  │
-│  │           Tenant Context                   │  │
-│  │  - ID, Settings, Password Policy           │  │
-│  │  - Allowed Strategies, MFA Requirements    │  │
-│  └───────────────────────────────────────────┘  │
-│                  │                               │
-│       ┌──────────┴──────────┐                   │
-│       ▼                     ▼                   │
-│  ┌──────────┐         ┌──────────┐             │
-│  │ Tenant A │         │ Tenant B │             │
-│  │ Identities│         │ Identities│            │
-│  └──────────┘         └──────────┘             │
-└─────────────────────────────────────────────────┘
-```
-
-**Isolation**: Identities have `TenantID` field, queries are scoped.
-
----
-
-## Performance Considerations
-
-| Operation | Typical Latency | Notes |
-|-----------|----------------|-------|
-| Password hash | 100ms-1s | Depends on bcrypt cost |
-| JWT validate | <1ms | No I/O |
-| DB session validate | 1-5ms | Single query |
-| RBAC check | 1-10ms | May need identity fetch |
-
-### Scaling
-
-- **Stateless**: JWT sessions scale horizontally
-- **Shared state**: Redis for rate limits, sessions
-- **Database**: Use read replicas for identity lookups
-
----
-
-## Observability
-
-### Metrics (Prometheus)
-- `kayan_registrations_total{status="success|failure"}`
-- `kayan_logins_total{method="password|oidc|..."}`
-- `kayan_sessions_active`
-- `kayan_policy_evaluations_total{decision="allow|deny"}`
-
-### Tracing (OpenTelemetry)
-- Spans for registration, login, session operations
-- Trace context propagation
-
-### Audit Logging
-- All authentication events logged with timestamp, IP, identity
-- SOC 2 / ISO 27001 aligned event format
+The rest of the architecture docs expand each of those layers in detail.

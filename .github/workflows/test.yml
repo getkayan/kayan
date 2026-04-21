@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ['1.21', '1.22']
+        go-version: ['1.22', '1.23']
     
     steps:
       - uses: actions/checkout@v4
@@ -33,14 +33,19 @@ jobs:
           cd kgorm
           go test -v -race ./...
 
+      - name: Run kredis Tests
+        run: |
+          cd kredis
+          go test -v -race ./...
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
-        if: matrix.go-version == '1.21'
+        if: matrix.go-version == '1.22'
         with:
           file: core/coverage.out
           flags: unittests
           name: codecov-umbrella
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
   integration:
     name: Integration Tests
@@ -68,7 +73,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.22'
           cache: true
 
       - name: Run Integration Tests

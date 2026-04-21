@@ -4,6 +4,67 @@
 
 ---
 
+## 0. Development
+
+### Module Structure
+
+This is a **Go multi-module workspace** (`go.work`). There is no single root module — each subdirectory is its own module:
+
+| Module path | Import path | Purpose |
+|-------------|-------------|---------|
+| `core/` | `github.com/getkayan/kayan/core` | Primary library (all auth logic) |
+| `kgorm/` | `github.com/getkayan/kayan/kgorm` | GORM storage adapter |
+| `kredis/` | `github.com/getkayan/kayan/kredis` | Redis adapter |
+| `cmd/kayan-cli/` | — | Administrative CLI |
+| `examples/nextjs-kayan-demo/backend` | — | Reference backend |
+
+### Build & Test Commands
+
+**Always `cd` into the module directory before running commands.** Do NOT run from the workspace root.
+
+```bash
+# Unit tests (race detection enabled)
+cd core && go test -race ./...
+cd kgorm && go test -race ./...
+cd kredis && go test -race ./...
+
+# With coverage (core only)
+cd core && go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+# Integration tests — requires PostgreSQL
+# Set DATABASE_URL=postgres://kayan:kayan@localhost:5432/kayan_test?sslmode=disable
+cd core && go test -race -tags=integration ./...
+
+# Build
+cd core && go build ./...
+cd kgorm && go build ./...
+
+# Lint
+cd core && golangci-lint run
+
+# CLI
+cd cmd/kayan-cli && go build -o kayan-cli .
+```
+
+### Multi-Module Pitfalls
+
+- **Never** run `go test ./...` from the workspace root — use per-module dirs.
+- `kredis/go.mod` uses `replace github.com/getkayan/kayan/core => ../core`. New adapter modules must do the same.
+- `kgorm/go.mod` does NOT use a replace directive — it relies on `go.work` resolving it.
+- Integration tests are tagged `//go:build integration` and run separately from unit tests.
+- When adding a new module, add it to `go.work` via `go work use ./newmodule`.
+
+### Key Documentation
+
+- [Architecture overview](docs/architecture/README.md)
+- [BYOS (Bring Your Own Schema)](docs/concepts/byos.md)
+- [Strategy internals](docs/architecture/strategy-internals.md)
+- [Extending Kayan](docs/architecture/extending-kayan.md)
+- [Getting started](docs/getting-started.md)
+- [Contributing](CONTRIBUTING.md)
+
+---
+
 ## 1. Core Philosophy (NEVER Violate)
 
 ### 1.1 Headless Only
@@ -215,6 +276,8 @@ func WithHooks(hooks Hooks) ManagerOption { ... }
 
 ## Quick Reference
 
+> See [docs/architecture/README.md](docs/architecture/README.md) for the full architecture guide.
+
 ```
 kayan/
 ├── core/                     # Core library — NO framework deps
@@ -237,7 +300,20 @@ kayan/
 │   ├── consent/              # GDPR/CCPA consent management
 │   ├── health/               # Health check utilities
 │   └── logger/               # Structured logging
-├── kgorm/                    # GORM storage adapter
+├── kgorm/                    # GORM storage adapter (co-located, self-contained)
+├── kredis/                   # Redis adapter (sessions, lockout, rate limiting)
 ├── cmd/                      # CLI tools
 └── docs/                     # Documentation
+```
+
+### Dependency Direction (enforcement)
+
+```
+core/identity  (stdlib only, leaf)
+     ↑
+core/domain, core/audit, core/events
+     ↑
+core/flow, core/session, core/oauth2, core/oidc, core/saml
+     ↑
+kgorm/, kredis/  (adapters — never imported by core/)
 ```

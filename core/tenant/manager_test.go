@@ -3,7 +3,6 @@ package tenant
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -48,12 +47,12 @@ func (m *mockStore) GetBySlug(ctx context.Context, slug string) (*Tenant, error)
 func (m *mockStore) List(ctx context.Context, f ListFilter) ([]*Tenant, error) { return nil, nil }
 
 type mockResolver struct {
-	resolveFunc func(r *http.Request) (string, error)
+	resolveFunc func(info ResolveInfo) (string, error)
 }
 
-func (m *mockResolver) Resolve(ctx context.Context, r *http.Request) (string, error) {
+func (m *mockResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
 	if m.resolveFunc != nil {
-		return m.resolveFunc(r)
+		return m.resolveFunc(info)
 	}
 	return "", nil
 }
@@ -77,15 +76,13 @@ func TestResolveFromRequest_Success(t *testing.T) {
 	store.Create(context.Background(), &Tenant{ID: "t1", Active: true})
 
 	resolver := &mockResolver{
-		resolveFunc: func(r *http.Request) (string, error) {
+		resolveFunc: func(info ResolveInfo) (string, error) {
 			return "t1", nil
 		},
 	}
 
 	m := NewManager(store, resolver)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	tenant, ctx, err := m.ResolveFromRequest(context.Background(), req)
+	tenant, ctx, err := m.Resolve(context.Background(), ResolveInfo{Host: "tenant.example.com"})
 
 	if err != nil {
 		t.Fatalf("ResolveFromRequest failed: %v", err)
@@ -106,15 +103,13 @@ func TestResolveFromRequest_Success(t *testing.T) {
 func TestResolveFromRequest_NotFound(t *testing.T) {
 	store := newMockStore()
 	resolver := &mockResolver{
-		resolveFunc: func(r *http.Request) (string, error) {
+		resolveFunc: func(info ResolveInfo) (string, error) {
 			return "t1", nil // Resolver finds ID, but store doesn't have it
 		},
 	}
 
 	m := NewManager(store, resolver)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	_, _, err := m.ResolveFromRequest(context.Background(), req)
+	_, _, err := m.Resolve(context.Background(), ResolveInfo{})
 
 	if err == nil {
 		t.Error("Expected error for non-existent tenant")
@@ -124,15 +119,13 @@ func TestResolveFromRequest_NotFound(t *testing.T) {
 func TestResolveFromRequest_Optional(t *testing.T) {
 	store := newMockStore()
 	resolver := &mockResolver{
-		resolveFunc: func(r *http.Request) (string, error) {
+		resolveFunc: func(info ResolveInfo) (string, error) {
 			return "", nil // No tenant found
 		},
 	}
 
 	m := NewManager(store, resolver, WithOptionalTenant())
-
-	req := httptest.NewRequest("GET", "/", nil)
-	tenant, _, err := m.ResolveFromRequest(context.Background(), req)
+	tenant, _, err := m.Resolve(context.Background(), ResolveInfo{})
 
 	if err != nil {
 		t.Fatalf("Unexpected error for optional tenant: %v", err)
@@ -149,7 +142,7 @@ func TestResolveFromRequest_Hook(t *testing.T) {
 	resolver := &mockResolver{}
 	m := NewManager(store, resolver)
 
-	m.hooks.BeforeResolve = func(ctx context.Context, r *http.Request) (string, bool) {
+	m.hooks.BeforeResolve = func(ctx context.Context, info ResolveInfo) (string, bool) {
 		return "hook-tenant", true
 	}
 
@@ -161,5 +154,43 @@ func TestResolveFromRequest_Hook(t *testing.T) {
 	}
 	if tenant.ID != "hook-tenant" {
 		t.Errorf("Expected hook-tenant, got %s", tenant.ID)
+	}
+}
+
+func TestResolveFromRequest_AdaptsRequest(t *testing.T) {
+	store := newMockStore()
+	store.Create(context.Background(), &Tenant{ID: "header-tenant", Active: true})
+
+	resolver := &mockResolver{
+		resolveFunc: func(info ResolveInfo) (string, error) {
+			if info.Host != "app.example.com" {
+				t.Fatalf("expected host app.example.com, got %q", info.Host)
+			}
+			if info.Path != "/tenants/header-tenant" {
+				t.Fatalf("expected path /tenants/header-tenant, got %q", info.Path)
+			}
+			if info.HeaderValue("X-Tenant-ID") != "header-tenant" {
+				t.Fatalf("expected X-Tenant-ID header to be propagated")
+			}
+			if info.QueryValue("tenant") != "query-tenant" {
+				t.Fatalf("expected tenant query to be propagated")
+			}
+			return info.HeaderValue("X-Tenant-ID"), nil
+		},
+	}
+
+	m := NewManager(store, resolver)
+	req := httptest.NewRequest("GET", "http://app.example.com/tenants/header-tenant?tenant=query-tenant", nil)
+	req.Header.Set("X-Tenant-ID", "header-tenant")
+
+	tenant, ctx, err := m.ResolveFromRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ResolveFromRequest failed: %v", err)
+	}
+	if tenant == nil || tenant.ID != "header-tenant" {
+		t.Fatalf("expected header-tenant, got %#v", tenant)
+	}
+	if IDFromContext(ctx) != "header-tenant" {
+		t.Fatalf("expected tenant id in context, got %q", IDFromContext(ctx))
 	}
 }

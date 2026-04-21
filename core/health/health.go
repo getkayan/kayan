@@ -38,8 +38,6 @@ package health
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 	"sync"
 	"time"
 )
@@ -204,52 +202,6 @@ func (m *Manager) IsHealthy(ctx context.Context) bool {
 func (m *Manager) IsReady(ctx context.Context) bool {
 	report := m.Check(ctx)
 	return report.Status != StatusUnhealthy
-}
-
-// ---- HTTP Handlers ----
-
-// LiveHandler returns a handler for liveness checks (Kubernetes).
-func (m *Manager) LiveHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	}
-}
-
-// ReadyHandler returns a handler for readiness checks (Kubernetes).
-func (m *Manager) ReadyHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		if m.IsReady(r.Context()) {
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{"status": "not ready"})
-		}
-	}
-}
-
-// FullHandler returns a handler for full health reports.
-func (m *Manager) FullHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		report := m.Check(r.Context())
-
-		w.Header().Set("Content-Type", "application/json")
-
-		switch report.Status {
-		case StatusHealthy:
-			w.WriteHeader(http.StatusOK)
-		case StatusDegraded:
-			w.WriteHeader(http.StatusOK)
-		case StatusUnhealthy:
-			w.WriteHeader(http.StatusServiceUnavailable)
-		}
-
-		json.NewEncoder(w).Encode(report)
-	}
 }
 
 // ---- Built-in Checkers ----

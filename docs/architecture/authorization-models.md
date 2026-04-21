@@ -1,316 +1,87 @@
 # Authorization Models
 
-Kayan provides flexible authorization with multiple policy engines that can be used independently or combined.
-
-## Overview
-
-| Model | Use Case | Complexity |
-|-------|----------|------------|
-| **RBAC** | Role-based permissions | Simple |
-| **ABAC** | Attribute-based policies | Medium |
-| **ReBAC** | Relationship-based access | Complex |
-| **Hybrid** | Combined engines | Custom |
-
----
-
-## RBAC (Role-Based Access Control)
-
-### Concept
-
-Users are assigned **roles**, and roles have **permissions**.
-
-```mermaid
-graph LR
-    U[User] -->|has| R1[Admin Role]
-    U -->|has| R2[Editor Role]
-    R1 -->|grants| P1[users:read]
-    R1 -->|grants| P2[users:write]
-    R1 -->|grants| P3[users:delete]
-    R2 -->|grants| P1
-    R2 -->|grants| P4[posts:write]
-```
-
-### Usage
-
-```go
-package main
-
-import (
-    "github.com/getkayan/kayan/core/policy"
-    "github.com/getkayan/kayan/core/rbac"
-)
-
-func main() {
-    // Create RBAC engine with in-memory storage
-    storage := rbac.NewMemoryStorage()
-    engine := policy.NewRBACEngine(storage)
-    
-    // Define roles and permissions
-    engine.CreateRole("admin", []string{
-        "users:read", "users:write", "users:delete",
-        "posts:read", "posts:write", "posts:delete",
-    })
-    
-    engine.CreateRole("editor", []string{
-        "posts:read", "posts:write",
-    })
-    
-    // Assign role to user
-    engine.AssignRole("user-123", "editor")
-    
-    // Check permission
-    allowed, _ := engine.Can(ctx, "user-123", "posts:write", nil)
-    // allowed = true
-}
-```
-
-### Middleware
-
-```go
-// Protect routes with RBAC
-e.POST("/posts", createPost, 
-    policy.RequirePermission(engine, "posts:write"))
-
-e.DELETE("/posts/:id", deletePost,
-    policy.RequireAnyPermission(engine, "posts:delete", "admin:all"))
-```
-
----
-
-## ABAC (Attribute-Based Access Control)
-
-### Concept
-
-Access decisions based on **attributes** of:
-- Subject (user properties)
-- Resource (object properties)
-- Action (operation type)
-- Environment (time, location, etc.)
-
-```mermaid
-graph TB
-    subgraph Request
-        S[Subject: user.role=manager, user.dept=sales]
-        A[Action: approve]
-        R[Resource: expense.amount=500, expense.dept=sales]
-        E[Environment: time=14:00]
-    end
-    
-    subgraph Policy
-        P["IF subject.role == 'manager'
-        AND resource.dept == subject.dept
-        AND resource.amount < 1000
-        THEN allow"]
-    end
-    
-    Request --> Policy
-    Policy --> D{Decision}
-    D -->|Match| Allow
-    D -->|No Match| Deny
-```
-
-### Usage
-
-```go
-// Create ABAC engine
-engine := policy.NewABACEngine()
-
-// Define policy rules
-engine.AddRule(policy.Rule{
-    Name: "managers-approve-dept-expenses",
-    Condition: func(ctx context.Context, subject, action string, resource any) bool {
-        user := GetUserFromContext(ctx)
-        expense := resource.(*Expense)
-        
-        return user.Role == "manager" &&
-               user.Department == expense.Department &&
-               expense.Amount < 1000
-    },
-    Effect: policy.Allow,
-})
-
-// Check access
-allowed, _ := engine.Can(ctx, userID, "approve", expense)
-```
-
-### Dynamic Attributes
-
-```go
-// Register attribute resolver
-engine.SetAttributeResolver(func(ctx context.Context, subjectID string) map[string]any {
-    user := loadUser(subjectID)
-    return map[string]any{
-        "role":       user.Role,
-        "department": user.Department,
-        "clearance":  user.ClearanceLevel,
-        "ip":         GetIPFromContext(ctx),
-        "time":       time.Now(),
-    }
-})
-```
-
----
-
-## Hybrid Authorization
-
-Combine multiple engines with configurable combination logic.
-
-### Combinators
-
-| Combinator | Logic | Use Case |
-|------------|-------|----------|
-| `DenyOverrides` | All must allow (AND) | Strict security |
-| `AllowOverrides` | Any can allow (OR) | Flexible access |
-
-### Usage
-
-```go
-// Create individual engines
-rbacEngine := policy.NewRBACEngine(storage)
-abacEngine := policy.NewABACEngine()
-
-// Combine with DenyOverrides (AND logic)
-// User must pass BOTH RBAC and ABAC checks
-hybrid := policy.NewHybridStrategy(
-    policy.DenyOverrides,
-    rbacEngine,
-    abacEngine,
-)
-
-// Use in middleware
-e.Use(policy.EnforcePolicy(hybrid))
-
-// Or check manually
-allowed, _ := hybrid.Can(ctx, userID, "documents:read", document)
-```
-
-### Example: Role + Ownership
-
-```go
-// RBAC: Must have documents:read permission
-// ABAC: Must own the document OR be admin
-
-rbacEngine.CreateRole("user", []string{"documents:read"})
-rbacEngine.CreateRole("admin", []string{"documents:read", "admin:all"})
-
-abacEngine.AddRule(policy.Rule{
-    Name: "owner-access",
-    Condition: func(ctx context.Context, subject, action string, resource any) bool {
-        doc := resource.(*Document)
-        return doc.OwnerID == subject
-    },
-    Effect: policy.Allow,
-})
-
-abacEngine.AddRule(policy.Rule{
-    Name: "admin-access",
-    Condition: func(ctx context.Context, subject, action string, resource any) bool {
-        user := GetUserFromContext(ctx)
-        return user.Role == "admin"
-    },
-    Effect: policy.Allow,
-})
-
-// Combine with AllowOverrides for ABAC (owner OR admin)
-// Then DenyOverrides with RBAC (must have permission)
-ownerOrAdmin := policy.NewHybridStrategy(policy.AllowOverrides, abacEngine)
-final := policy.NewHybridStrategy(policy.DenyOverrides, rbacEngine, ownerOrAdmin)
-```
-
----
-
-## Multi-Tenant Authorization
-
-### Tenant-Scoped Roles
-
-```go
-// Roles are scoped to tenant
-engine.AssignRole("user-123", "admin", rbac.WithTenant("tenant-abc"))
-
-// Check within tenant context
-ctx = tenant.WithTenantID(ctx, "tenant-abc")
-allowed, _ := engine.Can(ctx, "user-123", "users:delete", nil)
-```
-
-### Cross-Tenant Policies
-
-```go
-// Global admin role (no tenant scope)
-engine.CreateRole("super-admin", []string{"*:*"})
-engine.AssignRole("user-456", "super-admin") // No tenant = global
-
-// Check allows cross-tenant access
-allowed, _ := engine.Can(ctx, "user-456", "tenants:manage", nil)
-```
-
----
-
-## Policy Decision Flow
-
-```mermaid
-flowchart TD
-    R[Request] --> E1{Engine 1}
-    E1 -->|Allow| C1
-    E1 -->|Deny| C1
-    
-    C1{Combinator} --> E2{Engine 2}
-    E2 -->|Allow| C2
-    E2 -->|Deny| C2
-    
-    C2{Final} --> D[Decision]
-    
-    subgraph "DenyOverrides (AND)"
-        D1[All Allow → Allow]
-        D2[Any Deny → Deny]
-    end
-    
-    subgraph "AllowOverrides (OR)"
-        D3[Any Allow → Allow]
-        D4[All Deny → Deny]
-    end
-```
-
----
-
-## Best Practices
-
-### 1. Start Simple
-
-```go
-// Start with RBAC for basic permission checks
-engine := policy.NewRBACEngine(storage)
-```
-
-### 2. Add ABAC for Complex Rules
-
-```go
-// Add ABAC when you need dynamic conditions
-// like ownership, time-based access, etc.
-```
-
-### 3. Use Hybrid for Defense in Depth
-
-```go
-// Combine for layered security
-hybrid := policy.NewHybridStrategy(policy.DenyOverrides, rbac, abac)
-```
-
-### 4. Cache Wisely
-
-```go
-// Use cached storage for frequently checked permissions
-storage := rbac.NewCachedStorage(
-    rbac.NewDatabaseStorage(db),
-    cache,
-    5*time.Minute,
-)
-```
-
-### 5. Audit All Decisions
-
-```go
-// Log authorization decisions for compliance
-engine.SetAuditLogger(func(ctx context.Context, decision policy.Decision) {
-    audit.Log(ctx, "authorization", decision)
-})
-```
+Kayan intentionally separates authorization models instead of collapsing everything into one catch-all abstraction.
+
+## RBAC Architecture
+
+`core/rbac` is a lightweight role and permission engine. It expects a strategy that knows how to answer questions such as:
+
+- what roles does this identity have?
+- does this identity have a role?
+- what permissions are implied by those roles or directly attached?
+
+This makes RBAC easy to adapt to:
+
+- roles stored directly on the identity
+- roles stored in a separate persistence layer
+- derived roles computed from tenant or org membership
+
+Use RBAC for coarse-grained control and admin tooling. Avoid encoding deep hierarchy traversal into flat role strings if your resource model is actually relational.
+
+## ABAC Architecture
+
+`core/policy` exposes an `Engine` interface with a single `Can(ctx, subject, action, resource)` method. That small contract is enough to support:
+
+- pure ABAC strategies
+- custom domain-specific engines
+- composed hybrid policies
+
+Because rules are ordinary Go functions, they can inspect:
+
+- subject traits
+- resource attributes
+- tenant context
+- request metadata
+- device or risk metadata added to context
+
+This is a good fit for service-level authorization where the business rules already live in Go and need strong testability.
+
+## Hybrid Architecture
+
+Hybrid policy is usually the operational sweet spot in complex SaaS systems. The common model is:
+
+- RBAC for broad capability assignment
+- ABAC for contextual narrowing
+
+Example:
+
+- role says the actor is a billing admin
+- ABAC says they can only see invoices in their tenant and region
+
+Treat hybrid policy as composition, not duplication. Keep one layer responsible for entitlement and the other responsible for context.
+
+## ReBAC Architecture
+
+`core/rebac` models authorization as relationship graph traversal. Its main primitives are typed subject and object references plus relation names. A schema can define:
+
+- direct relations
+- computed relations
+- tuple-to-userset rewrites
+- cross-object inheritance rules
+
+That lets you represent structures such as:
+
+- user belongs to team
+- team administers workspace
+- workspace owns project
+- project contains document
+- document viewers inherit from project viewers
+
+The checker includes max-depth and cycle protection to keep graph traversal bounded.
+
+## Choosing a Model
+
+Use RBAC when your rules can be explained as named roles and direct permissions.
+
+Use ABAC when the rule depends on dynamic facts at evaluation time.
+
+Use ReBAC when the rule depends on graph traversal or object hierarchy.
+
+Use hybrid when two of those statements are true at once.
+
+## Recommended Boundaries
+
+- Keep request parsing outside the engine.
+- Keep persistence details outside the engine unless the store is explicitly part of the model, as in ReBAC.
+- Keep denial semantics simple for callers: boolean plus error.
+- Keep explanation, debug traces, or audit annotations as surrounding concern, not as the core authorization result type.

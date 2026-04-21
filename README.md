@@ -9,132 +9,211 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/getkayan/kayan)](https://github.com/getkayan/kayan/releases)
 
-**Kayan** is a headless, non-generic, extensible Identity & Access Management (IAM) library for Go.
+Kayan is a headless, non-generic, extensible IAM library for Go. It gives you authentication, session management, authorization, federation, provisioning, audit, compliance, and observability primitives without forcing an HTTP framework, a UI, or a fixed user schema.
 
----
+## Core Principles
 
-## Why Kayan?
+- Headless only. Kayan is a library, not a hosted service or UI framework.
+- Non-generic public APIs. Extension points use interfaces, `any`, and factory functions instead of type parameters.
+- BYOS. Your identity model, field names, ID type, and storage topology remain yours.
+- Strategy-driven composition. Authentication, sessions, authorization, tenancy, and protocol integrations are designed to be mixed and extended.
 
-| Challenge | Kayan's Solution |
-|-----------|------------------|
-| IAM solutions force their schema | **BYOS** - Bring Your Own Schema |
-| Go generics are complex | Non-generic design with interfaces |
-| Need UI flexibility | **Headless** - no opinions on frontend |
-| Single auth method lock-in | **Strategy pattern** - mix methods |
-| Scaling concerns | Stateless sessions, pluggable storage |
+## What You Get
 
----
+- Authentication flows in `core/flow` for password, magic link, OTP, WebAuthn, recovery, verification, step-up, rate limiting, and lockout.
+- Session strategies in `core/session` for stateless JWT and revocable database-backed sessions.
+- Authorization packages for RBAC, ABAC, hybrid policy, and ReBAC.
+- Federation and provisioning support across OAuth 2.0, OIDC, SAML 2.0, and SCIM 2.0.
+- Operational packages for audit, consent, compliance, telemetry, health checks, config, and logging.
+- Adapters such as `kgorm` and `kredis` for concrete persistence and distributed runtime support.
 
 ## Quick Start
 
 ```go
+package main
+
 import (
+    "context"
+    "log"
+    "os"
+    "time"
+
     "github.com/getkayan/kayan/core/flow"
+    "github.com/getkayan/kayan/core/identity"
     "github.com/getkayan/kayan/core/session"
     "github.com/getkayan/kayan/kgorm"
+    "github.com/google/uuid"
+    "gorm.io/driver/sqlite"
+    "gorm.io/gorm"
 )
 
-// 1. Your model
 type User struct {
     ID           string `gorm:"primaryKey"`
     Email        string `gorm:"uniqueIndex"`
     PasswordHash string
+    Traits       identity.JSON
 }
-func (u *User) GetID() any   { return u.ID }
+
+func (u *User) GetID() any { return u.ID }
+
 func (u *User) SetID(id any) { u.ID = id.(string) }
 
-// 2. Setup
-db, _ := gorm.Open(sqlite.Open("app.db"), &gorm.Config{})
-repo := kgorm.NewRepository(db)
-factory := func() any { return &User{} }
+func main() {
+    db, err := gorm.Open(sqlite.Open("app.db"), &gorm.Config{})
+    if err != nil {
+        log.Fatal(err)
+    }
 
-// 3. Registration
-regManager := flow.NewRegistrationManager(repo, factory)
-hasher := flow.NewBcryptHasher(10)
-pwStrategy := flow.NewPasswordStrategy(repo, hasher, "", factory)
-pwStrategy.MapFields([]string{"Email"}, "PasswordHash")
-regManager.RegisterStrategy(pwStrategy)
+    repo := kgorm.NewRepository(db)
+    factory := func() any { return &User{} }
 
-// 4. Login
-loginManager := flow.NewLoginManager(repo)
-loginManager.RegisterStrategy(pwStrategy)
+    reg, login := flow.PasswordAuth(
+        repo,
+        factory,
+        "email",
+        flow.WithHasherCost(12),
+        flow.WithIDGenerator(func() any { return uuid.NewString() }),
+        flow.WithPasswordPolicy(&flow.PasswordPolicy{
+            MinLength:        12,
+            RequireUppercase: true,
+            RequireLowercase: true,
+            RequireDigit:     true,
+        }),
+    )
 
-// 5. Sessions
-sessManager := session.NewManager(session.NewHS256Strategy(secret, 24*time.Hour))
+    ctx := context.Background()
+    traits := identity.JSON(`{"email":"dev@example.com"}`)
+
+    _, err = reg.Submit(ctx, "password", traits, "StrongPass1234")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    authenticated, err := login.Authenticate(ctx, "password", "dev@example.com", "StrongPass1234")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    jwtStrategy := session.NewHS256Strategy(os.Getenv("SESSION_SECRET"), 15*time.Minute)
+    sessionManager := session.NewManager(jwtStrategy)
+
+    _, err = sessionManager.Create(uuid.NewString(), authenticated.(*User).GetID())
+    if err != nil {
+        log.Fatal(err)
+    }
+}
 ```
 
----
-
-## Key Features
-
-### Authentication Strategies
-- **Password** - Bcrypt, argon2
-- **OIDC** - Google, GitHub, Microsoft
-- **WebAuthn** - Passkeys, FIDO2
-- **SAML 2.0** - Enterprise SSO
-- **Magic Link** - Passwordless email
-- **TOTP** - Two-factor authentication
-
-### Session Management
-- **JWT** - Stateless tokens
-- **Database** - Revocable sessions
-- **Rotation** - Access/refresh patterns
-
-### Authorization
-- **RBAC** - Role-based access
-- **ABAC** - Attribute-based policies
-- **Hybrid** - Combined RBAC+ABAC
-
-### Enterprise
-- **Multi-tenancy** - Tenant isolation
-- **Audit logging** - Compliance ready
-- **Rate limiting** - Brute-force protection
-
----
+For a deeper integration path with BYOS models, hooks, multiple auth strategies, tenancy, and authorization, start with [docs/getting-started.md](./docs/getting-started.md).
 
 ## Documentation
 
-### Getting Started
-- [Quick Start Guide](./docs/getting-started.md)
+Start with the docs index in [docs/README.md](./docs/README.md).
 
-### Concepts
-- [BYOS (Bring Your Own Schema)](./docs/concepts/byos.md)
+### Integration Path
+
+- [Getting Started](./docs/getting-started.md)
+- [BYOS](./docs/concepts/byos.md)
 - [Authentication Strategies](./docs/concepts/strategies.md)
 - [Session Management](./docs/concepts/sessions.md)
-- [Authorization (RBAC/ABAC)](./docs/concepts/authorization.md)
+- [Authorization](./docs/concepts/authorization.md)
 - [Multi-Tenancy](./docs/concepts/multi-tenancy.md)
 
 ### Architecture
+
 - [Architecture Overview](./docs/architecture/README.md)
+- [Authentication Flows](./docs/architecture/authentication-flows.md)
+- [Authorization Models](./docs/architecture/authorization-models.md)
 - [Security Model](./docs/architecture/security-model.md)
-- [Strategy Internals](./docs/architecture/strategy-internals.md)
 - [Storage Layer](./docs/architecture/storage-layer.md)
+- [Strategy Internals](./docs/architecture/strategy-internals.md)
 - [Extending Kayan](./docs/architecture/extending-kayan.md)
 
-### Reference
+### Package and Runtime Reference
+
+- [Infrastructure Packages](./docs/core/infrastructure.md)
+- [OIDC and OAuth 2.0](./docs/core/oidc.md)
+- [SAML 2.0](./docs/core/saml.md)
+- [SCIM 2.0](./docs/core/scim.md)
+- [Storage Adapters](./docs/adapters/storage.md)
+- [Operations](./docs/operations/README.md)
 - [Configuration](./docs/reference/configuration.md)
 - [API Reference](./docs/reference/api.md)
-- [OpenAPI Spec](./docs/openapi/openapi.yaml)
+- [JavaScript and TypeScript Integration](./docs/sdk/javascript.md)
+- [OpenAPI Specification](./docs/openapi/openapi.yaml)
 
-### SDKs
-- [JavaScript/TypeScript](./docs/sdk/javascript.md)
+## Docs Site
 
-### Examples
-- [20+ Examples](../kayan-examples/)
+This repository now includes a MkDocs navigation file over the existing `docs/` tree.
 
----
+Install the docs dependencies:
 
-## Ecosystem
+```bash
+python -m pip install -r requirements-docs.txt
+```
 
-| Package | Description |
-|---------|-------------|
-| `kayan` | Core library |
-| `kayan-echo` | Echo framework integration |
-| `kayan-js` | TypeScript SDK |
-| `kayan-console` | Admin UI (Next.js) |
-| `kayan-examples` | Working examples |
+Run the docs locally:
 
----
+```bash
+mkdocs serve
+```
+
+Build a static site for GitHub Pages or any static host:
+
+```bash
+mkdocs build
+```
+
+The site configuration lives in `mkdocs.yml` and uses `docs/README.md` as the documentation home page.
+
+## Package Map
+
+### Identity and authentication
+
+- `core/identity`: default identity, credential, session, and JSON helpers
+- `core/domain`: persistence contracts and shared interfaces
+- `core/flow`: registration, login, password auth, passwordless methods, WebAuthn, recovery, verification, step-up, rate limiting, lockout
+- `core/session`: JWT and database-backed sessions
+- `core/device`: device trust and fingerprinting
+- `core/mfa`: MFA enrollment, challenge, recovery codes, and verification
+- `core/risk`: adaptive risk scoring
+
+### Authorization and tenancy
+
+- `core/rbac`: role and permission checks
+- `core/rebac`: relationship-based authorization
+- `core/policy`: ABAC and hybrid policy engines
+- `core/tenant`: tenant resolution, hooks, and scoped storage
+- `core/admin`: admin-oriented headless APIs
+
+### Federation and provisioning
+
+- `core/oauth2`: OAuth 2.0 authorization server components
+- `core/oidc`: OIDC discovery, ID tokens, and logout helpers
+- `core/saml`: SAML 2.0 service provider support
+- `core/scim`: SCIM 2.0 provisioning and mapping
+
+### Operations and compliance
+
+- `core/audit`: audit events and store contracts
+- `core/events`: event dispatch and topics
+- `core/consent`: consent tracking and export
+- `core/compliance`: retention and encryption helpers
+- `core/config`: environment-backed configuration
+- `core/logger`: logging setup
+- `core/telemetry`: OpenTelemetry traces and metrics
+- `core/health`: liveness, readiness, and detailed health reports
+
+### Adapters
+
+- `kgorm`: GORM-backed storage adapter for identities, credentials, sessions, OAuth 2.0, RBAC, ReBAC, SCIM, and audit
+- `kredis`: Redis-backed runtime support for sessions, revocation-adjacent state, rate limiting, lockout, and WebAuthn sessions
+
+## Examples
+
+- [core/flow/example_passwordauth_test.go](./core/flow/example_passwordauth_test.go)
+- [core/tenant/example_manager_test.go](./core/tenant/example_manager_test.go)
+- [examples/nextjs-kayan-demo](./examples/nextjs-kayan-demo)
 
 ## License
 

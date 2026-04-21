@@ -1,69 +1,66 @@
 # Storage Adapters
 
-Kayan is strictly decoupled from any specific database or ORM. It interacts with persistence through the `domain` storage interfaces. 
+Kayan keeps adapters outside `core/` so databases and caches can evolve without dragging transport or persistence assumptions into the IAM logic.
 
-## Standard Usage: GORM Adapter (kgorm)
+## kgorm
 
-The official GORM adapter is the fastest way to get Kayan running on PostgreSQL, MySQL, SQLite, or SQL Server.
+`kgorm` is the primary relational adapter in the repository.
 
-### 1. Initialize the Repository
-```go
-import "github.com/getkayan/kayan/kgorm"
+It provides repository implementations for:
 
-db, _ := gorm.Open(postgres.Open(dsn))
-userFactory := func() identity.FlowIdentity { return &User{} }
+- identities and credentials
+- sessions
+- audit events
+- OAuth 2.0 clients, auth codes, and refresh tokens
+- RBAC persistence helpers
+- ReBAC tuples and schema-adjacent storage
+- SCIM persistence helpers
 
-repo := kgorm.NewRepository(db, userFactory)
+### When to use it
 
-// Optional: Enable Multi-tenancy isolation at the database level
-scopedRepo := kgorm.NewScopedRepository(repo, "tenant-123")
-```
+Use `kgorm` when your system of record is a relational database and you want the fastest path to production.
 
----
+### What it demonstrates
 
-## Custom Implementation: Vanilla SQL Adapter
+Even if you do not use GORM, `kgorm` is the reference example of how to implement `core/domain` and related package interfaces while respecting BYOS.
 
-If you don't use GORM or need maximum performance with raw SQL, you can implement the `domain.IdentityStorage` interface directly.
+## kredis
 
-### Example: Raw SQL Repository
-```go
-type SqlRepository struct {
-    db      *sql.DB
-    factory func() identity.FlowIdentity
-}
+`kredis` is the shared-state adapter for distributed auth concerns.
 
-// 1. Implementation of GetIdentity
-func (r *SqlRepository) GetIdentity(factory func() identity.FlowIdentity, id any) (identity.FlowIdentity, error) {
-    ident := factory() // Create new instance of user model
-    
-    // Query row and scan into the identity instance
-    row := r.db.QueryRow("SELECT id, traits, state FROM users WHERE id = ?", id)
-    var traits string
-    err := row.Scan(ident.GetID(), &traits, ident.GetState()) // Simplified
-    
-    return ident, err
-}
+It provides:
 
-// 2. Implementation of FindIdentity
-func (r *SqlRepository) FindIdentity(factory func() identity.FlowIdentity, query map[string]any) (identity.FlowIdentity, error) {
-    // Dynamically build WHERE clause based on 'query' map
-    // (e.g. traits ->> 'email' = 'bob@example.com')
-    return nil, nil
-}
-```
+- session support for Redis-backed flows
+- rate limiting
+- account lockout storage
+- WebAuthn-related persistence helpers
 
----
+### When to use it
 
-## Common Mistakes
+Use `kredis` when you deploy multiple application instances and need shared security state across them.
 
-> [!CAUTION]
-> **Returning Concrete Types**
-> Storage methods must always return the `identity.FlowIdentity` interface (which you get from calling the `factory()`). Never return your concrete `*User` struct directly from the storage layer to the core library, as this violates the decoupled architecture.
+Typical examples:
 
-> [!WARNING]
-> **Incorrect Factory Usage**
-> The `factory func() identity.FlowIdentity` passed to storage methods is your **only** way to know what the user model looks like at runtime. If you ignore the factory and hardcode a `&User{}` inside your adapter, your storage adapter will only work for that specific project and cannot be reused or extended.
+- rate limit counts visible to all instances
+- lockout windows shared across all login workers
+- short-lived auth artifacts with TTL-based expiry
 
-> [!TIP]
-> **Use JSON-Ready Databases**
-> Kayan heavily uses the `identity.JSON` type for traits and configurations. To ensure high performance for searching within traits (e.g., finding a user by email in a JSON column), use a database with native JSONB support (like PostgreSQL) and ensure you have GIN indexes on the traits column.
+## Recommended Combined Architecture
+
+The common production topology is:
+
+- `kgorm` as the durable system of record
+- `kredis` for distributed volatile state
+
+That combination gives you strong persistence plus low-latency shared counters and expirations.
+
+## Writing a New Adapter
+
+Follow the same rules as the built-in adapters:
+
+- depend on the relevant `core/` contracts only
+- keep persistence concerns out of `core/`
+- preserve BYOS by honoring factories and `any`
+- write package-local tests plus integration coverage
+
+If your adapter needs its own schema, migration tooling, or client connection management, keep that code in the adapter package rather than in consuming applications.

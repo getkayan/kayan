@@ -3,7 +3,6 @@ package tenant
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 )
 
@@ -26,8 +25,8 @@ func NewSubdomainResolver(baseDomain string) *SubdomainResolver {
 	}
 }
 
-func (r *SubdomainResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
-	host := req.Host
+func (r *SubdomainResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
+	host := info.Host
 	// Remove port if present
 	if idx := strings.Index(host, ":"); idx != -1 {
 		host = host[:idx]
@@ -74,8 +73,8 @@ func NewHeaderResolver(headerName string) *HeaderResolver {
 	return &HeaderResolver{HeaderName: headerName}
 }
 
-func (r *HeaderResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
-	return req.Header.Get(r.HeaderName), nil
+func (r *HeaderResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
+	return info.HeaderValue(r.HeaderName), nil
 }
 
 // PathResolver extracts tenant from URL path.
@@ -96,8 +95,8 @@ func NewPathResolver(prefix string, position int) *PathResolver {
 	}
 }
 
-func (r *PathResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
-	path := req.URL.Path
+func (r *PathResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
+	path := info.Path
 
 	if r.PathPrefix != "" {
 		if !strings.HasPrefix(path, r.PathPrefix) {
@@ -131,8 +130,8 @@ func NewQueryResolver(paramName string) *QueryResolver {
 	return &QueryResolver{ParamName: paramName}
 }
 
-func (r *QueryResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
-	return req.URL.Query().Get(r.ParamName), nil
+func (r *QueryResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
+	return info.QueryValue(r.ParamName), nil
 }
 
 // JWTClaimResolver extracts tenant from a JWT claim.
@@ -155,7 +154,7 @@ func NewJWTClaimResolver(claimName string, claimsKey any) *JWTClaimResolver {
 	}
 }
 
-func (r *JWTClaimResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
+func (r *JWTClaimResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
 	claims, ok := ctx.Value(r.ClaimsContextKey).(map[string]any)
 	if !ok {
 		return "", nil
@@ -177,9 +176,9 @@ func NewChainResolver(resolvers ...Resolver) *ChainResolver {
 	return &ChainResolver{Resolvers: resolvers}
 }
 
-func (r *ChainResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
+func (r *ChainResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
 	for _, resolver := range r.Resolvers {
-		tenantID, err := resolver.Resolve(ctx, req)
+		tenantID, err := resolver.Resolve(ctx, info)
 		if err != nil {
 			return "", err
 		}
@@ -200,7 +199,7 @@ func NewStaticResolver(tenantID string) *StaticResolver {
 	return &StaticResolver{TenantID: tenantID}
 }
 
-func (r *StaticResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
+func (r *StaticResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
 	return r.TenantID, nil
 }
 
@@ -209,7 +208,7 @@ func (r *StaticResolver) Resolve(ctx context.Context, req *http.Request) (string
 type CacheResolver struct {
 	Inner   Resolver
 	Cache   Cache
-	KeyFunc func(*http.Request) string
+	KeyFunc func(ResolveInfo) string
 	TTL     int // seconds
 }
 
@@ -219,9 +218,9 @@ type Cache interface {
 	Set(ctx context.Context, key string, value string, ttlSeconds int) error
 }
 
-func NewCacheResolver(inner Resolver, cache Cache, keyFunc func(*http.Request) string) *CacheResolver {
+func NewCacheResolver(inner Resolver, cache Cache, keyFunc func(ResolveInfo) string) *CacheResolver {
 	if keyFunc == nil {
-		keyFunc = func(r *http.Request) string { return r.Host }
+		keyFunc = func(info ResolveInfo) string { return info.Host }
 	}
 	return &CacheResolver{
 		Inner:   inner,
@@ -231,8 +230,8 @@ func NewCacheResolver(inner Resolver, cache Cache, keyFunc func(*http.Request) s
 	}
 }
 
-func (r *CacheResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
-	key := r.KeyFunc(req)
+func (r *CacheResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
+	key := r.KeyFunc(info)
 
 	// Check cache
 	if cached, ok := r.Cache.Get(ctx, key); ok {
@@ -240,7 +239,7 @@ func (r *CacheResolver) Resolve(ctx context.Context, req *http.Request) (string,
 	}
 
 	// Resolve
-	tenantID, err := r.Inner.Resolve(ctx, req)
+	tenantID, err := r.Inner.Resolve(ctx, info)
 	if err != nil {
 		return "", err
 	}
@@ -266,8 +265,8 @@ func NewValidatingResolver(inner Resolver, store Store) *ValidatingResolver {
 	}
 }
 
-func (r *ValidatingResolver) Resolve(ctx context.Context, req *http.Request) (string, error) {
-	tenantID, err := r.Inner.Resolve(ctx, req)
+func (r *ValidatingResolver) Resolve(ctx context.Context, info ResolveInfo) (string, error) {
+	tenantID, err := r.Inner.Resolve(ctx, info)
 	if err != nil {
 		return "", err
 	}
