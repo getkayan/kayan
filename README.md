@@ -27,6 +27,14 @@ Kayan is a headless, non-generic, extensible IAM library for Go. It gives you au
 - Operational packages for audit, consent, compliance, telemetry, health checks, config, and logging.
 - Adapters such as `kgorm` and `kredis` for concrete persistence and distributed runtime support.
 
+## Quick Links
+
+- 🚀 **[5-Minute Quick Start](./docs/QUICKSTART.md)** — Get up and running fast
+- 🤖 **[AI Assistant Instructions](./.ai-instructions.md)** — Context for AI coding assistants
+- 🌐 **[HTTP Framework Integration](./docs/adapters/http-frameworks.md)** — Fiber, Echo, Gin, stdlib
+- 📚 **[Complete Examples](./examples/)** — Password, magic link, TOTP, WebAuthn, and more
+- 🏗️ **[Architecture Guide](./docs/architecture/README.md)** — Design principles and patterns
+
 ## Quick Start
 
 ```go

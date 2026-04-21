@@ -1,64 +1,260 @@
-// Example 08: Recovery Codes (strategy: recovery_code)
+// 08-recovery-codes: MFA recovery via one-time recovery codes backed by Kayan.
 //
-// Demonstrates single-use MFA fallback codes generated at setup time.
-// Each code is bcrypt-hashed before storage; plaintexts shown once.
+// Demonstrates:
+//   - flow.NewRecoveryCodeStrategy() with flow.RecoveryCodeRepository
+//   - flow.GenerateRecoveryCodes() for cryptographically random code generation
+//   - flow.NewBcryptHasher() for code hashing (only hashes stored, never plaintext)
+//   - Normal password login + recovery fallback (each code is single-use)
 //
-// Flow:
-//  1. POST /api/register              { email, password }
-//  2. POST /api/login                 { email, password } → partial_token (MFA step required)
-//  3. POST /api/recovery-codes/generate  Authorization: partial_token → { codes } ← shown once
-//  4. POST /api/login/recover         { email, recovery_code } → session_token
-//  5. GET  /api/me                    Authorization: Bearer <session_token>
+// Endpoints:
+//   - POST /api/register                – { email, password } → { id }
+//   - POST /api/login                   – { email, password } → { session_token }
+//   - POST /api/recovery-codes/generate – Authorization: Bearer → { codes: [...] }
+//   - POST /api/login/recover           – { email, code } → { session_token }
+//   - GET  /api/me                      – Authorization: Bearer <session_token>
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
+	"time"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/getkayan/kayan/core/flow"
+	"github.com/getkayan/kayan/core/identity"
+	"github.com/getkayan/kayan/core/session"
+	"github.com/google/uuid"
 )
 
-const bcryptCost = 12
+// ---------- In-memory IdentityStorage + RecoveryCodeRepository ----------
 
-// ---- storage ----
-
-type user struct {
-	ID           string
-	Email        string
-	PasswordHash string
-}
-
-type codeRecord struct {
-	ID   string
-	Hash string
-	Used bool
-}
-
-type session struct {
-	userID  string
-	partial bool // true = only password step done, needs recovery
-}
-
-var (
+type memRepo struct {
 	mu            sync.RWMutex
-	users         = map[string]*user{}         // email → user
-	usersByID     = map[string]*user{}         // id → user
-	recoveryCodes = map[string][]*codeRecord{} // userID → codes
-	sessions      = map[string]*session{}      // token → session
-)
+	identities    map[string]any
+	creds         map[string]*identity.Credential
+	recoveryCodes map[string][]*flow.RecoveryCodeRecord // identityID → codes
+}
 
-// ---- helpers ----
+func newMemRepo() *memRepo {
+	return &memRepo{
+		identities:    make(map[string]any),
+		creds:         make(map[string]*identity.Credential),
+		recoveryCodes: make(map[string][]*flow.RecoveryCodeRecord),
+	}
+}
 
-func cors(next http.Handler) http.Handler {
+// domain.IdentityStorage implementation
+
+func (r *memRepo) CreateIdentity(ident any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
+	}
+	return nil
+}
+
+func (r *memRepo) GetIdentity(factory func() any, id any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	v, ok := r.identities[fmt.Sprintf("%v", id)]
+	if !ok {
+		return nil, errors.New("identity not found")
+	}
+	return v, nil
+}
+
+func (r *memRepo) FindIdentity(factory func() any, query map[string]any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, ident := range r.identities {
+		v := reflect.ValueOf(ident)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		match := true
+		for field, value := range query {
+			f := v.FieldByName(field)
+			if !f.IsValid() || fmt.Sprintf("%v", f.Interface()) != fmt.Sprintf("%v", value) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return ident, nil
+		}
+	}
+	return nil, errors.New("identity not found")
+}
+
+func (r *memRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]any, 0, len(r.identities))
+	for _, v := range r.identities {
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (r *memRepo) UpdateIdentity(ident any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
+	}
+	return nil
+}
+
+func (r *memRepo) DeleteIdentity(factory func() any, id any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.identities, fmt.Sprintf("%v", id))
+	return nil
+}
+
+func (r *memRepo) CreateCredential(cred any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := cred.(*identity.Credential); ok {
+		r.creds[c.Identifier+":"+c.Type] = c
+	}
+	return nil
+}
+
+func (r *memRepo) GetCredentialByIdentifier(identifier, method string) (*identity.Credential, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if method == "" {
+		for key, c := range r.creds {
+			if strings.HasPrefix(key, identifier+":") {
+				return c, nil
+			}
+		}
+		return nil, errors.New("credential not found")
+	}
+	c, ok := r.creds[identifier+":"+method]
+	if !ok {
+		return nil, errors.New("credential not found")
+	}
+	return c, nil
+}
+
+func (r *memRepo) UpdateCredentialSecret(_ context.Context, identityID, method, secret string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.creds {
+		if c.IdentityID == identityID && c.Type == method {
+			c.Secret = secret
+			return nil
+		}
+	}
+	return errors.New("credential not found")
+}
+
+// flow.RecoveryCodeRepository implementation
+
+// FindIdentityByField looks up an identity by a named field and value.
+// Used by RecoveryCodeStrategy to find the identity by email.
+func (r *memRepo) FindIdentityByField(_ context.Context, field, value string, factory func() any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, ident := range r.identities {
+		// Check JSON traits.
+		if ts, ok := ident.(flow.TraitSource); ok {
+			var m map[string]any
+			if json.Unmarshal(ts.GetTraits(), &m) == nil {
+				if fmt.Sprintf("%v", m[strings.ToLower(field)]) == value {
+					return ident, nil
+				}
+			}
+		}
+		// Check struct fields.
+		v := reflect.ValueOf(ident)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		f := v.FieldByName(field)
+		if f.IsValid() && fmt.Sprintf("%v", f.Interface()) == value {
+			return ident, nil
+		}
+	}
+	return nil, errors.New("identity not found")
+}
+
+// FindUnusedRecoveryCode returns the first unused recovery code for an identity.
+func (r *memRepo) FindUnusedRecoveryCode(_ context.Context, identityID any) (*flow.RecoveryCodeRecord, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id := fmt.Sprintf("%v", identityID)
+	for _, rec := range r.recoveryCodes[id] {
+		if rec != nil {
+			return rec, nil
+		}
+	}
+	return nil, flow.ErrNoRecoveryCodesRemaining
+}
+
+// MarkRecoveryCodeUsed removes the code so it cannot be used again.
+func (r *memRepo) MarkRecoveryCodeUsed(_ context.Context, identityID any, codeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := fmt.Sprintf("%v", identityID)
+	codes := r.recoveryCodes[id]
+	for i, rec := range codes {
+		if rec != nil && rec.ID == codeID {
+			codes[i] = nil // mark used (single-use)
+			return nil
+		}
+	}
+	return errors.New("code not found")
+}
+
+// StoreRecoveryCodes saves hashed recovery codes for an identity (replaces existing).
+func (r *memRepo) StoreRecoveryCodes(identityID string, hashes []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	records := make([]*flow.RecoveryCodeRecord, len(hashes))
+	for i, h := range hashes {
+		records[i] = &flow.RecoveryCodeRecord{
+			ID:   uuid.New().String(),
+			Hash: h,
+		}
+	}
+	r.recoveryCodes[identityID] = records
+}
+
+// ---------- Server ----------
+
+type server struct {
+	repo         *memRepo
+	reg          *flow.RegistrationManager
+	pwLogin      *flow.LoginManager
+	recoverLogin *flow.LoginManager
+	sessions     *session.JWTStrategy
+	hasher       *flow.BcryptHasher
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -68,186 +264,163 @@ func cors(next http.Handler) http.Handler {
 	})
 }
 
-func jsonResponse(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
 func bearerToken(r *http.Request) string {
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return auth[7:]
+	parts := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
+	if len(parts) == 2 && parts[0] == "Bearer" {
+		return parts[1]
 	}
 	return ""
 }
 
-// ---- handlers ----
-
-func handleRegister(w http.ResponseWriter, r *http.Request) {
+// POST /api/register – { email, password }
+func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" || body.Password == "" {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "email and password required"})
+		writeError(w, http.StatusBadRequest, "email and password required")
 		return
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if _, exists := users[body.Email]; exists {
-		jsonResponse(w, http.StatusConflict, map[string]string{"error": "email already registered"})
-		return
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcryptCost)
+	identRaw, err := s.reg.Submit(r.Context(), "password",
+		identity.JSON(fmt.Sprintf(`{"email":%q}`, body.Email)),
+		body.Password,
+	)
 	if err != nil {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	u := &user{ID: randomHex(8), Email: body.Email, PasswordHash: string(hash)}
-	users[body.Email] = u
-	usersByID[u.ID] = u
-	jsonResponse(w, http.StatusCreated, map[string]string{"id": u.ID, "email": u.Email})
+	ident := identRaw.(*identity.Identity)
+	writeJSON(w, http.StatusCreated, map[string]string{"id": ident.ID, "email": body.Email})
 }
 
-func handleLogin(w http.ResponseWriter, r *http.Request) {
+// POST /api/login – { email, password } → { session_token }
+func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" || body.Password == "" {
+		writeError(w, http.StatusBadRequest, "email and password required")
 		return
 	}
-	mu.RLock()
-	u, ok := users[body.Email]
-	mu.RUnlock()
-	if !ok || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(body.Password)) != nil {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+	identRaw, err := s.pwLogin.Authenticate(r.Context(), "password", body.Email, body.Password)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	partial := "partial_" + randomHex(16)
-	mu.Lock()
-	sessions[partial] = &session{userID: u.ID, partial: true}
-	mu.Unlock()
-	jsonResponse(w, http.StatusOK, map[string]any{
-		"partial_token": partial,
-		"message":       "Use your recovery code to complete login",
-	})
+	ident := identRaw.(*identity.Identity)
+	sess, err := s.sessions.Create(uuid.New().String(), ident.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"session_token": sess.ID})
 }
 
-func handleGenerateCodes(w http.ResponseWriter, r *http.Request) {
-	token := bearerToken(r)
-	mu.RLock()
-	sess, ok := sessions[token]
-	mu.RUnlock()
-	if !ok || !sess.partial {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+// POST /api/recovery-codes/generate – Authorization: Bearer
+// Generates 10 fresh recovery codes. Each code is shown once; only bcrypt hashes stored.
+func (s *server) handleGenerateCodes(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.sessions.Validate(bearerToken(r))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid session")
 		return
 	}
 
-	const n = 10
-	plaintexts := make([]string, 0, n)
-	records := make([]*codeRecord, 0, n)
-	for i := 0; i < n; i++ {
-		plain := randomHex(16) // 32 hex chars
-		hash, err := bcrypt.GenerateFromPassword([]byte(plain), bcryptCost)
-		if err != nil {
-			jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "generation failed"})
-			return
-		}
-		plaintexts = append(plaintexts, plain)
-		records = append(records, &codeRecord{ID: randomHex(4), Hash: string(hash)})
+	// flow.GenerateRecoveryCodes: cryptographically random codes + their bcrypt hashes.
+	plaintexts, hashes, err := flow.GenerateRecoveryCodes(s.hasher, 10)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate codes")
+		return
 	}
+	s.repo.StoreRecoveryCodes(sess.IdentityID, hashes)
 
-	mu.Lock()
-	recoveryCodes[sess.userID] = records
-	mu.Unlock()
-
-	log.Printf("[Recovery Codes] Generated %d codes for user %s", n, sess.userID)
-	jsonResponse(w, http.StatusCreated, map[string]any{
-		"codes":   plaintexts,
-		"message": "Store these codes safely — they will not be shown again.",
-	})
+	writeJSON(w, http.StatusCreated, map[string]any{"codes": plaintexts})
 }
 
-func handleRecover(w http.ResponseWriter, r *http.Request) {
+// POST /api/login/recover – { email, code } → { session_token }
+// RecoveryCodeStrategy verifies the code via bcrypt; marks it used on success.
+func (s *server) handleRecover(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email        string `json:"email"`
-		RecoveryCode string `json:"recovery_code"`
+		Email string `json:"email"`
+		Code  string `json:"code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" || body.Code == "" {
+		writeError(w, http.StatusBadRequest, "email and code required")
 		return
 	}
 
-	mu.RLock()
-	u, ok := users[body.Email]
-	mu.RUnlock()
-	if !ok {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "invalid"})
+	identRaw, err := s.recoverLogin.Authenticate(r.Context(), "recovery_code", body.Email, body.Code)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid or already-used recovery code")
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	codes := recoveryCodes[u.ID]
-	for _, c := range codes {
-		if c.Used {
-			continue
-		}
-		if bcrypt.CompareHashAndPassword([]byte(c.Hash), []byte(body.RecoveryCode)) == nil {
-			c.Used = true
-			token := "sess_" + randomHex(16)
-			sessions[token] = &session{userID: u.ID, partial: false}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"session_token": token})
-			return
-		}
+	ident := identRaw.(*identity.Identity)
+	sess, err := s.sessions.Create(uuid.New().String(), ident.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session error")
+		return
 	}
-	jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "invalid or already used recovery code"})
+	writeJSON(w, http.StatusOK, map[string]string{"session_token": sess.ID})
 }
 
-func handleMe(w http.ResponseWriter, r *http.Request) {
-	token := bearerToken(r)
-	mu.RLock()
-	sess, ok := sessions[token]
-	mu.RUnlock()
-	if !ok || sess.partial {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+// GET /api/me – Authorization: Bearer
+func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.sessions.Validate(bearerToken(r))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid or expired session")
 		return
 	}
-	mu.RLock()
-	u := usersByID[sess.userID]
-	mu.RUnlock()
-	if u == nil {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "user not found"})
+	identRaw, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, sess.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "identity not found")
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]string{"id": u.ID, "email": u.Email})
+	ident := identRaw.(*identity.Identity)
+	var email string
+	var m map[string]any
+	if json.Unmarshal(ident.Traits, &m) == nil {
+		email, _ = m["email"].(string)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": ident.ID, "email": email})
 }
+
+// ---------- Main ----------
 
 func main() {
+	repo := newMemRepo()
+	factory := func() any { return &identity.Identity{} }
+	hasher := flow.NewBcryptHasher(12)
+
+	// Password auth.
+	reg, pwLogin := flow.PasswordAuth(repo, factory, "email")
+
+	// Recovery-code strategy: looks up identity by "email" field, uses bcrypt for code comparison.
+	recoveryStrategy := flow.NewRecoveryCodeStrategy(repo, hasher, factory, "email")
+	recoverLogin := flow.NewLoginManager(repo, factory)
+	recoverLogin.RegisterStrategy(recoveryStrategy)
+
+	jwtStrategy := session.NewHS256Strategy("change-me-in-production", 24*time.Hour)
+
+	srv := &server{
+		repo:         repo,
+		reg:          reg,
+		pwLogin:      pwLogin,
+		recoverLogin: recoverLogin,
+		sessions:     jwtStrategy,
+		hasher:       hasher,
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/register", handleRegister)
-	mux.HandleFunc("/api/login", handleLogin)
-	mux.HandleFunc("/api/recovery-codes/generate", handleGenerateCodes)
-	mux.HandleFunc("/api/login/recover", handleRecover)
-	mux.HandleFunc("/api/me", handleMe)
+	mux.HandleFunc("POST /api/register", srv.handleRegister)
+	mux.HandleFunc("POST /api/login", srv.handleLogin)
+	mux.HandleFunc("POST /api/recovery-codes/generate", srv.handleGenerateCodes)
+	mux.HandleFunc("POST /api/login/recover", srv.handleRecover)
+	mux.HandleFunc("GET /api/me", srv.handleMe)
 
-	log.Println("Recovery codes example backend listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", cors(mux)))
-}
-
-func init() {
-	// Ensure POST-only on register/login/recover
-	origMux := http.DefaultServeMux
-	_ = origMux
-	_ = fmt.Sprintf // used in log.Printf
+	log.Println("08-recovery-codes backend listening on :8080")
+	if err := http.ListenAndServe(":8080", corsMiddleware(mux)); err != nil {
+		log.Fatal(err)
+	}
 }

@@ -20,6 +20,15 @@
 // # Example Implementation
 //
 // See the kgorm package for a complete GORM-based implementation of these interfaces.
+//
+//	import "github.com/getkayan/kayan/kgorm"
+//	import "gorm.io/driver/postgres"
+//
+//	db, _ := gorm.Open(postgres.Open("postgres://..."), &gorm.Config{})
+//	repo := kgorm.New(db)
+//
+//	// Now use repo with any flow manager
+//	reg, login := flow.PasswordAuth(repo, func() any { return &User{} }, "email")
 package domain
 
 import (
@@ -38,6 +47,26 @@ type Storage interface {
 	TokenStore
 }
 
+// IdentityStorage defines CRUD operations for identities and credentials.
+//
+// The factory function pattern allows storage implementations to work with any
+// identity model type without using generics. The factory returns a pointer to
+// an empty instance of the user's model.
+//
+// Example usage:
+//
+//	// Create
+//	user := &User{ID: "123", Email: "user@example.com"}
+//	repo.CreateIdentity(user)
+//
+//	// Get by ID
+//	ident, _ := repo.GetIdentity(func() any { return &User{} }, "123")
+//	user := ident.(*User)
+//
+//	// Find by field
+//	ident, _ := repo.FindIdentity(func() any { return &User{} }, map[string]any{"Email": "user@example.com"})
+//
+// See kgorm package for a reference implementation.
 type IdentityStorage interface {
 	CredentialStorage
 	CreateIdentity(ident any) error

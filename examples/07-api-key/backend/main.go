@@ -1,51 +1,236 @@
-// Example 07: API Key Authentication (strategy: api_key)
+// 07-api-key: Machine-to-machine authentication via API keys backed by Kayan.
 //
-// Demonstrates machine-to-machine authentication via long-lived API keys.
-// Keys are SHA-256 hashed before storage — the raw key is shown only once at generation time.
+// Demonstrates:
+//   - flow.NewAPIKeyStrategy() with flow.APIKeyRepository
+//   - flow.GenerateAPIKey() for cryptographically random key generation
+//   - flow.HashAPIKey() stores only the SHA-256 hash — raw key is shown once
+//   - JWT session for human login; API key for M2M resource access
 //
 // Endpoints:
-//
-//	POST   /api/keys/generate   { name }        → { id, name, key }  ← raw key shown once
-//	GET    /api/keys            Authorization   → list of key records (no raw keys)
-//	DELETE /api/keys/{id}       Authorization   → revoke key
-//	GET    /api/resource        Authorization   → protected resource (demonstrates M2M auth)
+//   - POST   /api/register         – { email, password } → { id }
+//   - POST   /api/login            – { email, password } → { session_token }
+//   - POST   /api/keys/generate    – Authorization: Bearer → { api_key, key_id }
+//   - DELETE /api/keys/{key_id}    – Authorization: Bearer → revoke key
+//   - GET    /api/resource         – X-API-Key: <key> → protected resource
+//   - GET    /api/me               – Authorization: Bearer <session_token>
 package main
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/getkayan/kayan/core/flow"
+	"github.com/getkayan/kayan/core/identity"
+	"github.com/getkayan/kayan/core/session"
+	"github.com/google/uuid"
 )
 
-// ---- storage ----
+// ---------- In-memory IdentityStorage + APIKeyRepository ----------
 
-type apiKey struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Hash      string    `json:"-"` // never exposed
-	CreatedAt time.Time `json:"created_at"`
+type apiKeyRecord struct {
+	id         string // public key ID (prefix of raw key)
+	keyHash    string // hex-encoded SHA-256; never the raw key
+	identityID string
 }
 
-var (
-	mu       sync.RWMutex
-	keyStore = map[string]*apiKey{} // hash → key record
-	keysByID = map[string]*apiKey{} // id → key record
-)
+type memRepo struct {
+	mu         sync.RWMutex
+	identities map[string]any
+	creds      map[string]*identity.Credential // identifier:type → Credential
+	apiKeys    map[string]*apiKeyRecord        // keyHash → record
+	keysByID   map[string]*apiKeyRecord        // keyID → record
+}
 
-// ---- helpers ----
+func newMemRepo() *memRepo {
+	return &memRepo{
+		identities: make(map[string]any),
+		creds:      make(map[string]*identity.Credential),
+		apiKeys:    make(map[string]*apiKeyRecord),
+		keysByID:   make(map[string]*apiKeyRecord),
+	}
+}
 
-func cors(next http.Handler) http.Handler {
+// domain.IdentityStorage implementation
+
+func (r *memRepo) CreateIdentity(ident any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
+	}
+	return nil
+}
+
+func (r *memRepo) GetIdentity(factory func() any, id any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	v, ok := r.identities[fmt.Sprintf("%v", id)]
+	if !ok {
+		return nil, errors.New("identity not found")
+	}
+	return v, nil
+}
+
+func (r *memRepo) FindIdentity(factory func() any, query map[string]any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, ident := range r.identities {
+		v := reflect.ValueOf(ident)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		match := true
+		for field, value := range query {
+			f := v.FieldByName(field)
+			if !f.IsValid() || fmt.Sprintf("%v", f.Interface()) != fmt.Sprintf("%v", value) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return ident, nil
+		}
+	}
+	return nil, errors.New("identity not found")
+}
+
+func (r *memRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]any, 0, len(r.identities))
+	for _, v := range r.identities {
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (r *memRepo) UpdateIdentity(ident any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
+	}
+	return nil
+}
+
+func (r *memRepo) DeleteIdentity(factory func() any, id any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.identities, fmt.Sprintf("%v", id))
+	return nil
+}
+
+func (r *memRepo) CreateCredential(cred any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := cred.(*identity.Credential); ok {
+		r.creds[c.Identifier+":"+c.Type] = c
+	}
+	return nil
+}
+
+func (r *memRepo) GetCredentialByIdentifier(identifier, method string) (*identity.Credential, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if method == "" {
+		for key, c := range r.creds {
+			if strings.HasPrefix(key, identifier+":") {
+				return c, nil
+			}
+		}
+		return nil, errors.New("credential not found")
+	}
+	c, ok := r.creds[identifier+":"+method]
+	if !ok {
+		return nil, errors.New("credential not found")
+	}
+	return c, nil
+}
+
+func (r *memRepo) UpdateCredentialSecret(_ context.Context, identityID, method, secret string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.creds {
+		if c.IdentityID == identityID && c.Type == method {
+			c.Secret = secret
+			return nil
+		}
+	}
+	return errors.New("credential not found")
+}
+
+// flow.APIKeyRepository implementation
+
+// FindIdentityByAPIKeyHash looks up the identity whose key matches the SHA-256 hash.
+func (r *memRepo) FindIdentityByAPIKeyHash(_ context.Context, keyHash string, factory func() any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	rec, ok := r.apiKeys[keyHash]
+	if !ok {
+		return nil, errors.New("api key not found")
+	}
+	ident, ok := r.identities[rec.identityID]
+	if !ok {
+		return nil, errors.New("identity not found")
+	}
+	return ident, nil
+}
+
+// StoreAPIKey saves a new API key record (only the hash is persisted).
+func (r *memRepo) StoreAPIKey(keyID, keyHash, identityID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec := &apiKeyRecord{id: keyID, keyHash: keyHash, identityID: identityID}
+	r.apiKeys[keyHash] = rec
+	r.keysByID[keyID] = rec
+}
+
+// DeleteAPIKeyByID revokes an API key by its public ID.
+func (r *memRepo) DeleteAPIKeyByID(keyID, identityID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.keysByID[keyID]
+	if !ok || rec.identityID != identityID {
+		return errors.New("key not found or not owned by this identity")
+	}
+	delete(r.apiKeys, rec.keyHash)
+	delete(r.keysByID, keyID)
+	return nil
+}
+
+// ---------- Server ----------
+
+type server struct {
+	repo     *memRepo
+	reg      *flow.RegistrationManager
+	pwLogin  *flow.LoginManager
+	apiLogin *flow.LoginManager
+	sessions *session.JWTStrategy
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -54,168 +239,182 @@ func cors(next http.Handler) http.Handler {
 	})
 }
 
-func jsonResponse(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
-func hashAPIKey(raw string) string {
-	h := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(h[:])
-}
-
-func generateAPIKey() (raw, id string, err error) {
-	b := make([]byte, 32)
-	if _, err = rand.Read(b); err != nil {
-		return
-	}
-	raw = "kayan_" + hex.EncodeToString(b)
-	idBytes := make([]byte, 8)
-	rand.Read(idBytes)
-	id = hex.EncodeToString(idBytes)
-	return
-}
-
 func bearerToken(r *http.Request) string {
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return auth[7:]
+	parts := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
+	if len(parts) == 2 && parts[0] == "Bearer" {
+		return parts[1]
 	}
 	return ""
 }
 
-func lookupByKey(raw string) *apiKey {
-	hash := hashAPIKey(raw)
-	mu.RLock()
-	defer mu.RUnlock()
-	return keyStore[hash]
-}
-
-// ---- handlers ----
-
-func handleGenerate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// POST /api/register – { email, password }
+func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" || body.Password == "" {
+		writeError(w, http.StatusBadRequest, "email and password required")
 		return
 	}
-
-	raw, id, err := generateAPIKey()
+	identRaw, err := s.reg.Submit(r.Context(), "password",
+		identity.JSON(fmt.Sprintf(`{"email":%q}`, body.Email)),
+		body.Password,
+	)
 	if err != nil {
-		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "key generation failed"})
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ident := identRaw.(*identity.Identity)
+	writeJSON(w, http.StatusCreated, map[string]string{"id": ident.ID})
+}
+
+// POST /api/login – { email, password } → { session_token }
+func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" || body.Password == "" {
+		writeError(w, http.StatusBadRequest, "email and password required")
+		return
+	}
+	identRaw, err := s.pwLogin.Authenticate(r.Context(), "password", body.Email, body.Password)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	ident := identRaw.(*identity.Identity)
+	sess, err := s.sessions.Create(uuid.New().String(), ident.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"session_token": sess.ID})
+}
+
+// POST /api/keys/generate – Authorization: Bearer <session_token>
+// Returns the raw API key once (never stored). Store only the key_id.
+func (s *server) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.sessions.Validate(bearerToken(r))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid session")
 		return
 	}
 
-	rec := &apiKey{
-		ID:        id,
-		Name:      body.Name,
-		Hash:      hashAPIKey(raw),
-		CreatedAt: time.Now().UTC(),
+	// flow.GenerateAPIKey returns the raw key + its SHA-256 hash.
+	rawKey, keyHash, err := flow.GenerateAPIKey(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "key generation failed")
+		return
 	}
 
-	mu.Lock()
-	keyStore[rec.Hash] = rec
-	keysByID[id] = rec
-	mu.Unlock()
+	// The key ID is the first 8 hex characters (public, safe to expose).
+	keyID := rawKey[:8]
+	s.repo.StoreAPIKey(keyID, keyHash, sess.IdentityID)
 
-	log.Printf("[API Key] Generated key %q for %q", id, body.Name)
-
-	// Return raw key once — never stored, never loggable again.
-	jsonResponse(w, http.StatusCreated, map[string]any{
-		"id":   id,
-		"name": body.Name,
-		"key":  raw, // shown ONCE
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"api_key": rawKey,
+		"key_id":  keyID,
 	})
 }
 
-func handleListKeys(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+// DELETE /api/keys/{key_id} – Authorization: Bearer
+func (s *server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.sessions.Validate(bearerToken(r))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid session")
 		return
 	}
-	// Require a valid API key to list keys (demonstrates key-based auth).
-	token := bearerToken(r)
-	if token == "" || lookupByKey(token) == nil {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	keyID := strings.TrimPrefix(r.URL.Path, "/api/keys/")
+	if keyID == "" {
+		writeError(w, http.StatusBadRequest, "key_id required in path")
 		return
 	}
-	mu.RLock()
-	keys := make([]map[string]any, 0, len(keysByID))
-	for _, k := range keysByID {
-		keys = append(keys, map[string]any{"id": k.ID, "name": k.Name, "created_at": k.CreatedAt})
+	if err := s.repo.DeleteAPIKeyByID(keyID, sess.IdentityID); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
 	}
-	mu.RUnlock()
-	jsonResponse(w, http.StatusOK, keys)
+	writeJSON(w, http.StatusOK, map[string]bool{"revoked": true})
 }
 
-func handleDeleteKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+// GET /api/resource – X-API-Key: <raw_key>
+// Authenticated via APIKeyStrategy (SHA-256 lookup, constant-time comparison).
+func (s *server) handleResource(w http.ResponseWriter, r *http.Request) {
+	rawKey := r.Header.Get("X-API-Key")
+	if rawKey == "" {
+		writeError(w, http.StatusUnauthorized, "X-API-Key header required")
 		return
 	}
-	token := bearerToken(r)
-	if token == "" || lookupByKey(token) == nil {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	// APIKeyStrategy.Authenticate: hashes the key and looks up the identity.
+	identRaw, err := s.apiLogin.Authenticate(r.Context(), "api_key", "", rawKey)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid API key")
 		return
 	}
-	// Extract ID from path: DELETE /api/keys/<id>
-	id := strings.TrimPrefix(r.URL.Path, "/api/keys/")
-	if id == "" {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "id required"})
-		return
-	}
-	mu.Lock()
-	rec, ok := keysByID[id]
-	if ok {
-		delete(keyStore, rec.Hash)
-		delete(keysByID, id)
-	}
-	mu.Unlock()
-	if !ok {
-		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "key not found"})
-		return
-	}
-	jsonResponse(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("key %s revoked", id)})
-}
-
-func handleResource(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	token := bearerToken(r)
-	rec := lookupByKey(token)
-	if rec == nil {
-		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
-		return
-	}
-	jsonResponse(w, http.StatusOK, map[string]any{
-		"message":  "You accessed a protected resource!",
-		"key_name": rec.Name,
-		"key_id":   rec.ID,
+	ident := identRaw.(*identity.Identity)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message":     "hello from protected resource",
+		"identity_id": ident.ID,
 	})
 }
+
+// GET /api/me – Authorization: Bearer
+func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.sessions.Validate(bearerToken(r))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid or expired session")
+		return
+	}
+	identRaw, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, sess.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "identity not found")
+		return
+	}
+	ident := identRaw.(*identity.Identity)
+	var email string
+	var m map[string]any
+	if json.Unmarshal(ident.Traits, &m) == nil {
+		email, _ = m["email"].(string)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": ident.ID, "email": email})
+}
+
+// ---------- Main ----------
 
 func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/keys/generate", handleGenerate)
-	mux.HandleFunc("/api/keys/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if path == "/api/keys/" || path == "/api/keys" {
-			handleListKeys(w, r)
-		} else {
-			handleDeleteKey(w, r)
-		}
-	})
-	mux.HandleFunc("/api/resource", handleResource)
+	repo := newMemRepo()
+	factory := func() any { return &identity.Identity{} }
 
-	log.Println("API key example backend listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", cors(mux)))
+	// Password auth for human login.
+	reg, pwLogin := flow.PasswordAuth(repo, factory, "email")
+
+	// APIKeyStrategy for M2M resource access.
+	// repo implements both domain.IdentityStorage and flow.APIKeyRepository.
+	apiKeyStrategy := flow.NewAPIKeyStrategy(repo, factory)
+	apiLogin := flow.NewLoginManager(repo, factory)
+	apiLogin.RegisterStrategy(apiKeyStrategy)
+
+	jwtStrategy := session.NewHS256Strategy("change-me-in-production", 24*time.Hour)
+
+	srv := &server{
+		repo:     repo,
+		reg:      reg,
+		pwLogin:  pwLogin,
+		apiLogin: apiLogin,
+		sessions: jwtStrategy,
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/register", srv.handleRegister)
+	mux.HandleFunc("POST /api/login", srv.handleLogin)
+	mux.HandleFunc("POST /api/keys/generate", srv.handleGenerateKey)
+	mux.HandleFunc("DELETE /api/keys/", srv.handleRevokeKey)
+	mux.HandleFunc("GET /api/resource", srv.handleResource)
+	mux.HandleFunc("GET /api/me", srv.handleMe)
+
+	log.Println("07-api-key backend listening on :8080")
+	if err := http.ListenAndServe(":8080", corsMiddleware(mux)); err != nil {
+		log.Fatal(err)
+	}
 }

@@ -168,14 +168,14 @@ func (p *Provider) setupTracing(res *resource.Resource) error {
 
 	// Add OTLP exporter if configured
 	if p.config.OTLPEndpoint != "" {
-		opts := []otlptracegrpc.Option{
+		exporterOpts := []otlptracegrpc.Option{
 			otlptracegrpc.WithEndpoint(p.config.OTLPEndpoint),
 		}
 		if p.config.InsecureOTLP {
-			opts = append(opts, otlptracegrpc.WithInsecure())
+			exporterOpts = append(exporterOpts, otlptracegrpc.WithInsecure())
 		}
 
-		exporter, err := otlptracegrpc.New(context.Background(), opts...)
+		exporter, err := otlptracegrpc.New(context.Background(), exporterOpts...)
 		if err != nil {
 			return err
 		}

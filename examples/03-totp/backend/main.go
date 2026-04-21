@@ -1,111 +1,243 @@
-// 03-totp: Password + TOTP two-factor authentication.
-// TOTP is implemented inline (HMAC-SHA1, 30s step, 6 digits) with no external lib.
-// Demonstrates: partial token after password, TOTP enrollment, TOTP verification.
+﻿// 03-totp: Password + TOTP two-factor authentication backed by Kayan.
+//
+// Demonstrates:
+//   - flow.PasswordAuth() for password registration + login
+//   - flow.NewTOTPStrategy() for TOTP verification (RFC 6238)
+//   - Two-step login: password → partial JWT → TOTP → full JWT
+//   - POST /api/register, POST /api/login/password, POST /api/totp/enroll
+//   - POST /api/totp/verify, GET /api/me
 package main
 
 import (
-	"crypto/hmac"
+	"context"
 	"crypto/rand"
-	"crypto/sha1"
 	"encoding/base32"
-	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/getkayan/kayan/core/flow"
+	"github.com/getkayan/kayan/core/identity"
+	"github.com/getkayan/kayan/core/session"
+	"github.com/google/uuid"
 )
 
-// ---------- In-memory storage ----------
+// ---------- In-memory IdentityStorage + TOTPRepository ----------
 
-type User struct {
-	ID           string
-	Email        string
-	PasswordHash []byte
-	TOTPSecret   string // base32-encoded; empty = not enrolled
-	TOTPEnrolled bool
+type totpRecord struct {
+	secret       string // base32-encoded TOTP secret
+	usedCounters map[uint64]bool
 }
 
-type Session struct {
-	Token     string
-	UserID    string
-	IsPartial bool // partial = password done, TOTP pending
+type memRepo struct {
+	mu         sync.RWMutex
+	identities map[string]any
+	creds      map[string]*identity.Credential
+	totpData   map[string]*totpRecord // identityID → TOTP data
 }
 
-var (
-	mu       sync.RWMutex
-	users    = map[string]*User{}
-	sessions = map[string]*Session{}
-)
-
-// ---------- TOTP (RFC 6238 / RFC 4226) — no external library ----------
-
-// totpGenSecret generates a random 20-byte base32 secret.
-func totpGenSecret() string {
-	b := make([]byte, 20)
-	_, _ = rand.Read(b)
-	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
-}
-
-// totpCounter returns the current 30-second time step counter.
-func totpCounter() uint64 {
-	return uint64(time.Now().Unix() / 30)
-}
-
-// totpCode computes a 6-digit TOTP code for a given base32 secret and counter.
-func totpCode(secret string, counter uint64) (string, error) {
-	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(secret))
-	if err != nil {
-		return "", err
+func newMemRepo() *memRepo {
+	return &memRepo{
+		identities: make(map[string]any),
+		creds:      make(map[string]*identity.Credential),
+		totpData:   make(map[string]*totpRecord),
 	}
-
-	// HMAC-SHA1 of the 8-byte big-endian counter.
-	msg := make([]byte, 8)
-	binary.BigEndian.PutUint64(msg, counter)
-	mac := hmac.New(sha1.New, key)
-	mac.Write(msg)
-	h := mac.Sum(nil)
-
-	// Dynamic truncation (RFC 4226 §5.4).
-	offset := h[len(h)-1] & 0x0f
-	code := binary.BigEndian.Uint32(h[offset:offset+4]) & 0x7fffffff
-	otp := int(code) % int(math.Pow10(6))
-
-	return fmt.Sprintf("%06d", otp), nil
 }
 
-// totpVerify checks the code against current counter ±1 window.
-func totpVerify(secret, code string) bool {
-	c := totpCounter()
-	for _, delta := range []uint64{0, 1, c - 1} { // current, next, previous
-		got, err := totpCode(secret, c-delta)
-		if err != nil {
-			continue
-		}
-		if hmac.Equal([]byte(got), []byte(code)) {
-			return true
+// IdentityStorage methods
+
+func (r *memRepo) CreateIdentity(ident any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
+	}
+	if cs, ok := ident.(flow.CredentialSource); ok {
+		for _, c := range cs.GetCredentials() {
+			cp := c
+			r.creds[c.Identifier+":"+c.Type] = &cp
 		}
 	}
-	return false
+	return nil
 }
 
-// ---------- Helpers ----------
-
-func randomHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	s := make([]byte, n*2)
-	const hx = "0123456789abcdef"
-	for i, v := range b {
-		s[i*2] = hx[v>>4]
-		s[i*2+1] = hx[v&0xf]
+func (r *memRepo) GetIdentity(factory func() any, id any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	v, ok := r.identities[fmt.Sprintf("%v", id)]
+	if !ok {
+		return nil, errors.New("identity not found")
 	}
-	return string(s)
+	return v, nil
+}
+
+func (r *memRepo) FindIdentity(factory func() any, query map[string]any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, ident := range r.identities {
+		v := reflect.ValueOf(ident)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		match := true
+		for field, value := range query {
+			f := v.FieldByName(field)
+			if !f.IsValid() || fmt.Sprintf("%v", f.Interface()) != fmt.Sprintf("%v", value) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return ident, nil
+		}
+	}
+	return nil, errors.New("identity not found")
+}
+
+func (r *memRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]any, 0, len(r.identities))
+	for _, v := range r.identities {
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (r *memRepo) UpdateIdentity(ident any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fi, ok := ident.(flow.FlowIdentity); ok {
+		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
+	}
+	return nil
+}
+
+func (r *memRepo) DeleteIdentity(factory func() any, id any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.identities, fmt.Sprintf("%v", id))
+	return nil
+}
+
+func (r *memRepo) CreateCredential(cred any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := cred.(*identity.Credential); ok {
+		r.creds[c.Identifier+":"+c.Type] = c
+	}
+	return nil
+}
+
+func (r *memRepo) GetCredentialByIdentifier(identifier, method string) (*identity.Credential, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if method == "" {
+		for key, c := range r.creds {
+			if strings.HasPrefix(key, identifier+":") {
+				return c, nil
+			}
+		}
+		return nil, errors.New("credential not found")
+	}
+	c, ok := r.creds[identifier+":"+method]
+	if !ok {
+		return nil, errors.New("credential not found")
+	}
+	return c, nil
+}
+
+func (r *memRepo) UpdateCredentialSecret(_ context.Context, identityID, method, secret string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.creds {
+		if c.IdentityID == identityID && c.Type == method {
+			c.Secret = secret
+			return nil
+		}
+	}
+	return errors.New("credential not found")
+}
+
+// TOTPRepository methods
+
+func (r *memRepo) FindIdentityByField(ctx context.Context, field, value string, factory func() any) (any, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, ident := range r.identities {
+		v := reflect.ValueOf(ident)
+		if v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		f := v.FieldByName(field)
+		if f.IsValid() && fmt.Sprintf("%v", f.Interface()) == value {
+			return ident, nil
+		}
+	}
+	// Also search by JSON traits
+	for _, ident := range r.identities {
+		if ts, ok := ident.(flow.TraitSource); ok {
+			var m map[string]any
+			if json.Unmarshal(ts.GetTraits(), &m) == nil {
+				if fmt.Sprintf("%v", m[field]) == value {
+					return ident, nil
+				}
+			}
+		}
+	}
+	return nil, errors.New("identity not found")
+}
+
+func (r *memRepo) FindTOTPSecret(ctx context.Context, identityID any) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	rec, ok := r.totpData[fmt.Sprintf("%v", identityID)]
+	if !ok || rec.secret == "" {
+		return "", errors.New("totp secret not found")
+	}
+	return rec.secret, nil
+}
+
+func (r *memRepo) MarkTOTPUsed(ctx context.Context, identityID any, counter uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id := fmt.Sprintf("%v", identityID)
+	rec, ok := r.totpData[id]
+	if !ok {
+		return errors.New("totp record not found")
+	}
+	if rec.usedCounters[counter] {
+		return errors.New("totp: replay detected")
+	}
+	rec.usedCounters[counter] = true
+	return nil
+}
+
+// SetTOTPSecret stores a TOTP secret for an identity (called during enrollment).
+func (r *memRepo) SetTOTPSecret(identityID, secret string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.totpData[identityID] = &totpRecord{
+		secret:       secret,
+		usedCounters: make(map[uint64]bool),
+	}
+}
+
+// ---------- Server ----------
+
+type server struct {
+	repo        *memRepo
+	reg         *flow.RegistrationManager
+	pwLogin     *flow.LoginManager
+	totpLogin   *flow.LoginManager
+	partialSess *session.JWTStrategy // short-lived: password done, TOTP pending
+	fullSess    *session.JWTStrategy // long-lived: fully authenticated
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -139,28 +271,8 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
-// sessionByToken returns the session for a given token (nil if not found).
-func sessionByToken(token string) *Session {
-	mu.RLock()
-	defer mu.RUnlock()
-	return sessions[token]
-}
-
-func userByID(id string) *User {
-	mu.RLock()
-	defer mu.RUnlock()
-	for _, u := range users {
-		if u.ID == id {
-			return u
-		}
-	}
-	return nil
-}
-
-// ---------- Handlers ----------
-
 // POST /api/register – { email, password }
-func handleRegister(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -169,29 +281,21 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "email and password required")
 		return
 	}
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := users[body.Email]; exists {
-		writeError(w, http.StatusConflict, "email already registered")
-		return
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), 12)
+	identRaw, err := s.reg.Submit(r.Context(), "password",
+		identity.JSON(fmt.Sprintf(`{"email":%q}`, body.Email)),
+		body.Password,
+	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to hash password")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	u := &User{ID: randomHex(8), Email: body.Email, PasswordHash: hash}
-	users[body.Email] = u
-
-	writeJSON(w, http.StatusCreated, map[string]string{"id": u.ID, "email": u.Email})
+	ident := identRaw.(*identity.Identity)
+	writeJSON(w, http.StatusCreated, map[string]string{"id": ident.ID, "email": body.Email})
 }
 
-// POST /api/login/password – { email, password } → { partial_token, totp_required }
-func handleLoginPassword(w http.ResponseWriter, r *http.Request) {
+// POST /api/login/password – { email, password } → { partial_token, totp_enrolled }
+// Issues a short-lived partial JWT; TOTP step still required.
+func (s *server) handleLoginPassword(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -201,72 +305,74 @@ func handleLoginPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu.RLock()
-	u, ok := users[body.Email]
-	mu.RUnlock()
-
-	if !ok {
-		_ = bcrypt.CompareHashAndPassword([]byte("$2a$12$dummy"), []byte(body.Password))
+	// Password strategy handles bcrypt comparison (constant-time).
+	identRaw, err := s.pwLogin.Authenticate(r.Context(), "password", body.Email, body.Password)
+	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
+	ident := identRaw.(*identity.Identity)
 
-	if err := bcrypt.CompareHashAndPassword(u.PasswordHash, []byte(body.Password)); err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
+	// Issue a short-lived partial JWT (5 min) — TOTP step pending.
+	partialSess, err := s.partialSess.Create(uuid.New().String(), ident.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session error")
 		return
 	}
 
-	// Issue a partial token — TOTP still required.
-	partial := "partial_" + randomHex(16)
-
-	mu.Lock()
-	sessions[partial] = &Session{Token: partial, UserID: u.ID, IsPartial: true}
-	mu.Unlock()
-
+	_, totpErr := s.repo.FindTOTPSecret(r.Context(), ident.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"partial_token": partial,
-		"totp_required": true,
-		"totp_enrolled": u.TOTPEnrolled,
+		"partial_token": partialSess.ID,
+		"totp_enrolled": totpErr == nil,
 	})
 }
 
-// POST /api/totp/enroll – Authorization: partial_token → { secret, otpauth_uri }
-func handleTOTPEnroll(w http.ResponseWriter, r *http.Request) {
+// POST /api/totp/enroll – Authorization: Bearer <partial_token> → { secret, otpauth_uri }
+func (s *server) handleTOTPEnroll(w http.ResponseWriter, r *http.Request) {
 	token := bearerToken(r)
-	sess := sessionByToken(token)
-	if sess == nil || !sess.IsPartial {
+	partialSess, err := s.partialSess.Validate(token)
+	if err != nil {
 		writeError(w, http.StatusUnauthorized, "valid partial token required")
 		return
 	}
 
-	u := userByID(sess.UserID)
-	if u == nil {
-		writeError(w, http.StatusInternalServerError, "user not found")
+	identRaw, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, partialSess.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "identity not found")
 		return
 	}
+	ident := identRaw.(*identity.Identity)
 
-	// Generate a fresh TOTP secret.
-	secret := totpGenSecret()
+	// Generate a cryptographically random 20-byte TOTP secret.
+	raw := make([]byte, 20)
+	if _, err := rand.Read(raw); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate secret")
+		return
+	}
+	secret := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)
 
-	mu.Lock()
-	u.TOTPSecret = secret
-	mu.Unlock()
+	s.repo.SetTOTPSecret(ident.ID, secret)
 
-	// Build an otpauth:// URI for QR code scanners.
-	uri := fmt.Sprintf("otpauth://totp/KayanDemo:%s?secret=%s&issuer=KayanDemo&algorithm=SHA1&digits=6&period=30",
-		u.Email, secret)
+	var email string
+	var m map[string]any
+	if json.Unmarshal(ident.Traits, &m) == nil {
+		email, _ = m["email"].(string)
+	}
+
+	otpauthURI := fmt.Sprintf("otpauth://totp/Kayan%%20Example%%3A%s?secret=%s&issuer=KayanExample",
+		email, secret)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"secret":      secret,
-		"otpauth_uri": uri,
+		"otpauth_uri": otpauthURI,
 	})
 }
 
-// POST /api/totp/confirm – Authorization: partial_token, { code } → mark enrolled
-func handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
+// POST /api/totp/verify – Authorization: Bearer <partial_token>, { code } → { session_token }
+func (s *server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	token := bearerToken(r)
-	sess := sessionByToken(token)
-	if sess == nil || !sess.IsPartial {
+	partialSess, err := s.partialSess.Validate(token)
+	if err != nil {
 		writeError(w, http.StatusUnauthorized, "valid partial token required")
 		return
 	}
@@ -279,102 +385,92 @@ func handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u := userByID(sess.UserID)
-	if u == nil || u.TOTPSecret == "" {
-		writeError(w, http.StatusBadRequest, "totp not initiated — call /api/totp/enroll first")
+	identRaw, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, partialSess.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "identity not found")
 		return
 	}
+	ident := identRaw.(*identity.Identity)
 
-	if !totpVerify(u.TOTPSecret, body.Code) {
+	var email string
+	var m map[string]any
+	if json.Unmarshal(ident.Traits, &m) == nil {
+		email, _ = m["email"].(string)
+	}
+
+	// TOTPStrategy.Authenticate handles RFC 6238 verification + replay protection.
+	_, err = s.totpLogin.Authenticate(r.Context(), "totp", email, body.Code)
+	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid TOTP code")
 		return
 	}
 
-	mu.Lock()
-	u.TOTPEnrolled = true
-	mu.Unlock()
-
-	writeJSON(w, http.StatusOK, map[string]string{"message": "TOTP enrolled successfully"})
+	// Upgrade to a full long-lived JWT.
+	fullSess, err := s.fullSess.Create(uuid.New().String(), ident.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"session_token": fullSess.ID})
 }
 
-// POST /api/login/totp – Authorization: partial_token, { code } → { session_token }
-func handleLoginTOTP(w http.ResponseWriter, r *http.Request) {
+// GET /api/me – Authorization: Bearer <session_token>
+func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	token := bearerToken(r)
-	sess := sessionByToken(token)
-	if sess == nil || !sess.IsPartial {
-		writeError(w, http.StatusUnauthorized, "valid partial token required")
+	sess, err := s.fullSess.Validate(token)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid or expired session")
 		return
 	}
-
-	var body struct {
-		Code string `json:"code"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" {
-		writeError(w, http.StatusBadRequest, "code required")
+	identRaw, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, sess.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "identity not found")
 		return
 	}
-
-	u := userByID(sess.UserID)
-	if u == nil || !u.TOTPEnrolled {
-		writeError(w, http.StatusBadRequest, "totp not enrolled")
-		return
+	ident := identRaw.(*identity.Identity)
+	var email string
+	var m map[string]any
+	if json.Unmarshal(ident.Traits, &m) == nil {
+		email, _ = m["email"].(string)
 	}
-
-	if !totpVerify(u.TOTPSecret, body.Code) {
-		writeError(w, http.StatusUnauthorized, "invalid TOTP code")
-		return
-	}
-
-	// Upgrade partial token to full session.
-	sessToken := "sess_" + randomHex(16)
-
-	mu.Lock()
-	delete(sessions, token) // invalidate partial
-	sessions[sessToken] = &Session{Token: sessToken, UserID: u.ID, IsPartial: false}
-	mu.Unlock()
-
-	writeJSON(w, http.StatusOK, map[string]string{"session_token": sessToken})
-}
-
-// GET /api/me – Authorization: Bearer <full session token>
-func handleMe(w http.ResponseWriter, r *http.Request) {
-	token := bearerToken(r)
-	if token == "" {
-		writeError(w, http.StatusUnauthorized, "missing token")
-		return
-	}
-
-	sess := sessionByToken(token)
-	if sess == nil || sess.IsPartial {
-		writeError(w, http.StatusUnauthorized, "invalid or incomplete session")
-		return
-	}
-
-	u := userByID(sess.UserID)
-	if u == nil {
-		writeError(w, http.StatusUnauthorized, "user not found")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":            u.ID,
-		"email":         u.Email,
-		"totp_enrolled": u.TOTPEnrolled,
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"id": ident.ID, "email": email})
 }
 
 // ---------- Main ----------
 
 func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/register", handleRegister)
-	mux.HandleFunc("POST /api/login/password", handleLoginPassword)
-	mux.HandleFunc("POST /api/totp/enroll", handleTOTPEnroll)
-	mux.HandleFunc("POST /api/totp/confirm", handleTOTPConfirm)
-	mux.HandleFunc("POST /api/login/totp", handleLoginTOTP)
-	mux.HandleFunc("GET /api/me", handleMe)
+	repo := newMemRepo()
+	factory := func() any { return &identity.Identity{} }
 
-	fmt.Println("03-totp backend listening on :8080")
+	// Password: registration + first-factor login
+	reg, pwLogin := flow.PasswordAuth(repo, factory, "email")
+
+	// TOTP: second-factor login (uses same repo which also implements TOTPRepository)
+	totpStrategy := flow.NewTOTPStrategy(repo, factory, "email")
+	totpLogin := flow.NewLoginManager(repo, factory)
+	totpLogin.RegisterStrategy(totpStrategy)
+
+	// Two JWT tiers: partial (5 min) and full (24 h)
+	partialSess := session.NewHS256Strategy("partial-secret-change-me", 5*time.Minute)
+	fullSess := session.NewHS256Strategy("full-secret-change-me", 24*time.Hour)
+
+	srv := &server{
+		repo:        repo,
+		reg:         reg,
+		pwLogin:     pwLogin,
+		totpLogin:   totpLogin,
+		partialSess: partialSess,
+		fullSess:    fullSess,
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/register", srv.handleRegister)
+	mux.HandleFunc("POST /api/login/password", srv.handleLoginPassword)
+	mux.HandleFunc("POST /api/totp/enroll", srv.handleTOTPEnroll)
+	mux.HandleFunc("POST /api/totp/verify", srv.handleTOTPVerify)
+	mux.HandleFunc("GET /api/me", srv.handleMe)
+
+	log.Println("03-totp backend listening on :8080")
 	if err := http.ListenAndServe(":8080", corsMiddleware(mux)); err != nil {
 		log.Fatal(err)
 	}
