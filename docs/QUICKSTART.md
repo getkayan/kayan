@@ -18,7 +18,7 @@ go get github.com/getkayan/kayan/kgorm  # For SQL databases
 ```go
 package main
 
-import "github.com/getkayan/kayan/core/flow"
+import "time"
 
 // Use your existing model — Kayan adapts to YOUR schema
 type User struct {
@@ -47,11 +47,11 @@ import (
 // Connect to your database
 db, _ := gorm.Open(postgres.Open("postgres://user:pass@localhost/dbname"), &gorm.Config{})
 
-// Auto-migrate Kayan's default tables (or use your own schema)
-db.AutoMigrate(&identity.Identity{}, &identity.Credential{}, &identity.Session{})
-
 // Create storage adapter
-repo := kgorm.New(db)
+repo := kgorm.NewRepository(db)
+
+// Auto-migrate Kayan's tables (or pass your own models)
+repo.AutoMigrate()
 ```
 
 ---
@@ -62,6 +62,7 @@ repo := kgorm.New(db)
 import (
     "github.com/getkayan/kayan/core/flow"
     "github.com/getkayan/kayan/core/session"
+    "os"
     "time"
 )
 
@@ -82,6 +83,8 @@ sessions := session.NewHS256Strategy(
 ---
 
 ## 5. Add HTTP Handlers
+
+The snippets below show the shape of a minimal integration. For a complete, runnable backend with request validation, CORS, in-memory storage, and error handling, use [`examples/01-password/backend/main.go`](../examples/01-password/backend/main.go).
 
 ### Registration Endpoint
 

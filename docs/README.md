@@ -12,12 +12,14 @@ The codebase is organized around three hard constraints:
 
 Start here if you are integrating Kayan into an application for the first time:
 
-1. [Getting Started](./getting-started.md)
-2. [BYOS](./concepts/byos.md)
-3. [Authentication Strategies](./concepts/strategies.md)
-4. [Session Management](./concepts/sessions.md)
-5. [Authorization](./concepts/authorization.md)
-6. [Multi-Tenancy](./concepts/multi-tenancy.md)
+1. [Quick Start](./QUICKSTART.md)
+2. [Getting Started](./getting-started.md)
+3. [Examples Guide](../examples/README.md)
+4. [BYOS](./concepts/byos.md)
+5. [Authentication Strategies](./concepts/strategies.md)
+6. [Session Management](./concepts/sessions.md)
+7. [Authorization](./concepts/authorization.md)
+8. [Multi-Tenancy](./concepts/multi-tenancy.md)
 
 Use these sections when you are designing or extending the library:
 
@@ -40,6 +42,14 @@ Use these package-level references when you need feature-specific guidance:
 - [Configuration](./reference/configuration.md)
 - [API Reference](./reference/api.md)
 - [JavaScript and TypeScript Integration](./sdk/javascript.md)
+
+## Practical References
+
+- [Examples Guide](../examples/README.md)
+- [Contributing](../CONTRIBUTING.md)
+- [Architecture Guardrails](../AGENTS.md)
+- [Versioning and Support](../VERSIONING.md)
+- [Deprecation Policy](../DEPRECATION.md)
 
 ## Package Map
 

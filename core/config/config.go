@@ -38,8 +38,8 @@ type Config struct {
 	DBType          string                  `mapstructure:"DB_TYPE"` // sqlite, postgres, mysql
 	DSN             string                  `mapstructure:"DSN"`
 	SkipAutoMigrate bool                    `mapstructure:"SKIP_AUTO_MIGRATE"`
-	LogLevel      string                  `mapstructure:"LOG_LEVEL"`
-	OIDCProviders map[string]OIDCProvider `mapstructure:"OIDC_PROVIDERS"`
+	LogLevel        string                  `mapstructure:"LOG_LEVEL"`
+	OIDCProviders   map[string]OIDCProvider `mapstructure:"OIDC_PROVIDERS"`
 }
 
 type OIDCProvider struct {

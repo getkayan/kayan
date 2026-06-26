@@ -32,8 +32,15 @@ Kayan is a headless, non-generic, extensible IAM library for Go. It gives you au
 - 🚀 **[5-Minute Quick Start](./docs/QUICKSTART.md)** — Get up and running fast
 - 🤖 **[AI Assistant Instructions](./.ai-instructions.md)** — Context for AI coding assistants
 - 🌐 **[HTTP Framework Integration](./docs/adapters/http-frameworks.md)** — Fiber, Echo, Gin, stdlib
-- 📚 **[Complete Examples](./examples/)** — Password, magic link, TOTP, WebAuthn, and more
+- 📚 **[Examples Guide](./examples/README.md)** — Runnable backends for password, magic link, TOTP, WebAuthn, and more
 - 🏗️ **[Architecture Guide](./docs/architecture/README.md)** — Design principles and patterns
+
+## Support and Stability
+
+- [Versioning and Support](./VERSIONING.md)
+- [Deprecation Policy](./DEPRECATION.md)
+- [Security Policy](./SECURITY.md)
+- [Changelog](./CHANGELOG.md)
 
 ## Quick Start
 
@@ -118,6 +125,8 @@ For a deeper integration path with BYOS models, hooks, multiple auth strategies,
 
 Start with the docs index in [docs/README.md](./docs/README.md).
 
+If you want a runnable reference app before wiring Kayan into your own service, start with [examples/README.md](./examples/README.md).
+
 ### Integration Path
 
 - [Getting Started](./docs/getting-started.md)
@@ -149,6 +158,12 @@ Start with the docs index in [docs/README.md](./docs/README.md).
 - [API Reference](./docs/reference/api.md)
 - [JavaScript and TypeScript Integration](./docs/sdk/javascript.md)
 - [OpenAPI Specification](./docs/openapi/openapi.yaml)
+
+### Project Policies
+
+- [Versioning and Support](./VERSIONING.md)
+- [Deprecation Policy](./DEPRECATION.md)
+- [Security Policy](./SECURITY.md)
 
 ## Docs Site
 
@@ -219,6 +234,7 @@ The site configuration lives in `mkdocs.yml` and uses `docs/README.md` as the do
 
 ## Examples
 
+- [examples/README.md](./examples/README.md)
 - [core/flow/example_passwordauth_test.go](./core/flow/example_passwordauth_test.go)
 - [core/tenant/example_manager_test.go](./core/tenant/example_manager_test.go)
 - [examples/nextjs-kayan-demo](./examples/nextjs-kayan-demo)

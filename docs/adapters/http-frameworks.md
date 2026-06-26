@@ -2,24 +2,17 @@
 
 Kayan is a **library**, not a service. It provides zero framework-specific dependencies in `core/`, making it compatible with any Go HTTP framework.
 
-This guide shows manual integration patterns for popular frameworks. The examples are intentionally complete (~30-40 lines per endpoint) so you can customize validation, error handling, response shapes, and business logic.
+This guide shows manual integration patterns for popular frameworks. The examples are intentionally complete enough to copy into a real service and then adapt for your own validation, error handling, response shapes, and business logic.
 
 ---
 
-## Philosophy: No Official Adapters
+## Start Here
 
-Kayan does **not** provide official framework adapters (like `kayan-fiber`, `kayan-echo`) because:
+If you want the fastest path to a working integration:
 
-1. **Integration is trivial** — most endpoints are 20-30 lines
-2. **Adapters restrict customization** — production apps need custom responses, validation, rate limiting
-3. **Maintenance burden** — supporting 5+ frameworks adds significant surface area
-4. **BYOS extends to BYOF** — "Bring Your Own Framework" is part of the philosophy
-
-Instead, this document provides **reference implementations** you copy and adapt to your needs.
-
----
-
-## Common Pattern
+1. Start with [docs/QUICKSTART.md](../QUICKSTART.md) for the shortest successful path.
+2. Use [examples/README.md](../../examples/README.md) to pick a runnable backend example.
+3. Come back to this guide when you are wiring handlers into Fiber, Echo, Gin, Chi, or `net/http`.
 
 All frameworks follow the same flow:
 
@@ -30,7 +23,20 @@ All frameworks follow the same flow:
 4. Return custom response
 ```
 
-The only framework-specific code is request/response handling (~10 lines).
+The only framework-specific code is request/response handling plus the middleware shape.
+
+---
+
+## Why There Are No Official Adapters
+
+Kayan does **not** provide official framework adapters (like `kayan-fiber`, `kayan-echo`) because:
+
+1. **Integration is trivial** — most endpoints are 20-30 lines
+2. **Adapters restrict customization** — production apps need custom responses, validation, rate limiting
+3. **Maintenance burden** — supporting 5+ frameworks adds significant surface area
+4. **BYOS extends to BYOF** — "Bring Your Own Framework" is part of the philosophy
+
+Instead, this document provides **reference implementations** you copy and adapt to your needs.
 
 ---
 

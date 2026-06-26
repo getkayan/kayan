@@ -6,6 +6,15 @@ Thank you for your interest in contributing to Kayan! This document provides gui
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Architectural Guardrails
+
+Kayan is a multi-module Go workspace with strict package-boundary rules. Before making structural or cross-package changes, read [AGENTS.md](AGENTS.md) for:
+
+- module-level build and test commands
+- dependency direction rules
+- adapter versus core package boundaries
+- testing and architecture expectations
+
 ## Getting Started
 
 ### Prerequisites
@@ -22,15 +31,67 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
    cd kayan
    ```
 
-2. **Install dependencies**
+2. **Understand the workspace layout**
+   
+   Kayan uses a Go workspace (`go.work`) with multiple modules. Always run Go commands from the module directory you are working in.
+
+   Primary modules:
+
+   - `core/` - main IAM library
+   - `kgorm/` - GORM storage adapter
+   - `kredis/` - Redis adapter
+   - `cmd/kayan-cli/` - administrative CLI
+
+   Do not run `go test ./...` from the repository root.
+
+3. **Install dependencies**
    ```bash
-   go mod download
+   cd core && go mod download
+   cd ../kgorm && go mod download
+   cd ../kredis && go mod download
+   cd ..
    ```
 
-3. **Run tests**
+4. **Verify your setup**
    ```bash
-   go test ./...
+   cd core && go test -race ./...
+   cd ../kgorm && go test -race ./...
+   cd ../kredis && go test -race ./...
+   cd ..
    ```
+
+5. **Optional: run a reference example**
+   ```bash
+   cd examples/01-password/backend
+   go run .
+   ```
+
+### Integration Tests
+
+Integration tests run separately from unit tests and require PostgreSQL 15.
+
+1. **Start PostgreSQL locally**
+   ```bash
+   docker run --name kayan-pg ^
+     -e POSTGRES_USER=kayan ^
+     -e POSTGRES_PASSWORD=kayan ^
+     -e POSTGRES_DB=kayan_test ^
+     -p 5432:5432 ^
+     postgres:15
+   ```
+
+2. **Set the database URL**
+   ```bash
+   set DATABASE_URL=postgres://kayan:kayan@localhost:5432/kayan_test?sslmode=disable
+   ```
+
+3. **Run integration tests from the `core/` module**
+   ```bash
+   cd core
+   go test -race -tags=integration ./...
+   ```
+
+CI uses the same connection string and module-local command layout.
 
 ## How to Contribute
 
@@ -66,8 +127,18 @@ We welcome feature requests! Please:
 
 3. **Run tests and linting**
    ```bash
-   go test ./...
-   go vet ./...
+   cd core
+   go test -race -coverprofile=coverage.out -covermode=atomic ./...
+   golangci-lint run
+
+   cd ../kgorm
+   go test -race ./...
+
+   cd ../kredis
+   go test -race ./...
+
+   cd ../cmd/kayan-cli
+   go build -o kayan-cli .
    ```
 
 4. **Commit with clear messages**
@@ -98,7 +169,8 @@ We welcome feature requests! Please:
 
 - All new features should have tests
 - Aim for >80% coverage on new code
-- Integration tests go in `*_test.go` files
+- Unit tests should be run per module with `-race`
+- Integration tests should use the `integration` build tag and run separately from unit tests
 - Use table-driven tests where appropriate
 
 ## Documentation

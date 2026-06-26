@@ -78,6 +78,58 @@ Use `core/audit` to store:
 
 Use `core/compliance` and `core/consent` when retention, deletion, export, and consent evidence are part of your contractual or regulatory requirements.
 
+## CSRF Protection
+
+Kayan is **CSRF-safe by default** when using the recommended Bearer token pattern in `Authorization` headers. Browsers do not auto-attach custom headers to cross-origin requests, making this pattern immune to CSRF attacks.
+
+### Recommended (CSRF-Safe)
+
+```go
+// Client sends token in header
+Authorization: Bearer <token>
+
+// Server validates from header
+func bearerToken(r *http.Request) string {
+    parts := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
+    if len(parts) == 2 && parts[0] == "Bearer" {
+        return parts[1]
+    }
+    return ""
+}
+```
+
+All Kayan examples use this pattern. No additional CSRF protection is needed.
+
+### Cookie-Based Sessions (Requires CSRF Protection)
+
+If you choose to store session tokens in cookies instead of Authorization headers, **you must implement CSRF protection**:
+
+```go
+// Set SameSite attribute (preferred)
+http.SetCookie(w, &http.Cookie{
+    Name:     "session",
+    Value:    sess.ID,
+    HttpOnly: true,
+    Secure:   true,
+    SameSite: http.SameSiteStrictMode, // or Lax for most apps
+})
+
+// OR implement double-submit cookie / synchronizer token pattern
+```
+
+**Cookie + CSRF token is required for:**
+- Traditional web apps with server-rendered forms
+- Scenarios where JavaScript cannot access tokens (HttpOnly cookies)
+- Legacy frontend code expecting cookie-based auth
+
+### OAuth2/OIDC State Parameter
+
+OAuth2 and OIDC strategies use cryptographically random state tokens (≥32 bytes) validated on callback. This protects redirect-based flows from CSRF. State tokens are:
+- Single-use
+- Time-limited
+- Stored in `domain.TokenStore`
+- Validated before completing authentication
+
 ## Integration Guidance
 
 - Do not expose raw internal error details to public endpoints.
@@ -85,3 +137,5 @@ Use `core/compliance` and `core/consent` when retention, deletion, export, and c
 - Resolve tenant context before credential lookups when tenants partition identities.
 - Correlate audit, telemetry, and application request IDs.
 - Test rate limit, lockout, revocation, and step-up paths as first-class security behavior.
+- Use Bearer tokens in headers, not cookies, to avoid CSRF vulnerabilities.
+- If using cookies, implement `SameSite` attribute or synchronizer token pattern.
