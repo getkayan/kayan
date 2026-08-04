@@ -24,8 +24,6 @@
 > - **RBAC** (`core/rbac`) — no role hierarchy and no wildcard permissions;
 >   `users:*` does not match `users:delete`. Role definitions are held per
 >   process, so every replica must register the same ones at startup.
-> - **Migrations** — `AutoMigrate` only. No versioned migrations, so schema
->   changes cannot be rolled back or replayed.
 > - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code`,
 >   `refresh_token`, and `client_credentials`. No device code, token exchange,
 >   DPoP, `private_key_jwt`, or dynamic client registration.
