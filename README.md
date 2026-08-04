@@ -24,11 +24,12 @@
 > - **ReBAC** (`core/rebac`) — `ListDirectObjects` returns direct grants only and
 >   does not walk the relation graph, so it can omit access that `Check` allows.
 >   `Check` is the authoritative answer.
-> - **SCIM** (`kayan-scim`) — no PATCH support, and filtering returns an error
->   rather than an unfiltered list. Provisioning from Okta or Entra ID will not
->   work yet.
-> - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code` and
->   `refresh_token` only. No `client_credentials`, device code, or DPoP.
+> - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code`,
+>   `refresh_token`, and `client_credentials`. No device code, token exchange,
+>   DPoP, `private_key_jwt`, or dynamic client registration.
+> - **SCIM** (`kayan-scim`) — no `/Schemas`, `/ResourceTypes`,
+>   `/ServiceProviderConfig`, or bulk operations. Value filters
+>   (`emails[type eq "work"]`) work in PATCH but not in list queries.
 > - **Persistence** — MFA enrollments, device trust, and SSO sessions are
 >   in-memory only and are lost on restart.
 
