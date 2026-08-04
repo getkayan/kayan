@@ -26,7 +26,7 @@ import (
 )
 
 // ---------- In-memory IdentityStorage ----------
-// Replace this with kgorm.New(db) in production.
+// Replace this with gormstore.New(db) in production.
 
 type memRepo struct {
 	mu         sync.RWMutex

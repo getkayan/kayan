@@ -237,7 +237,7 @@ Important options:
 
 ## Adapters
 
-- `kgorm.NewRepository(db)` for relational persistence
+- `gormstore.NewRepository(db)` for relational persistence
 - `kredis` package constructors for Redis-backed security state and session support
 
 For concrete usage patterns, prefer the package tests alongside this reference. The tests are the most precise source of expected behavior.

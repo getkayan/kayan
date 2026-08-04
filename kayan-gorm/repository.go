@@ -24,7 +24,7 @@
 // # Example Usage
 //
 //	db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-//	repo := kgorm.NewRepository(db)
+//	repo := gormstore.NewRepository(db)
 //
 //	// Run migrations
 //	repo.AutoMigrate()
@@ -37,7 +37,7 @@
 // To extend the default models, pass them to AutoMigrate:
 //
 //	repo.AutoMigrate(&MyCustomModel{}, &AnotherModel{})
-package kgorm
+package gormstore
 
 import (
 	"context"

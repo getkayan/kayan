@@ -8,7 +8,7 @@
 
 ```bash
 go get github.com/getkayan/kayan/core
-go get github.com/getkayan/kayan/kgorm  # For SQL databases
+go get github.com/getkayan/kayan/kayan-gorm  # For SQL databases
 ```
 
 ---
@@ -39,7 +39,7 @@ func (u *User) SetID(id any) { u.ID = id.(string) }
 
 ```go
 import (
-    "github.com/getkayan/kayan/kgorm"
+    "github.com/getkayan/kayan/kayan-gorm"
     "gorm.io/driver/postgres"
     "gorm.io/gorm"
 )
@@ -48,7 +48,7 @@ import (
 db, _ := gorm.Open(postgres.Open("postgres://user:pass@localhost/dbname"), &gorm.Config{})
 
 // Create storage adapter
-repo := kgorm.NewRepository(db)
+repo := gormstore.NewRepository(db)
 
 // Auto-migrate Kayan's tables (or pass your own models)
 repo.AutoMigrate()
@@ -331,11 +331,11 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 ### Add Rate Limiting
 
 ```go
-import "github.com/getkayan/kayan/kredis"
+import "github.com/getkayan/kayan/kayan-redis"
 import "github.com/redis/go-redis/v9"
 
 rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-limiter := kredis.NewRateLimiter(rdb)
+limiter := redisstore.NewRateLimiter(rdb)
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
     // Check rate limit (5 attempts per 15 minutes)
@@ -369,7 +369,7 @@ func TestRegistration(t *testing.T) {
     db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
     db.AutoMigrate(&identity.Identity{}, &identity.Credential{})
     
-    repo := kgorm.New(db)
+    repo := gormstore.New(db)
     reg, _ := flow.PasswordAuth(repo, func() any { return &identity.Identity{} }, "email")
     
     ident, err := reg.Submit(context.Background(), "password", 
@@ -386,8 +386,8 @@ func TestRegistration(t *testing.T) {
 
 - ✅ Use environment variables for secrets
 - ✅ Enable HTTPS/TLS
-- ✅ Add rate limiting (`kredis.NewRateLimiter`)
-- ✅ Add account lockout (`kredis.NewLockoutStore`)
+- ✅ Add rate limiting (`redisstore.NewRateLimiter`)
+- ✅ Add account lockout (`redisstore.NewLockoutStore`)
 - ✅ Enable audit logging (built into Kayan)
 - ✅ Set up monitoring (Prometheus/OTLP via `core/telemetry`)
 - ✅ Use strong JWT secrets (256-bit minimum)

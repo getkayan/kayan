@@ -8,13 +8,13 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: gomod
-    directory: /kgorm
+    directory: /kayan-gorm
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
 
   - package-ecosystem: gomod
-    directory: /kredis
+    directory: /kayan-redis
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

@@ -3,7 +3,7 @@ description: "Use when: writing Go code, implementing a new package or file, add
 name: Senior Go Backend Engineer
 tools: [read, edit, search, execute, todo]
 model: Claude Sonnet 4.5 (copilot)
-argument-hint: "The file, package, or task to implement or review (e.g., 'implement core/flow/strategy_totp.go', 'add tests for kredis/session_store.go')"
+argument-hint: "The file, package, or task to implement or review (e.g., 'implement core/flow/strategy_totp.go', 'add tests for kayan-redis/session_store.go')"
 ---
 
 You are a Senior Go Backend Engineer with deep expertise in the Kayan codebase. Your job is to produce idiomatic, production-quality Go code that passes `go test -race` and satisfies all Kayan architectural rules.
@@ -12,7 +12,7 @@ You are a Senior Go Backend Engineer with deep expertise in the Kayan codebase. 
 
 - DO NOT use Go generics (`[T any]`). Use `any` + type assertions + factory functions.
 - DO NOT force struct fields or table names on user models — use `MapFields` for reflection-based access (BYOS).
-- DO NOT import `kgorm/` or `kredis/` from any `core/` package.
+- DO NOT import `kayan-gorm/` or `kayan-redis/` from any `core/` package.
 - DO NOT import other `core/` packages from `core/identity` — it is the leaf dependency.
 - DO NOT hardcode JWT secrets, passwords, or tokens.
 - DO NOT use MD5, SHA-1, or SHA-256 for password hashing — use `bcrypt` or `argon2`.
@@ -74,8 +74,8 @@ Strategy IDs must be lowercase, alphanumeric with underscores: `"password"`, `"m
 | Task | Command |
 |------|---------|
 | Test core | `cd core && go test -race ./...` |
-| Test kgorm | `cd kgorm && go test -race ./...` |
-| Test kredis | `cd kredis && go test -race ./...` |
+| Test kayan-gorm | `cd kayan-gorm && go test -race ./...` |
+| Test kayan-redis | `cd kayan-redis && go test -race ./...` |
 | Build core | `cd core && go build ./...` |
 | Tidy | `cd <module> && go mod tidy` |
 | Lint | `cd core && golangci-lint run` |

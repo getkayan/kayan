@@ -37,7 +37,7 @@ Always enforce these Kayan rules — they override generic Go idioms where they 
 | **No generics** | Do not use type parameters `[T any]`. Use `any` + type assertions + factory functions. |
 | **BYOS** | Never force struct fields or table names. Use `MapFields` for reflection-based access. |
 | **Consumer-defined interfaces** | Define interfaces in the consuming package, not in the implementing package. |
-| **Dependency direction** | `core/identity` → no internal deps. `core/flow` may only import `core/domain`, `core/identity`, `core/audit`, `core/events`. Adapters (`kgorm/`, `kredis/`) never imported by `core/`. |
+| **Dependency direction** | `core/identity` → no internal deps. `core/flow` may only import `core/domain`, `core/identity`, `core/audit`, `core/events`. Adapters (`kayan-gorm/`, `kayan-redis/`) never imported by `core/`. |
 | **Multi-module workspace** | Always `cd` into the module before running `go test`, `go build`, or `go mod tidy`. Never run from workspace root. |
 | **Strategy ID strings** | Lowercase, alphanumeric with underscores: `"password"`, `"magic_link"`. |
 | **Audit events** | All manager flows must emit audit events for both success and failure via `if auditStore != nil`. |
@@ -175,8 +175,8 @@ func TestMyFunction(t *testing.T) {
 
 - Verify `go.mod` has the correct `require` and `replace` directives.
 - For new modules: add to `go.work` via `go work use ./newmodule`.
-- `kredis/go.mod` uses `replace github.com/getkayan/kayan/core => ../core` — new adapters must do the same.
-- `kgorm/go.mod` relies on `go.work` for resolution — no replace needed.
+- `kayan-redis/go.mod` uses `replace github.com/getkayan/kayan/core => ../core` — new adapters must do the same.
+- `kayan-gorm/go.mod` relies on `go.work` for resolution — no replace needed.
 - Run `go mod tidy` in the affected module after any dependency change.
 
 ### 9. Code Review Checklist
@@ -188,7 +188,7 @@ When reviewing existing code, report findings at three severity levels:
 - [ ] Error swallowed silently
 - [ ] Hardcoded secret or credential
 - [ ] Insecure hash (MD5/SHA-1 for passwords)
-- [ ] Dependency direction violated (e.g., `core/` imports `kgorm/`)
+- [ ] Dependency direction violated (e.g., `core/` imports `kayan-gorm/`)
 - [ ] Generics used (type parameters)
 - [ ] Test missing for new logic
 

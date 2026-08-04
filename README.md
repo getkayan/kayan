@@ -73,7 +73,7 @@ import (
     "github.com/getkayan/kayan/core/flow"
     "github.com/getkayan/kayan/core/identity"
     "github.com/getkayan/kayan/core/session"
-    "github.com/getkayan/kayan/kgorm"
+    "github.com/getkayan/kayan/kayan-gorm"
     "github.com/google/uuid"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
@@ -96,7 +96,7 @@ func main() {
         log.Fatal(err)
     }
 
-    repo := kgorm.NewRepository(db)
+    repo := gormstore.NewRepository(db)
     factory := func() any { return &User{} }
 
     reg, login := flow.PasswordAuth(

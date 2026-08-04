@@ -1,4 +1,4 @@
-package kgorm
+package gormstore
 
 import (
 	"github.com/getkayan/kayan/core/identity"

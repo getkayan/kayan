@@ -26,12 +26,12 @@ jobs:
         working-directory: core
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Run kgorm Tests
-        working-directory: kgorm
+      - name: Run kayan-gorm Tests
+        working-directory: kayan-gorm
         run: go test -race ./...
 
-      - name: Run kredis Tests
-        working-directory: kredis
+      - name: Run kayan-redis Tests
+        working-directory: kayan-redis
         run: go test -race ./...
 
       - name: Upload coverage to Codecov

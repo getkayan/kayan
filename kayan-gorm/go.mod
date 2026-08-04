@@ -1,4 +1,4 @@
-module github.com/getkayan/kayan/kgorm
+module github.com/getkayan/kayan/kayan-gorm
 
 go 1.25.5
 

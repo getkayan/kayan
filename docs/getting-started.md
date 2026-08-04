@@ -11,8 +11,8 @@ go get github.com/getkayan/kayan
 If you want the built-in GORM adapter and Redis-backed helpers:
 
 ```bash
-go get github.com/getkayan/kayan/kgorm
-go get github.com/getkayan/kayan/kredis
+go get github.com/getkayan/kayan/kayan-gorm
+go get github.com/getkayan/kayan/kayan-redis
 ```
 
 ## 2. Define Your Identity Model
@@ -67,7 +67,7 @@ if err != nil {
 	log.Fatal(err)
 }
 
-repo := kgorm.NewRepository(db)
+repo := gormstore.NewRepository(db)
 ```
 
 For BYOS, your adapter must satisfy only the interfaces you need. Password registration and login typically require:

@@ -13,8 +13,8 @@ This is a **Go multi-module workspace** (`go.work`). There is no single root mod
 | Module path | Import path | Purpose |
 |-------------|-------------|---------|
 | `core/` | `github.com/getkayan/kayan/core` | Primary library (all auth logic) |
-| `kgorm/` | `github.com/getkayan/kayan/kgorm` | GORM storage adapter |
-| `kredis/` | `github.com/getkayan/kayan/kredis` | Redis adapter |
+| `kgorm/` | `github.com/getkayan/kayan/kayan-gorm` | GORM storage adapter |
+| `kredis/` | `github.com/getkayan/kayan/kayan-redis` | Redis adapter |
 | `cmd/kayan-cli/` | — | Administrative CLI |
 | `examples/nextjs-kayan-demo/backend` | — | Reference backend |
 

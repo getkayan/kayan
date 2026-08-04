@@ -41,7 +41,7 @@
 //	func (u *User) SetID(id any) { u.ID = id.(string) }
 //
 //	// 2. Setup Kayan
-//	repo := kgorm.NewRepository(db)
+//	repo := gormstore.NewRepository(db)
 //	hasher := flow.NewBcryptHasher(10)
 //	pwStrategy := flow.NewPasswordStrategy(repo, hasher, "", factory)
 //	pwStrategy.MapFields([]string{"Email"}, "PasswordHash")

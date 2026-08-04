@@ -1,4 +1,4 @@
-module github.com/getkayan/kayan/kredis
+module github.com/getkayan/kayan/kayan-redis
 
 go 1.25.5
 

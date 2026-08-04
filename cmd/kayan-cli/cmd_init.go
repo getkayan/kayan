@@ -44,7 +44,7 @@ import (
 	"github.com/getkayan/kayan/core/session"
 	"github.com/getkayan/kayan/core/flow"
 	"github.com/getkayan/kayan/core/identity"
-	"github.com/getkayan/kayan/kgorm"
+	"github.com/getkayan/kayan/kayan-gorm"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -55,7 +55,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	repo := kgorm.NewRepository(db)
+	repo := gormstore.NewRepository(db)
 	factory := func() any { return &identity.Identity{} }
 
 	// 2. Kayan Setup

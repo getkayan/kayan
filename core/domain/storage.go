@@ -21,11 +21,11 @@
 //
 // See the kgorm package for a complete GORM-based implementation of these interfaces.
 //
-//	import "github.com/getkayan/kayan/kgorm"
+//	import "github.com/getkayan/kayan/kayan-gorm"
 //	import "gorm.io/driver/postgres"
 //
 //	db, _ := gorm.Open(postgres.Open("postgres://..."), &gorm.Config{})
-//	repo := kgorm.New(db)
+//	repo := gormstore.New(db)
 //
 //	// Now use repo with any flow manager
 //	reg, login := flow.PasswordAuth(repo, func() any { return &User{} }, "email")

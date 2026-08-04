@@ -1,4 +1,4 @@
-package kredis
+package redisstore
 
 import (
 	"context"

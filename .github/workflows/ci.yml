@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kgorm, kredis, cmd/kayan-cli]
+        module: [core, kayan-gorm, kayan-redis, kayan-testing, cmd/kayan-cli]
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +48,7 @@ jobs:
       # arrow points one way only. Adding a module here is how that stays true.
       #
       # This resolves real imports via `go list`, not grep over source text —
-      # doc comments in core/domain/storage.go reference kgorm as an example,
+      # doc comments in core/domain/storage.go reference kayan-gorm as an example,
       # and a lint that fails on documentation is a lint people switch off.
       - name: core must not import sibling modules
         working-directory: core
@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           imports="$(go list -deps ./... | grep '^github.com/getkayan/kayan/' || true)"
           status=0
-          for module in kgorm kredis; do
+          for module in kayan-gorm kayan-redis kayan-testing; do
             if echo "${imports}" | grep -q "^github.com/getkayan/kayan/${module}"; then
               echo "ERROR: core/ must not import ${module}/"
               echo "${imports}" | grep "^github.com/getkayan/kayan/${module}"
@@ -82,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kgorm, kredis, cmd/kayan-cli]
+        module: [core, kayan-gorm, kayan-redis, kayan-testing, cmd/kayan-cli]
     steps:
       - uses: actions/checkout@v4
 
