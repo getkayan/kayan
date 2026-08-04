@@ -8,13 +8,20 @@
 [![Coverage](https://codecov.io/gh/getkayan/kayan/branch/main/graph/badge.svg)](https://codecov.io/gh/getkayan/kayan)
 [![Go Report Card](https://goreportcard.com/badge/github.com/getkayan/kayan)](https://goreportcard.com/report/github.com/getkayan/kayan)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Release](https://img.shields.io/github/v/release/getkayan/kayan)](https://github.com/getkayan/kayan/releases)
+
+**Headless, non-generic, extensible IAM for Go.** Authentication, sessions,
+authorization, federation, provisioning, audit, and multi-tenancy — without a
+router, a UI, or a fixed user schema.
+
+```go
+reg, login := flow.PasswordAuth(repo, factory, "email")
+```
 
 > [!WARNING]
 > **Pre-1.0. Not ready for production use.**
 >
-> Kayan is under active development toward a 1.0 release. The public API will
-> change without a deprecation cycle before then — see [VERSIONING.md](./VERSIONING.md).
+> The public API will change without a deprecation cycle — see
+> [VERSIONING.md](./VERSIONING.md).
 >
 > Known gaps:
 >
@@ -28,43 +35,100 @@
 >   `/ServiceProviderConfig`, or bulk operations. Value filters
 >   (`emails[type eq "work"]`) work in PATCH but not in list queries.
 > - **SSO sessions** (`core/session`) — the cross-application session store is
->   in-memory only, so single sign-on is single-process. MFA enrollments and
->   device trust are persisted by `kayan-gorm`.
+>   in-memory only, so single sign-on is single-process.
 
-Kayan is a headless, non-generic, extensible IAM library for Go. It gives you authentication, session management, authorization, federation, provisioning, audit, compliance, and observability primitives without forcing an HTTP framework, a UI, or a fixed user schema.
+---
 
-## Core Principles
+## Mission
 
-- Headless only. Kayan is a library, not a hosted service or UI framework.
-- Non-generic public APIs. Extension points use interfaces, `any`, and factory functions instead of type parameters.
-- BYOS. Your identity model, field names, ID type, and storage topology remain yours.
-- Strategy-driven composition. Authentication, sessions, authorization, tenancy, and protocol integrations are designed to be mixed and extended.
+Give Go services the security-critical half of identity — authentication
+flows, sessions, authorization, federation, provisioning — without dictating
+the half that belongs to the application: its HTTP framework, its user schema,
+its database, or its cryptographic choices.
 
-## What You Get
+## Vision
 
-- Authentication flows in `core/flow` for password, magic link, OTP, WebAuthn, recovery, verification, step-up, rate limiting, and lockout.
-- Session strategies in `core/session` for stateless JWT and revocable database-backed sessions.
-- Authorization packages for RBAC, ABAC, hybrid policy, and ReBAC.
-- Federation and provisioning support across OAuth 2.0, OIDC, SAML 2.0, and SCIM 2.0.
-- Operational packages for audit, consent, compliance, telemetry, health checks, config, and logging.
-- Adapters such as `kayan-gorm` and `kayan-redis` for concrete persistence and distributed runtime support.
+An IAM library that is correct by default and swappable at every layer, so a
+team never has to choose between "secure" and "fits our architecture."
 
-## Quick Links
+Identity libraries usually force one of two trades. Frameworks make you adopt
+their router, their user table, and their session model. Toolkits hand you
+primitives and leave you to assemble the security properties — which is where
+authentication bypasses come from, because the assembly is the hard part.
 
-- 🚀 **[5-Minute Quick Start](./docs/QUICKSTART.md)** — Get up and running fast
-- 🤖 **[AI Assistant Instructions](./.ai-instructions.md)** — Context for AI coding assistants
-- 🌐 **[HTTP Framework Integration](./docs/adapters/http-frameworks.md)** — Fiber, Echo, Gin, stdlib
-- 📚 **[Examples Guide](./examples/README.md)** — Runnable backends for password, magic link, TOTP, WebAuthn, and more
-- 🏗️ **[Architecture Guide](./docs/architecture/README.md)** — Design principles and patterns
+Kayan takes a third position: **the security decisions live inside the
+library; the architectural decisions live in your application.**
 
-## Support and Stability
+---
 
-- [Versioning and Support](./VERSIONING.md)
-- [Deprecation Policy](./DEPRECATION.md)
-- [Security Policy](./SECURITY.md)
-- [Changelog](./CHANGELOG.md)
+## The three principles
 
-## Quick Start
+### Headless — you own transport
+
+Kayan has no router and no server. It never writes to an
+`http.ResponseWriter`. What it does own is the parsing and validation:
+
+```go
+// Kayan validates. You transport.
+req, err := provider.ParseAuthorizeRequest(ctx, r.URL.Query())
+jwks, err := provider.JWKS(ctx)
+form, err := idp.PostBindingForm(acsURL, response, relayState)
+```
+
+This is not a limitation dressed up as a feature. Security checks belong
+*inside* the parser: `ParseAuthorizeRequest` enforces the `redirect_uri`
+allowlist, the PKCE policy, and the supported response types. A caller who
+hand-parses a query string has to reimplement all three — and that is exactly
+where open redirectors come from.
+
+### Nothing is forced — safe default, real seam
+
+Every algorithm, hash, store, and clock sits behind an interface with a secure
+default you can replace:
+
+```go
+// Default: RSA + RS256.
+provider := keys.NewStaticProvider(&keys.Key{
+    KID: "2026-01", Method: jwt.SigningMethodRS256,
+    Private: rsaKey, Public: &rsaKey.PublicKey,
+})
+
+// Ed25519 instead. Nothing else changes.
+provider := keys.NewStaticProvider(&keys.Key{
+    KID: "2026-01", Method: jwt.SigningMethodEdDSA,
+    Private: edPriv, Public: edPub,
+})
+
+// Key never leaves the HSM — implement Signer and Kayan never holds it.
+oauth2.NewProvider(..., oauth2.WithSigner(&kmsSigner{}))
+```
+
+The same shape covers password hashing (`domain.Hasher`, bcrypt by default,
+argon2id is one line), XML signatures (`saml.SignatureVerifier`), tenant
+isolation (`tenant.Scoper` — row-level by default, schema- or
+database-per-tenant if you implement it), and migrations
+(`gormstore.Migrations()` returns an `fs.FS`, so you keep your own runner).
+
+**Secure by default, never secure by mandate.** PKCE is required unless you
+turn it off. Unsigned SAML assertions are refused unless you allow them. Each
+escape hatch documents what it gives up.
+
+### BYOS — your identity model stays yours
+
+No generics, no base struct to embed, no reserved column names:
+
+```go
+type User struct {          // Your struct. Your fields. Your ID type.
+    ID    string
+    Email string
+}
+
+repo.GetIdentity(ctx, func() any { return &User{} }, id)
+```
+
+---
+
+## Quick start
 
 ```go
 package main
@@ -78,202 +142,138 @@ import (
     "github.com/getkayan/kayan/core/flow"
     "github.com/getkayan/kayan/core/identity"
     "github.com/getkayan/kayan/core/session"
-    "github.com/getkayan/kayan/kayan-gorm"
+    gormstore "github.com/getkayan/kayan/kayan-gorm"
+    "github.com/glebarez/sqlite"
     "github.com/google/uuid"
-    "gorm.io/driver/sqlite"
     "gorm.io/gorm"
 )
 
+// Your model. Kayan stores it as-is.
 type User struct {
-    ID           string `gorm:"primaryKey"`
-    Email        string `gorm:"uniqueIndex"`
-    PasswordHash string
-    Traits       identity.JSON
+    ID     string `gorm:"primaryKey"`
+    Email  string `gorm:"uniqueIndex"`
+    Traits identity.JSON
 }
 
-func (u *User) GetID() any { return u.ID }
-
-func (u *User) SetID(id any) { u.ID = id.(string) }
+func (u *User) GetID() any     { return u.ID }
+func (u *User) SetID(id any)   { u.ID = id.(string) }
 
 func main() {
+    ctx := context.Background()
+
     db, err := gorm.Open(sqlite.Open("app.db"), &gorm.Config{})
     if err != nil {
         log.Fatal(err)
     }
 
     repo := gormstore.NewRepository(db)
+    if err := repo.AutoMigrateDev(&User{}); err != nil { // development only
+        log.Fatal(err)
+    }
+
     factory := func() any { return &User{} }
 
-    reg, login := flow.PasswordAuth(
-        repo,
-        factory,
-        "email",
-        flow.WithHasherCost(12),
-        flow.WithIDGenerator(func() any { return uuid.NewString() }),
+    reg, login := flow.PasswordAuth(repo, factory, "email",
         flow.WithPasswordPolicy(&flow.PasswordPolicy{
             MinLength:        12,
             RequireUppercase: true,
-            RequireLowercase: true,
             RequireDigit:     true,
         }),
     )
 
-    ctx := context.Background()
     traits := identity.JSON(`{"email":"dev@example.com"}`)
+    if _, err := reg.Submit(ctx, "password", traits, "StrongPass1234"); err != nil {
+        log.Fatal(err)
+    }
 
-    _, err = reg.Submit(ctx, "password", traits, "StrongPass1234")
+    user, err := login.Authenticate(ctx, "password", "dev@example.com", "StrongPass1234")
     if err != nil {
         log.Fatal(err)
     }
 
-    authenticated, err := login.Authenticate(ctx, "password", "dev@example.com", "StrongPass1234")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    jwtStrategy := session.NewHS256Strategy(os.Getenv("SESSION_SECRET"), 15*time.Minute)
-    sessionManager := session.NewManager(jwtStrategy)
-
-    _, err = sessionManager.Create(ctx, uuid.NewString(), authenticated.(*User).GetID())
-    if err != nil {
+    sessions := session.NewManager(
+        session.NewHS256Strategy(os.Getenv("SESSION_SECRET"), 15*time.Minute),
+    )
+    if _, err := sessions.Create(ctx, uuid.NewString(), user.(*User).GetID()); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-For a deeper integration path with BYOS models, hooks, multiple auth strategies, tenancy, and authorization, start with [docs/getting-started.md](./docs/getting-started.md).
+`AutoMigrateDev` is for development. Production applies the versioned SQL from
+`gormstore.Migrations(dialect)` with your own migration tool.
 
-## Documentation
+---
 
-Start with the docs index in [docs/README.md](./docs/README.md).
-
-If you want a runnable reference app before wiring Kayan into your own service, start with [examples/README.md](./examples/README.md).
-
-### Integration Path
-
-- [Getting Started](./docs/getting-started.md)
-- [BYOS](./docs/concepts/byos.md)
-- [Authentication Strategies](./docs/concepts/strategies.md)
-- [Session Management](./docs/concepts/sessions.md)
-- [Authorization](./docs/concepts/authorization.md)
-- [Multi-Tenancy](./docs/concepts/multi-tenancy.md)
-
-### Architecture
-
-- [Architecture Overview](./docs/architecture/README.md)
-- [Authentication Flows](./docs/architecture/authentication-flows.md)
-- [Authorization Models](./docs/architecture/authorization-models.md)
-- [Security Model](./docs/architecture/security-model.md)
-- [Storage Layer](./docs/architecture/storage-layer.md)
-- [Strategy Internals](./docs/architecture/strategy-internals.md)
-- [Extending Kayan](./docs/architecture/extending-kayan.md)
-
-### Package and Runtime Reference
-
-- [Infrastructure Packages](./docs/core/infrastructure.md)
-- [OIDC and OAuth 2.0](./docs/core/oidc.md)
-- [SAML 2.0](./docs/core/saml.md)
-- [SCIM 2.0](./docs/core/scim.md)
-- [Storage Adapters](./docs/adapters/storage.md)
-- [Operations](./docs/operations/README.md)
-- [Configuration](./docs/reference/configuration.md)
-- [API Reference](./docs/reference/api.md)
-- [JavaScript and TypeScript Integration](./docs/sdk/javascript.md)
-- [OpenAPI Specification](./docs/openapi/openapi.yaml)
-
-### Project Policies
-
-- [Versioning and Support](./VERSIONING.md)
-- [Deprecation Policy](./DEPRECATION.md)
-- [Security Policy](./SECURITY.md)
-
-## Docs Site
-
-This repository now includes a MkDocs navigation file over the existing `docs/` tree.
-
-Install the docs dependencies:
-
-```bash
-python -m pip install -r requirements-docs.txt
-```
-
-Run the docs locally:
-
-```bash
-mkdocs serve
-```
-
-Build a static site for GitHub Pages or any static host:
-
-```bash
-mkdocs build
-```
-
-The site configuration lives in `mkdocs.yml` and uses `docs/README.md` as the documentation home page.
-
-## Package Map
-
-### Identity and authentication
-
-- `core/identity`: default identity, credential, session, and JSON helpers
-- `core/domain`: persistence contracts and shared interfaces
-- `core/flow`: registration, login, password auth, passwordless methods, WebAuthn, recovery, verification, step-up, rate limiting, lockout
-- `core/session`: JWT and database-backed sessions
-- `core/device`: device trust and fingerprinting
-- `core/mfa`: MFA enrollment, challenge, recovery codes, and verification
-- `core/risk`: adaptive risk scoring
-
-### Authorization and tenancy
-
-- `core/rbac`: role and permission checks
-- `core/rebac`: relationship-based authorization
-- `core/policy`: ABAC and hybrid policy engines
-- `core/tenant`: tenant resolution, hooks, and scoped storage
-- `core/admin`: admin-oriented headless APIs
-
-### Federation and provisioning
-
-- `core/oauth2`: OAuth 2.0 authorization server components
-- `core/oidc`: OIDC discovery, ID tokens, and logout helpers
-- `core/saml`: SAML 2.0 service provider support
-- `core/scim`: SCIM 2.0 provisioning and mapping
-
-### Operations and compliance
-
-- `core/audit`: audit events and store contracts
-- `core/events`: event dispatch and topics
-- `core/consent`: consent tracking and export
-- `core/compliance`: retention and encryption helpers
-- `core/config`: environment-backed configuration
-- `core/logger`: logging setup
-- `core/telemetry`: OpenTelemetry traces and metrics
-- `core/health`: liveness, readiness, and detailed health reports
-
-### Modules
+## Modules
 
 Protocols and their storage live outside `core`, so a deployment compiles only
 what it uses — password authentication pulls in no OAuth 2.0, SCIM, or SAML.
 
-- `kayan-gorm`: GORM-backed storage for identities, credentials, sessions,
-  audit, ReBAC, MFA, and devices, plus tenant isolation callbacks
-- `kayan-redis`: Redis-backed runtime support for sessions, rate limiting,
-  lockout, and WebAuthn ceremonies
-- `kayan-oidc-provider`: OAuth 2.0 and OpenID Connect, with an optional GORM
-  adapter in `kayan-oidc-provider/gormstore`
-- `kayan-saml`: SAML 2.0 service provider and identity provider
-- `kayan-scim`: SCIM 2.0, with an optional GORM adapter in
-  `kayan-scim/gormstore`
-- `kayan-ldap`: LDAP directory authentication
-- `kayan-testing`: in-memory stores and a storage contract suite, for tests
-  only
+| Module | Purpose |
+|---|---|
+| `core` | Contracts, identity, sessions, flows, RBAC, ABAC, ReBAC, tenancy, audit |
+| `kayan-gorm` | GORM storage, tenant isolation callbacks, versioned migrations |
+| `kayan-redis` | Sessions, rate limiting, lockout, WebAuthn ceremonies |
+| `kayan-oidc-provider` | OAuth 2.0 and OpenID Connect (`gormstore/` adapter optional) |
+| `kayan-saml` | SAML 2.0 service provider and identity provider |
+| `kayan-scim` | SCIM 2.0 provisioning (`gormstore/` adapter optional) |
+| `kayan-ldap` | LDAP directory authentication |
+| `kayan-testing` | In-memory stores and a storage contract suite — tests only |
 
-## Examples
+The dependency arrow points one way: **`core` never imports a sibling
+module**, and CI enforces it.
 
-- [examples/README.md](./examples/README.md)
-- [core/flow/example_passwordauth_test.go](./core/flow/example_passwordauth_test.go)
-- [core/tenant/example_manager_test.go](./core/tenant/example_manager_test.go)
-- [examples/nextjs-kayan-demo](./examples/nextjs-kayan-demo)
+Writing your own backend? `kayantesting.StorageSuite` is the contract, so a
+Mongo or filesystem store can prove it behaves like the bundled ones:
+
+```go
+func TestMongoStore(t *testing.T) {
+    kayantesting.StorageSuite(t, func() domain.Storage {
+        return mongostore.New(testDatabase(t))
+    })
+}
+```
+
+---
+
+## What you get
+
+**Authentication** (`core/flow`) — password, magic link, OTP, TOTP, WebAuthn,
+API keys, recovery codes, LDAP, social/OIDC, step-up, rate limiting, lockout.
+
+**Sessions** (`core/session`) — stateless JWT and revocable database-backed
+strategies, with algorithm pinning on every parse path.
+
+**Authorization** — RBAC with role inheritance and wildcard permissions
+(`users:*` matches `users:delete`), ABAC, hybrid policy, and ReBAC.
+
+**Federation and provisioning** — OAuth 2.0, OIDC, SAML 2.0 with XML-DSig
+signature verification and structural signature-wrapping defense, SCIM 2.0
+with PATCH and a filter grammar.
+
+**Multi-tenancy** (`core/tenant`) — eight resolution strategies, with
+isolation enforced at the storage layer. A scoped query with no tenant in
+context is an error, never an unscoped read.
+
+**Operations** — audit, consent, compliance, telemetry, health checks.
+
+---
+
+## Documentation
+
+- [Getting Started](./docs/getting-started.md) · [Quick Start](./docs/QUICKSTART.md)
+- [BYOS](./docs/concepts/byos.md) · [Strategies](./docs/concepts/strategies.md) · [Sessions](./docs/concepts/sessions.md)
+- [Authorization](./docs/concepts/authorization.md) · [Multi-Tenancy](./docs/concepts/multi-tenancy.md)
+- [Architecture](./docs/architecture/README.md) · [Security Model](./docs/architecture/security-model.md)
+- [Examples](./examples/README.md) — runnable backends per strategy
+- [AGENTS.md](./AGENTS.md) / [CLAUDE.md](./CLAUDE.md) — architectural rules for contributors and AI agents
+
+## Project
+
+- [Versioning and Support](./VERSIONING.md) · [Deprecation Policy](./DEPRECATION.md)
+- [Security Policy](./SECURITY.md) · [Contributing](./CONTRIBUTING.md) · [Changelog](./CHANGELOG.md)
 
 ## License
 
-Apache 2.0
+Apache 2.0 — see [LICENSE](./LICENSE).

@@ -12,11 +12,19 @@ This is a **Go multi-module workspace** (`go.work`). There is no single root mod
 
 | Module path | Import path | Purpose |
 |-------------|-------------|---------|
-| `core/` | `github.com/getkayan/kayan/core` | Primary library (all auth logic) |
-| `kgorm/` | `github.com/getkayan/kayan/kayan-gorm` | GORM storage adapter |
-| `kredis/` | `github.com/getkayan/kayan/kayan-redis` | Redis adapter |
-| `cmd/kayan-cli/` | — | Administrative CLI |
-| `examples/nextjs-kayan-demo/backend` | — | Reference backend |
+| `core/` | `github.com/getkayan/kayan/core` | Contracts, identity, sessions, flows, authz, tenancy |
+| `kayan-gorm/` | `github.com/getkayan/kayan/kayan-gorm` | GORM storage, tenant isolation, migrations |
+| `kayan-redis/` | `github.com/getkayan/kayan/kayan-redis` | Sessions, rate limiting, lockout, WebAuthn |
+| `kayan-oidc-provider/` | `github.com/getkayan/kayan/kayan-oidc-provider` | OAuth 2.0 and OpenID Connect |
+| `kayan-saml/` | `github.com/getkayan/kayan/kayan-saml` | SAML 2.0 SP and IdP |
+| `kayan-scim/` | `github.com/getkayan/kayan/kayan-scim` | SCIM 2.0 provisioning |
+| `kayan-ldap/` | `github.com/getkayan/kayan/kayan-ldap` | LDAP directory authentication |
+| `kayan-testing/` | `github.com/getkayan/kayan/kayan-testing` | In-memory stores, storage contract suite |
+
+Protocols live outside `core` so a deployment compiles only what it uses.
+Password authentication pulls in no OAuth 2.0, SCIM, or SAML. Protocol storage
+ships with its protocol — `kayan-oidc-provider/gormstore`, `kayan-scim/gormstore` —
+rather than in `kayan-gorm`.
 
 ### Build & Test Commands
 
@@ -25,34 +33,27 @@ This is a **Go multi-module workspace** (`go.work`). There is no single root mod
 ```bash
 # Unit tests (race detection enabled)
 cd core && go test -race ./...
-cd kgorm && go test -race ./...
-cd kredis && go test -race ./...
+cd kayan-gorm && go test -race ./...
 
-# With coverage (core only)
+# With coverage
 cd core && go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-# Integration tests — requires PostgreSQL
-# Set DATABASE_URL=postgres://kayan:kayan@localhost:5432/kayan_test?sslmode=disable
-cd core && go test -race -tags=integration ./...
+# Fuzz targets live in kayan-oidc-provider/oauth2, kayan-saml, kayan-scim
+cd kayan-saml && go test -run '^$' -fuzz FuzzProcessResponse -fuzztime 30s ./...
 
-# Build
-cd core && go build ./...
-cd kgorm && go build ./...
-
-# Lint
-cd core && golangci-lint run
-
-# CLI
-cd cmd/kayan-cli && go build -o kayan-cli .
+# Build and lint
+cd core && go build ./... && golangci-lint run
 ```
 
 ### Multi-Module Pitfalls
 
 - **Never** run `go test ./...` from the workspace root — use per-module dirs.
-- `kredis/go.mod` uses `replace github.com/getkayan/kayan/core => ../core`. New adapter modules must do the same.
-- `kgorm/go.mod` does NOT use a replace directive — it relies on `go.work` resolving it.
-- Integration tests are tagged `//go:build integration` and run separately from unit tests.
-- When adding a new module, add it to `go.work` via `go work use ./newmodule`.
+- Sibling `go.mod` files use `replace github.com/getkayan/kayan/core => ../core`. New modules must do the same.
+- When adding a new module: `go work use ./newmodule`, then add it to the CI
+  matrices in `.github/workflows/{ci,test,security}.yml` and to the arch-lint
+  module list. A module absent from CI is a module nothing checks.
+- Anything left in `testdata/fuzz/` is a previously-found crasher and runs as a
+  regression test. Do not delete those.
 
 ### Key Documentation
 
@@ -95,33 +96,47 @@ cd cmd/kayan-cli && go build -o kayan-cli .
 ### 2.1 Dependency Direction (Strictly Enforced)
 
 ```
-core/domain     ← Depends on: core/identity, core/audit ONLY
 core/identity   ← Depends on: stdlib ONLY (zero internal deps)
-core/flow       ← Depends on: core/domain, core/identity, core/audit, core/events
-core/session    ← Depends on: core/domain, core/identity
+core/audit      ← Depends on: stdlib ONLY (zero internal deps)
 core/rbac       ← Depends on: stdlib ONLY (zero internal deps)
 core/rebac      ← Depends on: stdlib ONLY (zero internal deps)
-core/policy     ← Depends on: stdlib ONLY (zero internal deps)
+core/policy     ← Depends on: core/domain, core/audit, core/identity
 core/tenant     ← Depends on: stdlib ONLY (zero internal deps)
-core/audit      ← Depends on: stdlib ONLY (zero internal deps)
+core/keys       ← Depends on: stdlib + golang-jwt ONLY
+core/domain     ← Depends on: core/identity, core/audit ONLY
 core/events     ← Depends on: core/identity
-core/oauth2     ← Depends on: core/identity
-core/oidc       ← Depends on: core/identity
-core/saml       ← Depends on: core/identity
-kgorm/          ← Depends on: core/domain, core/identity, core/audit (GORM adapter)
+core/flow       ← Depends on: core/domain, core/identity, core/audit, core/events
+core/session    ← Depends on: core/domain, core/identity
+
+kayan-gorm/            ← core/domain, core/identity, core/audit, core/tenant, core/mfa, core/device
+kayan-redis/           ← core/session, core/flow
+kayan-oidc-provider/   ← core/domain, core/identity, core/audit, core/keys
+kayan-saml/            ← core/domain, core/identity
+kayan-scim/            ← core/identity
+kayan-ldap/            ← core/flow
+kayan-testing/         ← core/domain, core/identity, core/audit
 ```
 
 ### 2.2 Forbidden Dependencies
-- `core/` packages must **never** import `kgorm/` or any storage adapter.
-- `core/identity` must **never** import other `core/` packages — it is the leaf dependency.
-- `core/rbac`, `core/rebac`, `core/policy`, `core/tenant` must **never** import `core/flow` or `core/session`.
-- No package may import `core/flow` except through its exported interfaces.
+
+**`core/` must never import a sibling module.** This is the load-bearing rule:
+`core` defines contracts, siblings implement them, and the arrow points one
+way. CI enforces it with `go list -deps` rather than grep — a doc comment
+mentioning a module is not an import.
+
+- `core/identity` must **never** import other `core/` packages — it is the leaf.
+- `core/rbac`, `core/rebac`, `core/tenant` must **never** import `core/flow` or `core/session`.
+- `kayan-testing` must **never** be imported outside a `_test.go` file. Its
+  stores lose everything on restart; CI enforces this too.
 
 ### 2.3 External Dependency Policy
 - `core/identity`: **Zero external deps** — stdlib only.
 - `core/flow`, `core/session`: Minimal deps (`golang-jwt`, `x/crypto`, `google/uuid`).
 - New external dependencies in `core/` require justification. Prefer stdlib solutions.
-- Database drivers and ORM dependencies belong in adapter packages (`kgorm/`), never in `core/`.
+- Database drivers, ORMs, and protocol libraries belong in sibling modules,
+  never in `core/`. `goxmldsig` lives in `kayan-saml` and `go-ldap` in
+  `kayan-ldap` for exactly this reason: a consumer using password
+  authentication should not carry an XML canonicalization surface.
 
 ---
 
@@ -268,7 +283,7 @@ func WithHooks(hooks Hooks) ManagerOption { ... }
 | Non-generic design | Supports any ID type without compile-time constraints. Trades compile-time safety for universal compatibility. |
 | `any`-based interfaces | Enables BYOS — users keep their models, Kayan adapts with reflection. |
 | Strategy pattern | Allows mixing auth methods without modifying core logic. New methods = new files, not modified files. |
-| Separate adapter repos | `kgorm/` is co-located but self-contained. Future adapters (MongoDB, Redis) follow the same pattern. |
+| Separate adapter repos | Sibling modules are co-located but self-contained. A MongoDB or filesystem adapter implements the same contracts and drops in unchanged — `kayantesting.StorageSuite` is how it proves that. |
 | Consumer-defined interfaces | Interfaces are declared where they're consumed, not where they're implemented. Follows Go best practices. |
 | Hook system over inheritance | Pre/post hooks on managers instead of subclassing. Keeps the API surface flat and composable. |
 
@@ -280,29 +295,29 @@ func WithHooks(hooks Hooks) ManagerOption { ... }
 
 ```
 kayan/
-├── core/                     # Core library — NO framework deps
+├── core/                     # Contracts and the authentication engine
 │   ├── identity/             # Leaf dep: types only (Identity, Session, Credential, JSON)
-│   ├── domain/               # Storage interfaces (IdentityStorage, SessionStorage, etc.)
+│   ├── domain/               # Storage contracts, Hasher, Clock, IDGenerator, TokenGenerator
+│   ├── keys/                 # Signing keys: Provider, Signer, JWKS — the algorithm seam
 │   ├── flow/                 # Auth flows: strategies, managers, hooks, rate limiting
 │   ├── session/              # Session management: JWT + Database strategies
-│   ├── rbac/                 # RBAC engine (standalone, no core deps)
-│   ├── rebac/                # ReBAC engine (standalone, no core deps)
-│   ├── policy/               # ABAC + Hybrid policy engine (standalone)
-│   ├── tenant/               # Multi-tenancy: resolver, manager, scoped store
-│   ├── events/               # Unified event system & hooks
-│   ├── oauth2/               # OAuth2 provider (auth codes, tokens, PKCE)
-│   ├── oidc/                 # OIDC provider (discovery, userinfo, ID tokens)
-│   ├── saml/                 # SAML 2.0 SP/IdP
-│   ├── audit/                # Audit logging (events, store interface)
+│   ├── rbac/                 # RBAC: roles, inheritance, wildcard permissions
+│   ├── rebac/                # ReBAC engine
+│   ├── policy/               # ABAC + Hybrid policy engine
+│   ├── tenant/               # Multi-tenancy: resolvers, Scoper, Scoped, isolation contract
+│   ├── mfa/  core/device/    # MFA orchestration and device trust
+│   ├── events/  core/audit/  # Event system and audit logging
 │   ├── compliance/           # Data retention, encryption
 │   ├── telemetry/            # OpenTelemetry, Prometheus
-│   ├── config/               # Dynamic configuration
-│   ├── consent/              # GDPR/CCPA consent management
-│   ├── health/               # Health check utilities
-│   └── logger/               # Structured logging
-├── kgorm/                    # GORM storage adapter (co-located, self-contained)
-├── kredis/                   # Redis adapter (sessions, lockout, rate limiting)
-├── cmd/                      # CLI tools
+│   ├── consent/  health/     # GDPR consent, health checks
+│   └── logger/  config/      # Structured logging, configuration
+├── kayan-gorm/               # GORM storage, tenant callbacks, versioned migrations
+├── kayan-redis/              # Sessions, lockout, rate limiting, WebAuthn ceremonies
+├── kayan-oidc-provider/      # OAuth 2.0 + OIDC   (gormstore/ optional)
+├── kayan-saml/               # SAML 2.0 SP/IdP    (goxmldsig lives here, not in core)
+├── kayan-scim/               # SCIM 2.0           (gormstore/ optional)
+├── kayan-ldap/               # go-ldap implementation of flow.LDAPDialer
+├── kayan-testing/            # In-memory stores + StorageSuite (tests only)
 └── docs/                     # Documentation
 ```
 
@@ -311,9 +326,13 @@ kayan/
 ```
 core/identity  (stdlib only, leaf)
      ↑
-core/domain, core/audit, core/events
+core/domain, core/audit, core/events, core/keys
      ↑
-core/flow, core/session, core/oauth2, core/oidc, core/saml
+core/flow, core/session, core/rbac, core/tenant
      ↑
-kgorm/, kredis/  (adapters — never imported by core/)
+kayan-*  (siblings — never imported by core/)
 ```
+
+CI checks this with `go list -deps`, not grep: a doc comment naming a module
+is not an import, and a lint that fails on documentation is one people switch
+off.
