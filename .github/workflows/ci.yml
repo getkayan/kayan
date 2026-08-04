@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kayan-gorm, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
+        module: [core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
     steps:
       - uses: actions/checkout@v4
 
@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           imports="$(go list -deps ./... | grep '^github.com/getkayan/kayan/' || true)"
           status=0
-          for module in kayan-gorm kayan-oidc-provider kayan-redis kayan-saml kayan-scim kayan-testing; do
+          for module in kayan-gorm kayan-ldap kayan-oidc-provider kayan-redis kayan-saml kayan-scim kayan-testing; do
             if echo "${imports}" | grep -q "^github.com/getkayan/kayan/${module}"; then
               echo "ERROR: core/ must not import ${module}/"
               echo "${imports}" | grep "^github.com/getkayan/kayan/${module}"
@@ -95,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kayan-gorm, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
+        module: [core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
     steps:
       - uses: actions/checkout@v4
 

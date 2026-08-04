@@ -50,6 +50,10 @@ jobs:
         working-directory: kayan-testing
         run: go test -race ./...
 
+      - name: Run kayan-ldap Tests
+        working-directory: kayan-ldap
+        run: go test -race ./...
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:

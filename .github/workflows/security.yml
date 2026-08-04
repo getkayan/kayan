@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kayan-gorm, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
+        module: [core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
     steps:
       - uses: actions/checkout@v4
 
