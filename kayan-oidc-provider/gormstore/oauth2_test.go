@@ -32,7 +32,7 @@ func TestOAuth2ClientCRUD(t *testing.T) {
 
 	client := &oauth2.Client{
 		ID:           "client-1",
-		Secret:       "secret-hash",
+		SecretHash:   "secret-hash",
 		RedirectURIs: []string{"https://example.com/callback"},
 		GrantTypes:   []string{"authorization_code"},
 		Scopes:       []string{"openid", "profile"},

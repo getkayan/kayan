@@ -1,27 +1,21 @@
 package flow
 
 import (
-	"golang.org/x/crypto/bcrypt"
+	"github.com/getkayan/kayan/core/domain"
 )
 
-type BcryptHasher struct {
-	Cost int
-}
+// BcryptHasher hashes secrets with bcrypt.
+//
+// Deprecated: use [domain.BcryptHasher]. It moved to core/domain because it is
+// a [domain.Hasher] implementation with no dependency on this package, and
+// other packages that hash secrets could not reach it here. This alias keeps
+// existing wiring working.
+type BcryptHasher = domain.BcryptHasher
 
-func NewBcryptHasher(cost int) *BcryptHasher {
-	if cost == 0 {
-		cost = 14
-	}
-	return &BcryptHasher{Cost: cost}
+// NewBcryptHasher returns a bcrypt hasher. A cost of zero selects
+// [domain.DefaultBcryptCost].
+//
+// Deprecated: use [domain.NewBcryptHasher].
+func NewBcryptHasher(cost int) *domain.BcryptHasher {
+	return domain.NewBcryptHasher(cost)
 }
-
-func (h *BcryptHasher) Hash(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), h.Cost)
-	return string(bytes), err
-}
-
-func (h *BcryptHasher) Compare(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
-}
-

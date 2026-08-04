@@ -33,6 +33,9 @@ package domain
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 
 	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/identity"
@@ -91,7 +94,57 @@ type CredentialStorage interface {
 }
 
 // IDGenerator is a function that generates a new ID.
+//
+// It is for record identifiers, where any scheme works — UUIDv4, UUIDv7,
+// ULID, or a database sequence. Use [TokenGenerator] for anything an attacker
+// must not be able to predict.
 type IDGenerator func() any
+
+// TokenGenerator produces a security token: an authorization code, refresh
+// token, magic link, or state value.
+//
+// Implementations must draw from a cryptographically secure source. Unlike
+// [IDGenerator], the output is a credential — a sequential or timestamp-derived
+// value here lets an attacker guess a token belonging to someone else. The two
+// are separate types so that a generator chosen for readable record IDs cannot
+// be wired into a credential path by accident.
+type TokenGenerator func() (string, error)
+
+// DefaultTokenBytes is the entropy, in bytes, of tokens from
+// [NewTokenGenerator]. 256 bits is well beyond the 128-bit floor RFC 6749
+// section 10.10 sets for authorization codes.
+const DefaultTokenBytes = 32
+
+// NewTokenGenerator returns a [TokenGenerator] drawing n bytes from
+// crypto/rand and encoding them as base64url without padding.
+//
+// It panics if n is below 16, since fewer than 128 bits is guessable at scale
+// and a misconfigured generator should fail at startup rather than issue weak
+// credentials.
+func NewTokenGenerator(n int) TokenGenerator {
+	if n < 16 {
+		panic("domain: token generator needs at least 16 bytes of entropy")
+	}
+	return func() (string, error) {
+		buf := make([]byte, n)
+		if _, err := rand.Read(buf); err != nil {
+			return "", fmt.Errorf("domain: read random bytes: %w", err)
+		}
+		return base64.RawURLEncoding.EncodeToString(buf), nil
+	}
+}
+
+// DefaultTokenGenerator produces [DefaultTokenBytes] of entropy from
+// crypto/rand.
+var DefaultTokenGenerator = NewTokenGenerator(DefaultTokenBytes)
+
+// TokenGeneratorOrDefault returns g, or [DefaultTokenGenerator] when g is nil.
+func TokenGeneratorOrDefault(g TokenGenerator) TokenGenerator {
+	if g == nil {
+		return DefaultTokenGenerator
+	}
+	return g
+}
 
 // Hasher defines the interface for password hashing and verification.
 type Hasher interface {

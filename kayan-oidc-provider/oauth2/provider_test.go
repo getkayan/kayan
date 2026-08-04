@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/getkayan/kayan/core/audit"
+	"github.com/getkayan/kayan/core/domain"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type testOAuth2Store struct {
@@ -108,7 +110,7 @@ func (s *testOAuth2Store) Purge(context.Context, time.Time) (int64, error) {
 func TestProviderExchangeWithPKCEAndIntrospection(t *testing.T) {
 	ctx := context.Background()
 	store := newTestOAuth2Store()
-	store.clients["client-1"] = &Client{ID: "client-1", Secret: "top-secret"}
+	store.clients["client-1"] = testClient(t, "top-secret", "https://app.example.com/callback")
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -170,7 +172,7 @@ func TestProviderExchangeWithPKCEAndIntrospection(t *testing.T) {
 func TestProviderRefreshRotatesRefreshToken(t *testing.T) {
 	ctx := context.Background()
 	store := newTestOAuth2Store()
-	store.clients["client-1"] = &Client{ID: "client-1", Secret: "top-secret"}
+	store.clients["client-1"] = testClient(t, "top-secret", "https://app.example.com/callback")
 	store.refreshTokens["refresh-old"] = &RefreshToken{
 		Token:      "refresh-old",
 		ClientID:   "client-1",
@@ -205,7 +207,7 @@ func TestProviderRefreshRotatesRefreshToken(t *testing.T) {
 func TestProviderExchangeRejectsInvalidVerifier(t *testing.T) {
 	ctx := context.Background()
 	store := newTestOAuth2Store()
-	store.clients["client-1"] = &Client{ID: "client-1", Secret: "top-secret"}
+	store.clients["client-1"] = testClient(t, "top-secret", "https://app.example.com/callback")
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -219,11 +221,16 @@ func TestProviderExchangeRejectsInvalidVerifier(t *testing.T) {
 	}
 
 	_, err = provider.Exchange(ctx, code, "client-1", "top-secret", "https://app.example.com/callback", "wrong-verifier")
-	if err == nil || err.Error() != "invalid code verifier" {
-		t.Fatalf("expected invalid code verifier error, got %v", err)
+	if !errors.Is(err, ErrInvalidGrant) {
+		t.Fatalf("expected ErrInvalidGrant for a bad verifier, got %v", err)
 	}
-	if len(store.auditEvents) != 0 {
-		t.Fatal("expected no audit success event on failed PKCE validation")
+	// A failed exchange is itself worth recording — repeated PKCE failures are
+	// what an interception attempt looks like. What must not appear is a
+	// success event.
+	for _, event := range store.auditEvents {
+		if event.Status == "success" {
+			t.Fatalf("a success audit event was recorded for a failed PKCE validation: %+v", event)
+		}
 	}
 }
 
@@ -236,7 +243,7 @@ func providerChallenge(verifier string) string {
 func TestProviderRevokeAndIntrospect(t *testing.T) {
 	ctx := context.Background()
 	store := newTestOAuth2Store()
-	store.clients["client-1"] = &Client{ID: "client-1", Secret: "top-secret"}
+	store.clients["client-1"] = testClient(t, "top-secret", "https://app.example.com/callback")
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -249,11 +256,12 @@ func TestProviderRevokeAndIntrospect(t *testing.T) {
 	)
 
 	// Generate a token via auth code exchange
-	code, err := provider.GenerateAuthCode(ctx, "client-1", "user-1", "https://app.example.com/callback", []string{"openid"}, "", "")
+	const verifier = "revoke-flow-verifier"
+	code, err := provider.GenerateAuthCode(ctx, "client-1", "user-1", "https://app.example.com/callback", []string{"openid"}, providerChallenge(verifier), "S256")
 	if err != nil {
 		t.Fatalf("generate auth code: %v", err)
 	}
-	tokens, err := provider.Exchange(ctx, code, "client-1", "top-secret", "https://app.example.com/callback", "")
+	tokens, err := provider.Exchange(ctx, code, "client-1", "top-secret", "https://app.example.com/callback", verifier)
 	if err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
@@ -318,5 +326,21 @@ func TestMemoryRevocationStore_CleanExpired(t *testing.T) {
 	revoked, _ = store.IsRevoked(ctx, "valid-jti")
 	if !revoked {
 		t.Fatal("expected valid entry to still be revoked")
+	}
+}
+
+// testClient builds a confidential client whose secret is hashed the way a
+// real registration would hash it.
+func testClient(t *testing.T, secret string, redirectURIs ...string) *Client {
+	t.Helper()
+
+	hash, err := domain.NewBcryptHasher(bcrypt.MinCost).Hash(secret)
+	if err != nil {
+		t.Fatalf("hash client secret: %v", err)
+	}
+	return &Client{
+		ID:           "client-1",
+		SecretHash:   hash,
+		RedirectURIs: redirectURIs,
 	}
 }

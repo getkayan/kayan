@@ -44,6 +44,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -51,6 +52,7 @@ import (
 	"time"
 
 	"github.com/getkayan/kayan/core/audit"
+	"github.com/getkayan/kayan/core/domain"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -64,6 +66,51 @@ type Provider struct {
 	signingKey        any // RSA or ECDSA key
 	keyID             string
 	revocationStore   RevocationStore
+
+	hasher       domain.Hasher
+	tokens       domain.TokenGenerator
+	clock        domain.Clock
+	requirePKCE  bool
+	allowPlainCC bool
+}
+
+// WithClientSecretHasher sets the hasher used to verify client secrets.
+//
+// It must be the same one used to hash [Client.SecretHash] at registration.
+// Defaults to bcrypt.
+func WithClientSecretHasher(h domain.Hasher) ProviderOption {
+	return func(p *Provider) { p.hasher = h }
+}
+
+// WithTokenGenerator sets the source of authorization codes and refresh
+// tokens. Defaults to [domain.DefaultTokenGenerator].
+func WithTokenGenerator(g domain.TokenGenerator) ProviderOption {
+	return func(p *Provider) { p.tokens = g }
+}
+
+// WithProviderClock sets the clock used for expiry. Defaults to
+// [domain.SystemClock].
+func WithProviderClock(c domain.Clock) ProviderOption {
+	return func(p *Provider) { p.clock = c }
+}
+
+// WithRequirePKCE controls whether an authorization code must carry a PKCE
+// challenge. Defaults to true.
+//
+// Disabling it allows an authorization code interception attack against public
+// clients (RFC 7636 section 1). Turn it off only for a legacy confidential
+// client that cannot be updated, and prefer scoping that to the client.
+func WithRequirePKCE(require bool) ProviderOption {
+	return func(p *Provider) { p.requirePKCE = require }
+}
+
+// WithAllowPlainCodeChallenge permits the "plain" PKCE method.
+//
+// Defaults to false. With "plain" the challenge is the verifier, so anyone who
+// intercepts the authorization request can complete the exchange — the method
+// exists only for clients that cannot compute SHA-256 (RFC 7636 section 4.2).
+func WithAllowPlainCodeChallenge(allow bool) ProviderOption {
+	return func(p *Provider) { p.allowPlainCC = allow }
 }
 
 // ProviderOption configures optional Provider behavior.
@@ -106,16 +153,65 @@ func NewProvider(cs ClientStore, acs AuthCodeStore, rts RefreshTokenStore, issue
 		issuer:            issuer,
 		signingKey:        signingKey,
 		keyID:             keyID,
+		// Secure by default: PKCE required, "plain" refused. Both are
+		// swappable through options for callers who must interoperate with
+		// something older.
+		requirePKCE: true,
 	}
 	for _, opt := range opts {
 		opt(p)
 	}
+	if p.hasher == nil {
+		p.hasher = domain.NewBcryptHasher(0)
+	}
+	p.tokens = domain.TokenGeneratorOrDefault(p.tokens)
+	p.clock = domain.ClockOrDefault(p.clock)
 	return p
 }
 
-// GenerateAuthCode generates a temporary code for the authorization flow with optional PKCE support.
+// GenerateAuthCode issues an authorization code.
+//
+// The redirect URI is checked against the client's registered allowlist, and a
+// PKCE challenge is required unless the provider was built with
+// WithRequirePKCE(false). Both checks happen here so a caller cannot reach the
+// token endpoint with a code that was never validated.
 func (p *Provider) GenerateAuthCode(ctx context.Context, clientID, identityID, redirectURI string, scopes []string, challenge, challengeMethod string) (string, error) {
-	code := uuid.New().String()
+	client, err := p.clientStore.GetClient(ctx, clientID)
+	if err != nil {
+		return "", ErrInvalidClient.WithDescription("unknown client").WithCause(err)
+	}
+
+	// Without this the authorization endpoint is an open redirector: an
+	// attacker sends the victim through a legitimate authorization request and
+	// receives the code at an address of their choosing.
+	if !client.AllowsRedirectURI(redirectURI) {
+		return "", ErrInvalidRequest.WithDescription("redirect_uri is not registered for this client")
+	}
+
+	if challenge == "" {
+		// A public client cannot keep a secret, so PKCE is the only thing
+		// binding the code to the requester.
+		if p.requirePKCE || client.IsPublic() {
+			return "", ErrInvalidRequest.WithDescription("code_challenge is required")
+		}
+	} else {
+		method := normalizeChallengeMethod(challengeMethod)
+		if method == challengeMethodPlain && !p.allowPlainCC {
+			return "", ErrInvalidRequest.WithDescription("code_challenge_method must be S256")
+		}
+		if method == "" {
+			return "", ErrInvalidRequest.WithDescription("unsupported code_challenge_method")
+		}
+		// Store the resolved method so the exchange cannot reinterpret an
+		// absent value as "plain".
+		challengeMethod = method
+	}
+
+	code, err := p.tokens()
+	if err != nil {
+		return "", ErrServerError.WithCause(err)
+	}
+
 	authCode := &AuthCode{
 		Code:                code,
 		ClientID:            clientID,
@@ -124,70 +220,76 @@ func (p *Provider) GenerateAuthCode(ctx context.Context, clientID, identityID, r
 		Scopes:              scopes,
 		CodeChallenge:       challenge,
 		CodeChallengeMethod: challengeMethod,
-		ExpiresAt:           time.Now().Add(10 * time.Minute),
+		ExpiresAt:           p.clock.Now().Add(authCodeTTL),
 	}
 
 	if err := p.authCodeStore.SaveAuthCode(ctx, authCode); err != nil {
-		return "", err
+		return "", ErrServerError.WithCause(err)
 	}
 	return code, nil
 }
 
+// Grant types this provider understands.
+const (
+	GrantAuthorizationCode = "authorization_code"
+	GrantRefreshToken      = "refresh_token"
+)
+
+// authCodeTTL bounds how long an authorization code is valid. RFC 6749
+// section 4.1.2 recommends a maximum of ten minutes.
+const authCodeTTL = 10 * time.Minute
+
 // Exchange exchanges an authorization code for an access token response.
+//
+// The client is authenticated first, so an unauthenticated caller learns
+// nothing about whether a code exists.
 func (p *Provider) Exchange(ctx context.Context, code, clientID, clientSecret, redirectURI, verifier string) (*TokenResponse, error) {
-	authCode, err := p.authCodeStore.GetAuthCode(ctx, code)
-	if err != nil {
-		p.logAudit(ctx, "oauth2.exchange.failure", clientID, "", "failure", "invalid authorization code")
-		return nil, errors.New("invalid authorization code")
-	}
-
-	if authCode.ExpiresAt.Before(time.Now()) {
-		p.authCodeStore.DeleteAuthCode(ctx, code)
-		p.logAudit(ctx, "oauth2.exchange.failure", clientID, authCode.IdentityID, "failure", "authorization code expired")
-		return nil, errors.New("authorization code expired")
-	}
-
-	if authCode.ClientID != clientID {
-		return nil, errors.New("client id mismatch")
-	}
-
-	if authCode.RedirectURI != redirectURI {
-		return nil, errors.New("redirect uri mismatch")
-	}
-
-	// PKCE Verification
-	if authCode.CodeChallenge != "" {
-		if !p.verifyPKCE(authCode.CodeChallenge, authCode.CodeChallengeMethod, verifier) {
-			return nil, errors.New("invalid code verifier")
-		}
-	}
-
-	// Validate client secret if provided
-	if clientSecret != "" {
-		_, err = p.ValidateClient(ctx, clientID, clientSecret)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Important: Delete code after successful exchange
-	p.authCodeStore.DeleteAuthCode(ctx, code)
-
-	accessToken, err := p.GenerateAccessToken(clientID, authCode.IdentityID, authCode.Scopes)
-	if err != nil {
+	// Authenticate before touching the code store. Client authentication was
+	// previously skipped whenever the secret was empty, so a confidential
+	// client could be impersonated by simply omitting it.
+	if _, err := p.authenticate(ctx, clientID, clientSecret, GrantAuthorizationCode); err != nil {
+		p.logAudit(ctx, "oauth2.exchange.failure", clientID, "", "failure", "client authentication failed")
 		return nil, err
 	}
 
-	refreshTokenValue := uuid.New().String()
-	refreshToken := &RefreshToken{
-		Token:      refreshTokenValue,
-		ClientID:   clientID,
-		IdentityID: authCode.IdentityID,
-		Scopes:     authCode.Scopes,
-		ExpiresAt:  time.Now().Add(7 * 24 * time.Hour), // 7 days
+	authCode, err := p.authCodeStore.GetAuthCode(ctx, code)
+	if err != nil {
+		p.logAudit(ctx, "oauth2.exchange.failure", clientID, "", "failure", "invalid authorization code")
+		return nil, ErrInvalidGrant.WithDescription("invalid authorization code").WithCause(err)
 	}
 
-	if err := p.refreshTokenStore.SaveRefreshToken(ctx, refreshToken); err != nil {
+	// The code is single-use regardless of what happens next. Leaving it live
+	// after a failed exchange would allow retrying the other checks.
+	defer func() { _ = p.authCodeStore.DeleteAuthCode(ctx, code) }()
+
+	if !p.clock.Now().Before(authCode.ExpiresAt) {
+		p.logAudit(ctx, "oauth2.exchange.failure", clientID, authCode.IdentityID, "failure", "authorization code expired")
+		return nil, ErrInvalidGrant.WithDescription("authorization code expired")
+	}
+
+	if authCode.ClientID != clientID {
+		// The code belongs to another client: this is a code injection
+		// attempt, not a mistake.
+		p.logAudit(ctx, "oauth2.exchange.failure", clientID, authCode.IdentityID, "failure", "authorization code issued to a different client")
+		return nil, ErrInvalidGrant.WithDescription("invalid authorization code")
+	}
+
+	if authCode.RedirectURI != redirectURI {
+		return nil, ErrInvalidGrant.WithDescription("redirect_uri does not match the authorization request")
+	}
+
+	if err := p.verifyCodeChallenge(authCode, verifier); err != nil {
+		p.logAudit(ctx, "oauth2.exchange.failure", clientID, authCode.IdentityID, "failure", "PKCE verification failed")
+		return nil, err
+	}
+
+	accessToken, err := p.GenerateAccessToken(clientID, authCode.IdentityID, authCode.Scopes)
+	if err != nil {
+		return nil, ErrServerError.WithCause(err)
+	}
+
+	refreshValue, err := p.issueRefreshToken(ctx, clientID, authCode.IdentityID, authCode.Scopes, "")
+	if err != nil {
 		return nil, err
 	}
 
@@ -196,63 +298,143 @@ func (p *Provider) Exchange(ctx context.Context, code, clientID, clientSecret, r
 	return &TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
-		RefreshToken: refreshTokenValue,
+		ExpiresIn:    int64(accessTokenTTL.Seconds()),
+		RefreshToken: refreshValue,
 		Sub:          authCode.IdentityID,
 	}, nil
 }
 
-// Refresh obtains a new access token using a refresh token and performs rotation.
-func (p *Provider) Refresh(ctx context.Context, tokenValue, clientID, clientSecret string) (*TokenResponse, error) {
-	// Validate client
-	if clientSecret != "" {
-		_, err := p.ValidateClient(ctx, clientID, clientSecret)
+// verifyCodeChallenge checks PKCE for an authorization code.
+//
+// A code with no challenge is rejected when PKCE is required, so a client
+// cannot opt out by omitting the challenge.
+func (p *Provider) verifyCodeChallenge(authCode *AuthCode, verifier string) error {
+	if authCode.CodeChallenge == "" {
+		if p.requirePKCE {
+			return ErrInvalidGrant.WithDescription("code_challenge is required")
+		}
+		return nil
+	}
+
+	if verifier == "" {
+		return ErrInvalidGrant.WithDescription("code_verifier is required")
+	}
+	if !p.verifyPKCE(authCode.CodeChallenge, authCode.CodeChallengeMethod, verifier) {
+		return ErrInvalidGrant.WithDescription("invalid code_verifier")
+	}
+	return nil
+}
+
+// issueRefreshToken saves a new refresh token, continuing familyID when given.
+func (p *Provider) issueRefreshToken(ctx context.Context, clientID, identityID string, scopes []string, familyID string) (string, error) {
+	value, err := p.tokens()
+	if err != nil {
+		return "", ErrServerError.WithCause(err)
+	}
+	if familyID == "" {
+		familyID, err = p.tokens()
 		if err != nil {
-			return nil, err
+			return "", ErrServerError.WithCause(err)
 		}
 	}
 
+	token := &RefreshToken{
+		Token:      value,
+		ClientID:   clientID,
+		IdentityID: identityID,
+		Scopes:     scopes,
+		ExpiresAt:  p.clock.Now().Add(refreshTokenTTL),
+		FamilyID:   familyID,
+	}
+	if err := p.refreshTokenStore.SaveRefreshToken(ctx, token); err != nil {
+		return "", ErrServerError.WithCause(err)
+	}
+	return value, nil
+}
+
+// Token lifetimes.
+const (
+	accessTokenTTL  = time.Hour
+	refreshTokenTTL = 7 * 24 * time.Hour
+)
+
+// Refresh exchanges a refresh token for a new access token, rotating the
+// refresh token.
+//
+// When the store implements [RefreshTokenFamilyStore], a redeemed token stays
+// resolvable and a second presentation revokes the whole family. That is the
+// only signal available that a refresh token was stolen: the legitimate client
+// and the thief both hold a token from the same chain, and whichever presents
+// a spent one proves the chain is compromised.
+//
+// With a plain [RefreshTokenStore] the redeemed token is deleted instead, so a
+// replay is reported as invalid but the thief's token continues to work.
+func (p *Provider) Refresh(ctx context.Context, tokenValue, clientID, clientSecret string) (*TokenResponse, error) {
+	// Authenticate first: previously an empty secret skipped this entirely.
+	if _, err := p.authenticate(ctx, clientID, clientSecret, GrantRefreshToken); err != nil {
+		p.logAudit(ctx, "oauth2.refresh.failure", clientID, "", "failure", "client authentication failed")
+		return nil, err
+	}
+
+	family, hasFamily := p.refreshTokenStore.(RefreshTokenFamilyStore)
+
 	gr, err := p.refreshTokenStore.GetRefreshToken(ctx, tokenValue)
 	if err != nil {
-		return nil, errors.New("invalid refresh token")
+		return nil, ErrInvalidGrant.WithDescription("invalid refresh token").WithCause(err)
 	}
 
 	if gr.ClientID != clientID {
-		return nil, errors.New("client id mismatch")
+		return nil, ErrInvalidGrant.WithDescription("invalid refresh token")
 	}
 
-	if gr.ExpiresAt.Before(time.Now()) {
-		p.refreshTokenStore.DeleteRefreshToken(ctx, tokenValue)
-		return nil, errors.New("refresh token expired")
+	// Reuse detection. A token presented twice means two parties hold it, so
+	// every token descended from the same authorization is revoked and the
+	// legitimate client is forced to re-authenticate.
+	if gr.IsUsed() {
+		p.logAudit(ctx, "oauth2.refresh.reuse", clientID, gr.IdentityID, "failure",
+			"refresh token replayed; revoking the token family")
+		if hasFamily && gr.FamilyID != "" {
+			if err := family.RevokeFamily(ctx, gr.FamilyID); err != nil {
+				return nil, ErrServerError.WithCause(err)
+			}
+		} else {
+			_ = p.refreshTokenStore.DeleteRefreshToken(ctx, tokenValue)
+		}
+		return nil, ErrInvalidGrant.WithDescription("invalid refresh token")
 	}
 
-	// Token Rotation: Delete old refresh token
-	p.refreshTokenStore.DeleteRefreshToken(ctx, tokenValue)
+	if !p.clock.Now().Before(gr.ExpiresAt) {
+		_ = p.refreshTokenStore.DeleteRefreshToken(ctx, tokenValue)
+		return nil, ErrInvalidGrant.WithDescription("refresh token expired")
+	}
 
-	// Issue new tokens
+	// Rotate. With family tracking the spent token is retained and marked, so
+	// a later replay is detectable; otherwise it is deleted.
+	if hasFamily {
+		if err := family.MarkRefreshTokenUsed(ctx, tokenValue, p.clock.Now()); err != nil {
+			return nil, ErrServerError.WithCause(err)
+		}
+	} else if err := p.refreshTokenStore.DeleteRefreshToken(ctx, tokenValue); err != nil {
+		return nil, ErrServerError.WithCause(err)
+	}
+
 	accessToken, err := p.GenerateAccessToken(clientID, gr.IdentityID, gr.Scopes)
+	if err != nil {
+		return nil, ErrServerError.WithCause(err)
+	}
+
+	newValue, err := p.issueRefreshToken(ctx, clientID, gr.IdentityID, gr.Scopes, gr.FamilyID)
 	if err != nil {
 		return nil, err
 	}
 
-	newRefreshTokenValue := uuid.New().String()
-	newRefreshToken := &RefreshToken{
-		Token:      newRefreshTokenValue,
-		ClientID:   clientID,
-		IdentityID: gr.IdentityID,
-		Scopes:     gr.Scopes,
-		ExpiresAt:  time.Now().Add(7 * 24 * time.Hour),
-	}
-
-	if err := p.refreshTokenStore.SaveRefreshToken(ctx, newRefreshToken); err != nil {
-		return nil, err
-	}
+	p.logAudit(ctx, "oauth2.refresh.success", clientID, gr.IdentityID, "success", "")
 
 	return &TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
-		RefreshToken: newRefreshTokenValue,
+		ExpiresIn:    int64(accessTokenTTL.Seconds()),
+		RefreshToken: newValue,
 		Sub:          gr.IdentityID,
 	}, nil
 }
@@ -270,20 +452,51 @@ func (p *Provider) logAudit(ctx context.Context, eventType, actor, subject, stat
 	})
 }
 
+// PKCE code challenge methods (RFC 7636 section 4.2).
+const (
+	challengeMethodS256  = "S256"
+	challengeMethodPlain = "plain"
+)
+
+// normalizeChallengeMethod canonicalizes a code_challenge_method, returning ""
+// for anything unrecognized.
+//
+// An empty method is *not* treated as "plain". RFC 7636 defaults an omitted
+// method to plain, but accepting that at verification lets an attacker who
+// intercepts an authorization request strip the method and replay the
+// challenge as its own verifier. GenerateAuthCode resolves the method up
+// front, so by the time a code is verified the field is always explicit.
+func normalizeChallengeMethod(method string) string {
+	switch strings.ToUpper(method) {
+	case "S256":
+		return challengeMethodS256
+	case "PLAIN":
+		return challengeMethodPlain
+	default:
+		return ""
+	}
+}
+
+// verifyPKCE checks a code verifier against the stored challenge.
 func (p *Provider) verifyPKCE(challenge, method, verifier string) bool {
-	if method == "" || strings.ToUpper(method) == "PLAIN" {
-		return challenge == verifier
-	}
+	switch normalizeChallengeMethod(method) {
+	case challengeMethodS256:
+		sum := sha256.Sum256([]byte(verifier))
+		expected := base64.RawURLEncoding.EncodeToString(sum[:])
+		return subtle.ConstantTimeCompare([]byte(challenge), []byte(expected)) == 1
 
-	if strings.ToUpper(method) == "S256" {
-		h := sha256.New()
-		h.Write([]byte(verifier))
-		hash := h.Sum(nil)
-		expected := base64.RawURLEncoding.EncodeToString(hash)
-		return challenge == expected
-	}
+	case challengeMethodPlain:
+		// Only reachable when the provider was explicitly built to allow it.
+		if !p.allowPlainCC {
+			return false
+		}
+		return subtle.ConstantTimeCompare([]byte(challenge), []byte(verifier)) == 1
 
-	return false
+	default:
+		// An unknown or absent method fails closed rather than degrading to a
+		// plaintext comparison.
+		return false
+	}
 }
 
 // GenerateAccessToken generates a signed JWT access token for a user.
@@ -305,16 +518,65 @@ func (p *Provider) GenerateAccessToken(clientID string, identityID string, scope
 }
 
 // ValidateClient validates the client ID and secret.
+// ValidateClient authenticates a client at the token endpoint.
+//
+// Confidential clients must present a secret; it is verified against the
+// stored hash with the configured [domain.Hasher], never compared directly.
+// Public clients — those registered with [AuthMethodNone] — authenticate with
+// no secret and rely on PKCE instead.
+//
+// The error is the same whether the client is unknown or the secret is wrong,
+// so the endpoint cannot be used to enumerate client IDs.
 func (p *Provider) ValidateClient(ctx context.Context, clientID, clientSecret string) (*Client, error) {
 	client, err := p.clientStore.GetClient(ctx, clientID)
 	if err != nil {
+		// Spend comparable time on an unknown client so response timing does
+		// not distinguish "no such client" from "wrong secret".
+		if clientSecret != "" {
+			_ = p.hasher.Compare(clientSecret, dummyBcryptHash)
+		}
+		return nil, ErrInvalidClient.WithDescription("client authentication failed").WithCause(err)
+	}
+
+	if client.IsPublic() {
+		// A public client has no secret. Presenting one means the caller is
+		// confused about the registration, so refuse rather than ignore it.
+		if clientSecret != "" {
+			return nil, ErrInvalidClient.WithDescription("client authentication failed")
+		}
+		return client, nil
+	}
+
+	// Confidential client: a secret is mandatory. Previously an empty secret
+	// skipped verification entirely, so omitting it authenticated the client.
+	if clientSecret == "" {
+		return nil, ErrInvalidClient.WithDescription("client authentication failed")
+	}
+	if client.SecretHash == "" {
+		// Registered as confidential but with no stored hash. Fail closed:
+		// treating this as "no secret required" authenticates anyone.
+		return nil, ErrInvalidClient.WithDescription("client authentication failed")
+	}
+	if !p.hasher.Compare(clientSecret, client.SecretHash) {
+		return nil, ErrInvalidClient.WithDescription("client authentication failed")
+	}
+
+	return client, nil
+}
+
+// dummyBcryptHash is a valid bcrypt hash of a value no caller will present. It
+// gives the unknown-client path the same work as a real verification.
+const dummyBcryptHash = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.QGxuAyxRkiSVJ5wZ5aVXo0nSFQPBpBu"
+
+// authenticate resolves and authenticates the client for a token request.
+func (p *Provider) authenticate(ctx context.Context, clientID, clientSecret, grantType string) (*Client, error) {
+	client, err := p.ValidateClient(ctx, clientID, clientSecret)
+	if err != nil {
 		return nil, err
 	}
-
-	if client.Secret != clientSecret {
-		return nil, errors.New("invalid client secret")
+	if !client.AllowsGrantType(grantType) {
+		return nil, ErrUnauthorizedClient.WithDescriptionf("client may not use the %s grant", grantType)
 	}
-
 	return client, nil
 }
 

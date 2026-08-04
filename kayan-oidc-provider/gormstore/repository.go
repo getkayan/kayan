@@ -74,6 +74,45 @@ func (r *OAuth2Repository) DeleteRefreshToken(ctx context.Context, token string)
 	return r.db.WithContext(ctx).Delete(&gormRefreshToken{}, "token = ?", token).Error
 }
 
+// MarkRefreshTokenUsed implements [oauth2.RefreshTokenFamilyStore].
+//
+// The token is retained rather than deleted so that a later replay is
+// detectable — deleting it would make a stolen token indistinguishable from an
+// unknown one.
+func (r *OAuth2Repository) MarkRefreshTokenUsed(ctx context.Context, token string, usedAt time.Time) error {
+	res := r.db.WithContext(ctx).
+		Model(&gormRefreshToken{}).
+		Where("token = ? AND used_at IS NULL", token).
+		Update("used_at", usedAt)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		// Either the token is gone or another request marked it first. Report
+		// it so the caller does not issue a second token for one redemption.
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// RevokeFamily implements [oauth2.RefreshTokenFamilyStore].
+func (r *OAuth2Repository) RevokeFamily(ctx context.Context, familyID string) error {
+	if familyID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).Delete(&gormRefreshToken{}, "family_id = ?", familyID).Error
+}
+
+// DeleteExpiredRefreshTokens removes tokens past their expiry, including spent
+// ones retained for replay detection.
+func (r *OAuth2Repository) DeleteExpiredRefreshTokens(ctx context.Context, olderThan time.Time) (int64, error) {
+	res := r.db.WithContext(ctx).Delete(&gormRefreshToken{}, "expires_at < ?", olderThan)
+	return res.RowsAffected, res.Error
+}
+
+// Compile-time proof that this repository supports reuse detection.
+var _ oauth2.RefreshTokenFamilyStore = (*OAuth2Repository)(nil)
+
 // ListClients returns all registered OAuth2 clients.
 // Implements the oidc.ClientLister interface for backchannel logout support.
 func (r *OAuth2Repository) ListClients(ctx context.Context) ([]*oauth2.Client, error) {
@@ -89,13 +128,17 @@ func (r *OAuth2Repository) ListClients(ctx context.Context) ([]*oauth2.Client, e
 }
 
 type gormClient struct {
-	ID                   string `gorm:"primaryKey"`
-	Secret               string
-	RedirectURIs         []string `gorm:"type:text;serializer:json"`
-	GrantTypes           []string `gorm:"type:text;serializer:json"`
-	Scopes               []string `gorm:"type:text;serializer:json"`
-	AppName              string
-	BackChannelLogoutURI string
+	ID string `gorm:"primaryKey"`
+	// SecretHash stores the hashed client secret. The plaintext secret is
+	// never persisted, so a database disclosure does not hand over every
+	// client credential.
+	SecretHash              string
+	RedirectURIs            []string `gorm:"type:text;serializer:json"`
+	GrantTypes              []string `gorm:"type:text;serializer:json"`
+	Scopes                  []string `gorm:"type:text;serializer:json"`
+	AppName                 string
+	TokenEndpointAuthMethod string
+	BackChannelLogoutURI    string
 }
 
 func (gormClient) TableName() string { return "oauth2_clients" }
@@ -105,13 +148,14 @@ func toCoreClient(gc *gormClient) *oauth2.Client {
 		return nil
 	}
 	return &oauth2.Client{
-		ID:                   gc.ID,
-		Secret:               gc.Secret,
-		RedirectURIs:         gc.RedirectURIs,
-		GrantTypes:           gc.GrantTypes,
-		Scopes:               gc.Scopes,
-		AppName:              gc.AppName,
-		BackChannelLogoutURI: gc.BackChannelLogoutURI,
+		ID:                      gc.ID,
+		SecretHash:              gc.SecretHash,
+		RedirectURIs:            gc.RedirectURIs,
+		GrantTypes:              gc.GrantTypes,
+		Scopes:                  gc.Scopes,
+		AppName:                 gc.AppName,
+		TokenEndpointAuthMethod: gc.TokenEndpointAuthMethod,
+		BackChannelLogoutURI:    gc.BackChannelLogoutURI,
 	}
 }
 
@@ -120,13 +164,14 @@ func fromCoreClient(c *oauth2.Client) *gormClient {
 		return nil
 	}
 	return &gormClient{
-		ID:                   c.ID,
-		Secret:               c.Secret,
-		RedirectURIs:         c.RedirectURIs,
-		GrantTypes:           c.GrantTypes,
-		Scopes:               c.Scopes,
-		AppName:              c.AppName,
-		BackChannelLogoutURI: c.BackChannelLogoutURI,
+		ID:                      c.ID,
+		SecretHash:              c.SecretHash,
+		RedirectURIs:            c.RedirectURIs,
+		GrantTypes:              c.GrantTypes,
+		Scopes:                  c.Scopes,
+		AppName:                 c.AppName,
+		TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
+		BackChannelLogoutURI:    c.BackChannelLogoutURI,
 	}
 }
 
@@ -181,6 +226,13 @@ type gormRefreshToken struct {
 	IdentityID string    `gorm:"index"`
 	Scopes     []string  `gorm:"type:text;serializer:json"`
 	ExpiresAt  time.Time `gorm:"index"`
+	// FamilyID links tokens descended from one authorization, so replaying a
+	// spent token can revoke the whole chain.
+	FamilyID string `gorm:"index"`
+	// UsedAt marks a redeemed token. Redeemed tokens are retained rather than
+	// deleted: that is what makes a replay distinguishable from an unknown
+	// token.
+	UsedAt *time.Time
 }
 
 func (gormRefreshToken) TableName() string { return "oauth2_refresh_tokens" }
@@ -190,6 +242,8 @@ func toCoreRefreshToken(gr *gormRefreshToken) *oauth2.RefreshToken {
 		return nil
 	}
 	return &oauth2.RefreshToken{
+		FamilyID:   gr.FamilyID,
+		UsedAt:     gr.UsedAt,
 		Token:      gr.Token,
 		ClientID:   gr.ClientID,
 		IdentityID: gr.IdentityID,
@@ -203,6 +257,8 @@ func fromCoreRefreshToken(r *oauth2.RefreshToken) *gormRefreshToken {
 		return nil
 	}
 	return &gormRefreshToken{
+		FamilyID:   r.FamilyID,
+		UsedAt:     r.UsedAt,
 		Token:      r.Token,
 		ClientID:   r.ClientID,
 		IdentityID: r.IdentityID,
