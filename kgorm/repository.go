@@ -123,9 +123,15 @@ func (r *Repository) SaveToken(ctx context.Context, token *domain.AuthToken) err
 }
 
 // GetToken implements domain.TokenStore.
+//
+// Expired tokens are reported as not found. These tokens authenticate password
+// recovery, email verification, and magic-link login, so the store filters on
+// expiry rather than relying on every caller to re-check it.
 func (r *Repository) GetToken(ctx context.Context, token string) (*domain.AuthToken, error) {
 	var gt gormAuthToken
-	if err := r.db.WithContext(ctx).First(&gt, "token = ?", token).Error; err != nil {
+	err := r.db.WithContext(ctx).
+		First(&gt, "token = ? AND expires_at > ?", token, time.Now()).Error
+	if err != nil {
 		return nil, err
 	}
 	return toCoreAuthToken(&gt), nil
@@ -136,7 +142,6 @@ func (r *Repository) DeleteToken(ctx context.Context, token string) error {
 	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "token = ?", token).Error
 }
 
-// DeleteExpiredTokens implements domain.TokenStore.
 // DeleteExpiredTokens implements domain.TokenStore.
 func (r *Repository) DeleteExpiredTokens(ctx context.Context) error {
 	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "expires_at < ?", time.Now()).Error
