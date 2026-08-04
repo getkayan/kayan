@@ -52,7 +52,7 @@ Kayan is a headless, non-generic, extensible IAM library for Go. It gives you au
 - Authorization packages for RBAC, ABAC, hybrid policy, and ReBAC.
 - Federation and provisioning support across OAuth 2.0, OIDC, SAML 2.0, and SCIM 2.0.
 - Operational packages for audit, consent, compliance, telemetry, health checks, config, and logging.
-- Adapters such as `kgorm` and `kredis` for concrete persistence and distributed runtime support.
+- Adapters such as `kayan-gorm` and `kayan-redis` for concrete persistence and distributed runtime support.
 
 ## Quick Links
 
@@ -139,7 +139,7 @@ func main() {
     jwtStrategy := session.NewHS256Strategy(os.Getenv("SESSION_SECRET"), 15*time.Minute)
     sessionManager := session.NewManager(jwtStrategy)
 
-    _, err = sessionManager.Create(uuid.NewString(), authenticated.(*User).GetID())
+    _, err = sessionManager.Create(ctx, uuid.NewString(), authenticated.(*User).GetID())
     if err != nil {
         log.Fatal(err)
     }
@@ -254,10 +254,23 @@ The site configuration lives in `mkdocs.yml` and uses `docs/README.md` as the do
 - `core/telemetry`: OpenTelemetry traces and metrics
 - `core/health`: liveness, readiness, and detailed health reports
 
-### Adapters
+### Modules
 
-- `kgorm`: GORM-backed storage adapter for identities, credentials, sessions, OAuth 2.0, RBAC, ReBAC, SCIM, and audit
-- `kredis`: Redis-backed runtime support for sessions, revocation-adjacent state, rate limiting, lockout, and WebAuthn sessions
+Protocols and their storage live outside `core`, so a deployment compiles only
+what it uses — password authentication pulls in no OAuth 2.0, SCIM, or SAML.
+
+- `kayan-gorm`: GORM-backed storage for identities, credentials, sessions,
+  audit, ReBAC, MFA, and devices, plus tenant isolation callbacks
+- `kayan-redis`: Redis-backed runtime support for sessions, rate limiting,
+  lockout, and WebAuthn ceremonies
+- `kayan-oidc-provider`: OAuth 2.0 and OpenID Connect, with an optional GORM
+  adapter in `kayan-oidc-provider/gormstore`
+- `kayan-saml`: SAML 2.0 service provider and identity provider
+- `kayan-scim`: SCIM 2.0, with an optional GORM adapter in
+  `kayan-scim/gormstore`
+- `kayan-ldap`: LDAP directory authentication
+- `kayan-testing`: in-memory stores and a storage contract suite, for tests
+  only
 
 ## Examples
 
