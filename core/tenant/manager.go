@@ -223,19 +223,3 @@ func (m *Manager) HTTPMiddlewareFunc(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // ---- Scoped Storage Helper ----
-
-// ScopedStore wraps a tenant store to automatically scope operations to a tenant.
-type ScopedStore struct {
-	inner    Store
-	tenantID string
-}
-
-// NewScopedStore creates a store scoped to a specific tenant.
-func NewScopedStore(inner Store, tenantID string) *ScopedStore {
-	return &ScopedStore{inner: inner, tenantID: tenantID}
-}
-
-// TenantID returns the scoped tenant ID.
-func (s *ScopedStore) TenantID() string {
-	return s.tenantID
-}

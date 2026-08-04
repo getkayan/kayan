@@ -9,7 +9,7 @@
 //   - Tenant isolation for identities and sessions
 //   - Per-tenant configuration (password policies, session TTL, etc.)
 //   - Multiple resolution strategies (domain, subdomain, path, header)
-//   - TenantAware interface for automatic scoping
+//   - Storage-enforced isolation through the Scoped interface
 //   - Lifecycle hooks for tenant operations
 //   - Context-based tenant propagation
 //
@@ -32,15 +32,21 @@
 //	// Get tenant settings
 //	settings := t.Settings
 //
-// # TenantAware Interface
+// # Isolation
 //
-// Implement TenantAware on your identity model for automatic scoping:
+// Resolving a tenant puts it in the context; enforcing it is the storage
+// adapter's job. Implement [Scoped] on any model that belongs to a tenant, and
+// the adapter stamps it on write and checks it on read:
 //
 //	type User struct {
-//	    TenantID string
+//	    Tenant string
 //	}
-//	func (u *User) GetTenantID() string { return u.TenantID }
-//	func (u *User) SetTenantID(id string) { u.TenantID = id }
+//	func (u *User) TenantID() string       { return u.Tenant }
+//	func (u *User) SetTenantID(id string)  { u.Tenant = id }
+//
+// Isolation fails closed: a scoped query with no tenant in the context is an
+// error, not an unscoped read. Use [WithSystemContext] to mark deliberate
+// cross-tenant work.
 package tenant
 
 import (
@@ -142,13 +148,35 @@ func WithTenantID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, tenantIDContextKey, id)
 }
 
-// ---- TenantAware Interface ----
+// ---- Tenant-scoped records ----
 
-// TenantAware is an optional interface for models that support multi-tenancy.
-// Implement this on your identity/user struct to enable automatic tenant scoping.
+// TenantAware is an optional interface for models that belong to a tenant.
+//
+// Deprecated: use [Scoped], which is the same contract under the name the
+// isolation machinery uses. TenantAware had no call sites — nothing ever read
+// GetTenantID — so the "automatic scoping" it advertised did not exist.
 type TenantAware interface {
 	GetTenantID() string
 	SetTenantID(string)
+}
+
+// scopedAdapter presents a [TenantAware] value as a [Scoped] one.
+type scopedAdapter struct{ inner TenantAware }
+
+func (a scopedAdapter) TenantID() string      { return a.inner.GetTenantID() }
+func (a scopedAdapter) SetTenantID(id string) { a.inner.SetTenantID(id) }
+
+// AsScoped adapts a value implementing either [Scoped] or the deprecated
+// [TenantAware] interface. The second result is false when it implements
+// neither.
+func AsScoped(v any) (Scoped, bool) {
+	if s, ok := v.(Scoped); ok {
+		return s, true
+	}
+	if legacy, ok := v.(TenantAware); ok {
+		return scopedAdapter{inner: legacy}, true
+	}
+	return nil, false
 }
 
 // ---- Storage Interface ----
