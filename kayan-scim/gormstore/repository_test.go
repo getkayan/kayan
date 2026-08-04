@@ -2,7 +2,6 @@ package gormstore
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	scim "github.com/getkayan/kayan/kayan-scim"
@@ -37,30 +36,13 @@ func newTestRepo(t *testing.T) *ScimRepository {
 	return repo
 }
 
-// TestListRejectsUnsupportedFilter guards against the store silently returning
-// every resource for a filtered request. Okta and Entra ID both list users by
-// filter; over-returning would hand back the whole directory.
-func TestListRejectsUnsupportedFilter(t *testing.T) {
+// TestUnfilteredListReturnsEverything is the baseline the filter tests narrow
+// from. Filtering itself is covered in filter_test.go.
+func TestUnfilteredListReturnsEverything(t *testing.T) {
 	ctx := context.Background()
 	repo := newTestRepo(t)
 
-	t.Run("users", func(t *testing.T) {
-		_, _, err := repo.ListScimUsers(ctx, `userName eq "someone"`, 1, 10)
-		if !errors.Is(err, scim.ErrFilterUnsupported) {
-			t.Fatalf("error = %v, want ErrFilterUnsupported", err)
-		}
-	})
-
-	t.Run("groups", func(t *testing.T) {
-		_, _, err := repo.ListScimGroups(ctx, `displayName eq "admins"`, 1, 10)
-		if !errors.Is(err, scim.ErrFilterUnsupported) {
-			t.Fatalf("error = %v, want ErrFilterUnsupported", err)
-		}
-	})
-
-	t.Run("empty filter still lists", func(t *testing.T) {
-		if _, _, err := repo.ListScimGroups(ctx, "", 1, 10); err != nil {
-			t.Fatalf("unfiltered list failed: %v", err)
-		}
-	})
+	if _, _, err := repo.ListScimGroups(ctx, "", 1, 10); err != nil {
+		t.Fatalf("unfiltered list failed: %v", err)
+	}
 }

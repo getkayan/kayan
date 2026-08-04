@@ -8,8 +8,10 @@ package gormstore
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	scim "github.com/getkayan/kayan/kayan-scim"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -78,18 +80,28 @@ func (r *ScimRepository) DeleteScimUser(ctx context.Context, id string) error {
 }
 
 func (r *ScimRepository) ListScimUsers(ctx context.Context, filter string, startIndex, count int) ([]*scim.User, int, error) {
-	// Filtering is not implemented yet. Returning every user for a filtered
-	// request would silently disclose resources the caller did not ask for, so
-	// the request is refused instead.
+	m := r.mapper.ToModelPlaceholder()
+
+	query := r.db.WithContext(ctx).Model(m)
 	if filter != "" {
-		return nil, 0, scim.ErrFilterUnsupported
+		expr, err := scim.ParseFilter(filter)
+		if err != nil {
+			return nil, 0, err
+		}
+		query, err = applyFilter(query, expr, r.columnForPath)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
+	// Count before paging, so the caller learns how many resources match
+	// rather than how many are on this page.
 	var total int64
-	m := r.mapper.ToModelPlaceholder()
-	r.db.WithContext(ctx).Model(m).Count(&total)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
-	rows, err := r.db.WithContext(ctx).Model(m).Offset(startIndex - 1).Limit(count).Rows()
+	rows, err := query.Offset(startIndex - 1).Limit(count).Rows()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -111,6 +123,13 @@ func (r *ScimRepository) ListScimUsers(ctx context.Context, filter string, start
 // Group implementations (Basic GORM implementations)
 
 func (r *ScimRepository) CreateScimGroup(ctx context.Context, group *scim.Group) error {
+	// A group created without an ID needs one assigned. Without this, every
+	// such group shares the empty primary key and the second insert fails on
+	// a constraint the caller cannot see.
+	if group.ID == "" {
+		group.ID = uuid.NewString()
+	}
+
 	g := &gormGroup{
 		ID:          group.ID,
 		DisplayName: group.DisplayName,
@@ -143,16 +162,25 @@ func (r *ScimRepository) DeleteScimGroup(ctx context.Context, id string) error {
 }
 
 func (r *ScimRepository) ListScimGroups(ctx context.Context, filter string, startIndex, count int) ([]*scim.Group, int, error) {
-	// See ListScimUsers: an unimplemented filter must fail, not over-return.
+	query := r.db.WithContext(ctx).Model(&gormGroup{})
 	if filter != "" {
-		return nil, 0, scim.ErrFilterUnsupported
+		expr, err := scim.ParseFilter(filter)
+		if err != nil {
+			return nil, 0, err
+		}
+		query, err = applyFilter(query, expr, groupColumnForPath)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	var total int64
-	r.db.WithContext(ctx).Model(&gormGroup{}).Count(&total)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
 	var groups []gormGroup
-	if err := r.db.WithContext(ctx).Offset(startIndex - 1).Limit(count).Find(&groups).Error; err != nil {
+	if err := query.Offset(startIndex - 1).Limit(count).Find(&groups).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -189,4 +217,59 @@ func (gormGroup) TableName() string { return "scim_groups" }
 // migrations; see the module README.
 func (r *ScimRepository) AutoMigrate() error {
 	return r.db.AutoMigrate(&gormGroup{})
+}
+
+// columnForPath resolves a SCIM attribute path to a database column on the
+// caller's user model.
+//
+// The mapping is the one supplied at construction, so an attribute the
+// deployment did not map is refused rather than guessed at. That also keeps a
+// filter from reaching a column the deployment never meant to expose.
+func (r *ScimRepository) columnForPath(path scim.Path) (string, error) {
+	attribute := path.Attribute
+	if path.SubAttribute != "" {
+		attribute += "." + path.SubAttribute
+	}
+
+	for scimPath, field := range r.mapper.Config().FieldMappings {
+		if strings.EqualFold(scimPath, attribute) {
+			return toColumnName(field), nil
+		}
+	}
+
+	return "", scim.NewError("400", "invalidFilter",
+		fmt.Sprintf("attribute %q is not filterable in this deployment", attribute))
+}
+
+// groupColumnForPath resolves a path against the group model.
+func groupColumnForPath(path scim.Path) (string, error) {
+	if path.SubAttribute != "" {
+		return "", scim.NewError("400", "invalidFilter", "group filters do not support sub-attributes")
+	}
+
+	switch strings.ToLower(path.Attribute) {
+	case "id":
+		return "id", nil
+	case "displayname":
+		return "display_name", nil
+	default:
+		return "", scim.NewError("400", "invalidFilter",
+			fmt.Sprintf("attribute %q is not filterable on groups", path.Attribute))
+	}
+}
+
+// toColumnName converts a Go field name to GORM's default snake_case column.
+func toColumnName(field string) string {
+	var b strings.Builder
+	for i, r := range field {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(r + 32)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
