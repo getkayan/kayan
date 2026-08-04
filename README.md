@@ -21,9 +21,6 @@
 > - **ReBAC** (`core/rebac`) — `ListDirectObjects` returns direct grants only and
 >   does not walk the relation graph, so it can omit access that `Check` allows.
 >   `Check` is the authoritative answer.
-> - **RBAC** (`core/rbac`) — no role hierarchy and no wildcard permissions;
->   `users:*` does not match `users:delete`. Role definitions are held per
->   process, so every replica must register the same ones at startup.
 > - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code`,
 >   `refresh_token`, and `client_credentials`. No device code, token exchange,
 >   DPoP, `private_key_jwt`, or dynamic client registration.
