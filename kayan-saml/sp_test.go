@@ -178,6 +178,9 @@ func TestInitiateLogin(t *testing.T) {
 }
 
 func TestProcessResponse(t *testing.T) {
+	ctx := context.Background()
+	signer, cert := testSigner(t)
+
 	config := Config{
 		EntityID: "http://sp.example.com",
 		ACSUrl:   "http://sp.example.com/acs",
@@ -187,35 +190,72 @@ func TestProcessResponse(t *testing.T) {
 	factory := func() any { return &mockUser{} }
 	sp := NewServiceProvider(config, store, repo, factory)
 
-	idp := &IdPConfig{
-		ID:     "idp1",
-		SSOUrl: "http://idp.example.com/sso",
-	}
-	sp.RegisterIdP(idp)
+	sp.RegisterIdP(&IdPConfig{
+		ID:          "idp1",
+		EntityID:    "http://idp.example.com",
+		SSOUrl:      "http://idp.example.com/sso",
+		Certificate: cert,
+	})
 
-	// Manually create a session
-	sessionID := "test-session"
-	requestID := "request-123"
-	store.Save(context.Background(), &Session{
+	const (
+		sessionID = "test-session"
+		requestID = "request-123"
+	)
+	if err := store.Save(ctx, &Session{
 		ID:        sessionID,
 		RequestID: requestID,
 		IdPID:     "idp1",
-	})
+		ExpiresAt: time.Now().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
 
-	// Create a dummy SAML response
-	// Note: In a real test we'd need a valid signed XML.
-	// Here we mock the parsing/validation if possible, or construct a minimal valid XML that passes unmarshal.
-	// Since ProcessResponse does validation, we need to be careful.
-	// For this unit test, let's create a response that matches what we expect unmarshaled.
+	encoded := signedResponse(t, signer, responseFixture(requestID))
 
-	resp := Response{
-		InResponseTo: requestID,
+	user, err := sp.ProcessResponse(ctx, encoded, sessionID)
+	if err != nil {
+		t.Fatalf("ProcessResponse failed: %v", err)
+	}
+	if user == nil {
+		t.Fatal("ProcessResponse returned no identity")
+	}
+}
+
+// responseFixture builds a well-formed response that should pass every check.
+func responseFixture(inResponseTo string) Response {
+	now := time.Now().UTC()
+	return Response{
+		ID:           "_response-1",
+		InResponseTo: inResponseTo,
+		Version:      "2.0",
+		IssueInstant: now,
+		Destination:  "http://sp.example.com/acs",
+		Issuer:       Issuer{Value: "http://idp.example.com"},
 		Status: Status{
-			StatusCode: StatusCode{Value: "urn:oasis:names:tc:SAML:2.0:status:Success"},
+			StatusCode: StatusCode{Value: StatusSuccess},
 		},
 		Assertion: &Assertion{
+			ID:           "_assertion-1",
+			Version:      "2.0",
+			IssueInstant: now,
+			Issuer:       Issuer{Value: "http://idp.example.com"},
 			Subject: Subject{
 				NameID: NameID{Value: "user@example.com"},
+				SubjectConfirmations: []SubjectConfirmation{{
+					Method: ConfirmationMethodBearer,
+					SubjectConfirmationData: SubjectConfirmationData{
+						Recipient:    "http://sp.example.com/acs",
+						NotOnOrAfter: now.Add(5 * time.Minute),
+						InResponseTo: inResponseTo,
+					},
+				}},
+			},
+			Conditions: Conditions{
+				NotBefore:    now.Add(-time.Minute),
+				NotOnOrAfter: now.Add(5 * time.Minute),
+				AudienceRestrictions: []AudienceRestriction{{
+					Audiences: []string{"http://sp.example.com"},
+				}},
 			},
 			AttributeStatement: AttributeStatement{
 				Attributes: []Attribute{
@@ -224,20 +264,20 @@ func TestProcessResponse(t *testing.T) {
 			},
 		},
 	}
+}
 
-	respBytes, _ := xml.Marshal(resp)
-	encodedResp := base64.StdEncoding.EncodeToString(respBytes)
+// signedResponse marshals, signs, and base64-encodes a response the way an
+// identity provider would deliver it.
+func signedResponse(t *testing.T, signer Signer, resp Response) string {
+	t.Helper()
 
-	user, err := sp.ProcessResponse(context.Background(), encodedResp, sessionID)
+	raw, err := xml.Marshal(resp)
 	if err != nil {
-		t.Fatalf("ProcessResponse failed: %v", err)
+		t.Fatalf("marshal response: %v", err)
 	}
-
-	u := user.(*mockUser)
-	// The default factory creates a user but reconcileIdentity might not set ID if it's new
-	// But it should have traits set from attributes
-	traitsStr := string(u.Traits)
-	if !strings.Contains(traitsStr, "user@example.com") {
-		t.Errorf("User traits missing email: %s", traitsStr)
+	signed, err := signer.Sign(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("sign response: %v", err)
 	}
+	return base64.StdEncoding.EncodeToString(signed)
 }

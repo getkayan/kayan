@@ -41,6 +41,8 @@
 package saml
 
 import (
+	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -52,6 +54,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/getkayan/kayan/core/domain"
@@ -91,6 +94,10 @@ type Config struct {
 
 	// SessionTTL for pending authentication sessions.
 	SessionTTL time.Duration
+
+	// ClockSkew tolerates clock differences against the identity provider when
+	// checking assertion validity. Defaults to [DefaultClockSkew].
+	ClockSkew time.Duration
 }
 
 // IdPConfig represents an external Identity Provider configuration.
@@ -109,6 +116,10 @@ type IdPConfig struct {
 
 	// Certificate is the IdP's public certificate for verifying responses.
 	Certificate *x509.Certificate
+
+	// ExtraCertificates are additional certificates accepted during a signing
+	// key rollover, when the identity provider may sign with either.
+	ExtraCertificates []*x509.Certificate
 
 	// NameIDFormat preferred format (e.g., "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress").
 	NameIDFormat string
@@ -215,6 +226,7 @@ type Response struct {
 	Version      string     `xml:"Version,attr"`
 	IssueInstant time.Time  `xml:"IssueInstant,attr"`
 	Destination  string     `xml:"Destination,attr"`
+	Issuer       Issuer     `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Status       Status     `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
 	Assertion    *Assertion `xml:"urn:oasis:names:tc:SAML:2.0:assertion Assertion"`
 }
@@ -231,15 +243,54 @@ type StatusCode struct {
 
 // Assertion represents a SAML assertion (simplified).
 type Assertion struct {
+	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:assertion Assertion"`
+	// ID identifies this assertion. It is required by SAML 2.0 and is what
+	// makes replay detectable — an assertion with no ID cannot be tracked.
+	ID                 string             `xml:"ID,attr"`
+	Version            string             `xml:"Version,attr"`
+	IssueInstant       time.Time          `xml:"IssueInstant,attr"`
+	Issuer             Issuer             `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Subject            Subject            `xml:"urn:oasis:names:tc:SAML:2.0:assertion Subject"`
 	Conditions         Conditions         `xml:"urn:oasis:names:tc:SAML:2.0:assertion Conditions"`
+	AuthnStatement     *AuthnStatement    `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnStatement,omitempty"`
 	AttributeStatement AttributeStatement `xml:"urn:oasis:names:tc:SAML:2.0:assertion AttributeStatement"`
+}
+
+// AuthnStatement records how and when the subject authenticated.
+type AuthnStatement struct {
+	AuthnInstant time.Time     `xml:"AuthnInstant,attr"`
+	SessionIndex string        `xml:"SessionIndex,attr,omitempty"`
+	AuthnContext *AuthnContext `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnContext,omitempty"`
+}
+
+// AuthnContext describes the authentication method used.
+type AuthnContext struct {
+	AuthnContextClassRef string `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnContextClassRef,omitempty"`
 }
 
 // Subject contains the NameID.
 type Subject struct {
 	NameID NameID `xml:"urn:oasis:names:tc:SAML:2.0:assertion NameID"`
+	// SubjectConfirmations bind the assertion to a recipient and a moment in
+	// time. Without them a captured assertion can be delivered to any endpoint.
+	SubjectConfirmations []SubjectConfirmation `xml:"urn:oasis:names:tc:SAML:2.0:assertion SubjectConfirmation"`
 }
+
+// SubjectConfirmation states how the subject is confirmed.
+type SubjectConfirmation struct {
+	Method                  string                  `xml:"Method,attr"`
+	SubjectConfirmationData SubjectConfirmationData `xml:"urn:oasis:names:tc:SAML:2.0:assertion SubjectConfirmationData"`
+}
+
+// SubjectConfirmationData scopes a confirmation to one recipient and window.
+type SubjectConfirmationData struct {
+	Recipient    string    `xml:"Recipient,attr,omitempty"`
+	NotOnOrAfter time.Time `xml:"NotOnOrAfter,attr,omitempty"`
+	InResponseTo string    `xml:"InResponseTo,attr,omitempty"`
+}
+
+// ConfirmationMethodBearer is the bearer confirmation method used by web SSO.
+const ConfirmationMethodBearer = "urn:oasis:names:tc:SAML:2.0:cm:bearer"
 
 // NameID represents the user identifier.
 type NameID struct {
@@ -251,6 +302,34 @@ type NameID struct {
 type Conditions struct {
 	NotBefore    time.Time `xml:"NotBefore,attr"`
 	NotOnOrAfter time.Time `xml:"NotOnOrAfter,attr"`
+	// AudienceRestrictions name the service providers this assertion was
+	// minted for. Without checking them, an assertion issued to one service is
+	// accepted by another.
+	AudienceRestrictions []AudienceRestriction `xml:"urn:oasis:names:tc:SAML:2.0:assertion AudienceRestriction"`
+}
+
+// AudienceRestriction limits which service providers may accept an assertion.
+type AudienceRestriction struct {
+	Audiences []string `xml:"urn:oasis:names:tc:SAML:2.0:assertion Audience"`
+}
+
+// allowsAudience reports whether the conditions permit the given audience.
+//
+// Conditions with no AudienceRestriction permit any audience, per SAML 2.0
+// section 2.5.1.4; a service provider that requires one should reject the
+// assertion before reaching here.
+func (c Conditions) allowsAudience(audience string) bool {
+	if len(c.AudienceRestrictions) == 0 {
+		return false
+	}
+	for _, restriction := range c.AudienceRestrictions {
+		for _, candidate := range restriction.Audiences {
+			if candidate == audience {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // AttributeStatement contains user attributes.
@@ -306,11 +385,47 @@ func (u *SAMLUser) GetAttributes(name string) []string {
 // ServiceProvider handles SAML SP operations.
 type ServiceProvider struct {
 	config       Config
+	mu           sync.RWMutex
 	idps         map[string]*IdPConfig
 	sessionStore SessionStore
 	identityRepo domain.IdentityStorage
 	factory      func() any
 	hooks        Hooks
+
+	verifier    SignatureVerifier
+	signer      Signer
+	replayCache ReplayCache
+	clock       domain.Clock
+}
+
+// SPOption configures a [ServiceProvider].
+type SPOption func(*ServiceProvider)
+
+// WithSignatureVerifier replaces the signature verifier.
+//
+// The default requires a valid XML signature. Supply your own to verify
+// through an HSM or to apply a stricter policy.
+func WithSignatureVerifier(v SignatureVerifier) SPOption {
+	return func(sp *ServiceProvider) { sp.verifier = v }
+}
+
+// WithSPSigner sets the signer used for outgoing AuthnRequests.
+func WithSPSigner(s Signer) SPOption {
+	return func(sp *ServiceProvider) { sp.signer = s }
+}
+
+// WithReplayCache replaces the assertion replay cache.
+//
+// The default is in-process, which is correct for a single instance. Several
+// replicas each keep their own, so an assertion can be replayed once per
+// replica — use a shared cache in that case.
+func WithReplayCache(c ReplayCache) SPOption {
+	return func(sp *ServiceProvider) { sp.replayCache = c }
+}
+
+// WithSPClock sets the clock used for validity windows.
+func WithSPClock(c domain.Clock) SPOption {
+	return func(sp *ServiceProvider) { sp.clock = c }
 }
 
 // NewServiceProvider creates a new SAML SP.
@@ -319,17 +434,34 @@ func NewServiceProvider(
 	sessionStore SessionStore,
 	identityRepo domain.IdentityStorage,
 	factory func() any,
+	opts ...SPOption,
 ) *ServiceProvider {
 	if config.SessionTTL == 0 {
 		config.SessionTTL = 5 * time.Minute
 	}
-	return &ServiceProvider{
+
+	sp := &ServiceProvider{
 		config:       config,
 		idps:         make(map[string]*IdPConfig),
 		sessionStore: sessionStore,
 		identityRepo: identityRepo,
 		factory:      factory,
 	}
+	for _, opt := range opts {
+		opt(sp)
+	}
+
+	sp.clock = domain.ClockOrDefault(sp.clock)
+	if sp.verifier == nil {
+		// Signature verification is the only thing authenticating an
+		// assertion, so it is on by default and must be opted out of
+		// explicitly through WithSignatureVerifier.
+		sp.verifier = NewXMLDSigVerifier()
+	}
+	if sp.replayCache == nil {
+		sp.replayCache = NewMemoryReplayCache(sp.clock)
+	}
+	return sp
 }
 
 // SetHooks sets lifecycle hooks.
@@ -339,6 +471,8 @@ func (sp *ServiceProvider) SetHooks(hooks Hooks) {
 
 // RegisterIdP adds an Identity Provider configuration.
 func (sp *ServiceProvider) RegisterIdP(idp *IdPConfig) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
 	sp.idps[idp.ID] = idp
 }
 
@@ -365,20 +499,19 @@ func (sp *ServiceProvider) RegisterIdPFromMetadata(ctx context.Context, id, meta
 }
 
 // GetIdP returns the IdP configuration.
-func (sp *ServiceProvider) GetIdP(id string) (*IdPConfig, error) {
+func (sp *ServiceProvider) GetIdP(id string) (*IdPConfig, bool) {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
 	idp, ok := sp.idps[id]
-	if !ok {
-		return nil, fmt.Errorf("IdP not found: %s", id)
-	}
-	return idp, nil
+	return idp, ok
 }
 
 // InitiateLogin starts the SAML authentication flow.
 // Returns the redirect URL to the IdP.
 func (sp *ServiceProvider) InitiateLogin(ctx context.Context, idpID string, returnURL string) (string, error) {
-	idp, err := sp.GetIdP(idpID)
-	if err != nil {
-		return "", err
+	idp, ok := sp.GetIdP(idpID)
+	if !ok {
+		return "", fmt.Errorf("saml: identity provider %q is not configured", idpID)
 	}
 
 	// Generate request ID
@@ -437,83 +570,280 @@ func (sp *ServiceProvider) InitiateLogin(ctx context.Context, idpID string, retu
 		sp.hooks.AfterAuthnRequest(ctx, idpID, session.ID)
 	}
 
-	// Build redirect URL (HTTP-Redirect binding)
-	samlRequest := base64.StdEncoding.EncodeToString(xmlBytes)
-	redirectURL := fmt.Sprintf("%s?SAMLRequest=%s&RelayState=%s",
-		idp.SSOUrl,
-		url.QueryEscape(samlRequest),
-		url.QueryEscape(session.ID),
-	)
+	// HTTP-Redirect binding. The message must be DEFLATE-compressed before
+	// base64 encoding (SAML 2.0 Bindings section 3.4.4.1); base64 of the raw
+	// XML is rejected by real identity providers.
+	encoded, err := deflateAndEncode(xmlBytes)
+	if err != nil {
+		return "", err
+	}
 
-	return redirectURL, nil
+	redirect, err := url.Parse(idp.SSOUrl)
+	if err != nil {
+		return "", fmt.Errorf("saml: parse SSO URL: %w", err)
+	}
+	query := redirect.Query()
+	query.Set("SAMLRequest", encoded)
+	query.Set("RelayState", session.ID)
+	redirect.RawQuery = query.Encode()
+
+	return redirect.String(), nil
 }
 
-// ProcessResponse handles the SAML response from the IdP.
-// Returns the authenticated identity.
+// deflateAndEncode compresses a SAML message for the HTTP-Redirect binding.
+func deflateAndEncode(message []byte) (string, error) {
+	var buf bytes.Buffer
+	writer, err := flate.NewWriter(&buf, flate.DefaultCompression)
+	if err != nil {
+		return "", fmt.Errorf("saml: create deflate writer: %w", err)
+	}
+	if _, err := writer.Write(message); err != nil {
+		return "", fmt.Errorf("saml: deflate message: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("saml: finish deflate: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+}
+
+// maxDecodedMessageSize bounds a decompressed SAML message.
+//
+// DEFLATE can expand a small payload enormously, so an unbounded read is a
+// denial-of-service vector on an unauthenticated endpoint.
+const maxDecodedMessageSize = 5 << 20 // 5 MiB
+
+// ParseRedirectBinding decodes a SAML message from HTTP-Redirect query
+// parameters.
+//
+// It is transport-neutral: pass url.Values from wherever the request arrived.
+// Kayan does not read from an *http.Request or write to a ResponseWriter.
+func ParseRedirectBinding(values url.Values, parameter string) ([]byte, error) {
+	raw := values.Get(parameter)
+	if raw == "" {
+		return nil, fmt.Errorf("saml: %s parameter is missing", parameter)
+	}
+
+	compressed, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("saml: decode %s: %w", parameter, err)
+	}
+
+	reader := flate.NewReader(bytes.NewReader(compressed))
+	defer reader.Close()
+
+	message, err := io.ReadAll(io.LimitReader(reader, maxDecodedMessageSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("saml: inflate %s: %w", parameter, err)
+	}
+	if len(message) > maxDecodedMessageSize {
+		return nil, fmt.Errorf("saml: %s exceeds %d bytes when decompressed", parameter, maxDecodedMessageSize)
+	}
+	return message, nil
+}
+
+// ParsePostBinding decodes a SAML message from HTTP-POST form values.
+func ParsePostBinding(values url.Values, parameter string) ([]byte, error) {
+	raw := values.Get(parameter)
+	if raw == "" {
+		return nil, fmt.Errorf("saml: %s parameter is missing", parameter)
+	}
+
+	message, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("saml: decode %s: %w", parameter, err)
+	}
+	if len(message) > maxDecodedMessageSize {
+		return nil, fmt.Errorf("saml: %s exceeds %d bytes", parameter, maxDecodedMessageSize)
+	}
+	return message, nil
+}
+
+// ProcessResponse handles the SAML response from the IdP and returns the
+// authenticated identity.
+//
+// The signature is verified before anything is trusted, and every claim is
+// read from the verified element rather than from the received document. That
+// ordering is what defeats XML Signature Wrapping: an attacker who wraps a
+// legitimately signed assertion around injected content cannot have the
+// injected content read, because the unverified tree is never parsed for
+// claims.
 func (sp *ServiceProvider) ProcessResponse(ctx context.Context, samlResponse, relayState string) (any, error) {
-	// Decode response
 	responseBytes, err := base64.StdEncoding.DecodeString(samlResponse)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode SAML response: %w", err)
+		return nil, fmt.Errorf("saml: decode response: %w", err)
 	}
 
-	var response Response
-	if err := xml.Unmarshal(responseBytes, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse SAML response: %w", err)
+	// The envelope is parsed only to read routing fields — the relay state
+	// correlation and the status code. Nothing from it reaches the identity.
+	var envelope Response
+	if err := xml.Unmarshal(responseBytes, &envelope); err != nil {
+		return nil, fmt.Errorf("saml: parse response: %w", err)
 	}
 
-	// Before hook
 	if sp.hooks.BeforeProcessResponse != nil {
-		if err := sp.hooks.BeforeProcessResponse(ctx, &response); err != nil {
+		if err := sp.hooks.BeforeProcessResponse(ctx, &envelope); err != nil {
 			return nil, err
 		}
 	}
 
-	// Validate response (simplified - production should verify signatures)
-	if response.Status.StatusCode.Value != "urn:oasis:names:tc:SAML:2.0:status:Success" {
-		return nil, fmt.Errorf("SAML response status: %s", response.Status.StatusCode.Value)
+	if envelope.Status.StatusCode.Value != StatusSuccess {
+		return nil, fmt.Errorf("saml: response status %s", envelope.Status.StatusCode.Value)
 	}
 
-	if response.Assertion == nil {
-		return nil, fmt.Errorf("no assertion in SAML response")
-	}
-
-	// Find session by relay state
+	// Correlate with the request this service provider made, so the identity
+	// provider is known before its certificate is used to verify anything.
 	session, err := sp.sessionStore.Get(ctx, relayState)
-	if err != nil {
+	if err != nil || session == nil {
 		if !sp.config.AllowIdPInitiated {
-			return nil, fmt.Errorf("session not found and IdP-initiated SSO not allowed")
+			return nil, fmt.Errorf("%w: no pending request matches this response", ErrUnsolicited)
 		}
-		// IdP-initiated flow
+		session = nil
 	} else {
-		// Verify InResponseTo matches
-		if response.InResponseTo != session.RequestID {
-			return nil, fmt.Errorf("InResponseTo mismatch")
+		if !session.ExpiresAt.IsZero() && !sp.clock.Now().Before(session.ExpiresAt) {
+			_ = sp.sessionStore.Delete(ctx, session.ID)
+			return nil, fmt.Errorf("saml: authentication request expired")
 		}
-		defer sp.sessionStore.Delete(ctx, session.ID)
+		defer func() { _ = sp.sessionStore.Delete(ctx, session.ID) }()
 	}
 
-	// Determine IdP
-	var idp *IdPConfig
+	idp, err := sp.resolveIdP(session, &envelope)
+	if err != nil {
+		return nil, err
+	}
+
+	verified, err := sp.verify(ctx, responseBytes, idp)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the assertion from the verified bytes only.
+	assertion, verifiedResponse, err := parseVerified(verified)
+	if err != nil {
+		return nil, err
+	}
+
+	expectedInResponseTo := ""
 	if session != nil {
-		idp, _ = sp.GetIdP(session.IdPID)
+		expectedInResponseTo = session.RequestID
 	}
 
-	// Extract user info
-	user := sp.extractUser(&response, idp)
+	opts := ValidationOptions{
+		Audience:             sp.config.EntityID,
+		Destination:          sp.config.ACSUrl,
+		ExpectedInResponseTo: expectedInResponseTo,
+		AllowUnsolicited:     sp.config.AllowIdPInitiated,
+		ClockSkew:            sp.config.ClockSkew,
+	}
+	if idp != nil {
+		opts.ExpectedIssuer = idp.EntityID
+	}
 
-	// After hook
+	// The envelope's own attributes — Destination, InResponseTo, Issuer — are
+	// only trustworthy when the signature covered the Response. When just the
+	// assertion was signed, the SubjectConfirmationData inside it carries the
+	// equivalent bindings and is what validation relies on instead.
+	envelopeForValidation := verifiedResponse
+	if envelopeForValidation == nil && verified.CoveredResponse {
+		envelopeForValidation = &envelope
+	}
+
+	if err := validateAssertion(ctx, assertion, envelopeForValidation, opts, sp.clock, sp.replayCache); err != nil {
+		return nil, err
+	}
+
+	user := sp.extractUser(assertion, idp)
+
 	if sp.hooks.AfterProcessResponse != nil {
 		sp.hooks.AfterProcessResponse(ctx, user)
 	}
 
-	// Reconcile identity
 	return sp.reconcileIdentity(ctx, user, idp)
 }
 
+// StatusSuccess is the SAML status code for a successful response.
+const StatusSuccess = "urn:oasis:names:tc:SAML:2.0:status:Success"
+
+// resolveIdP determines which identity provider a response came from.
+//
+// For a solicited response the identity provider is known from the pending
+// session. For an unsolicited one it is resolved by issuer, and an unknown
+// issuer is refused rather than falling back to a default — otherwise any
+// configured certificate could vouch for any issuer.
+func (sp *ServiceProvider) resolveIdP(session *Session, envelope *Response) (*IdPConfig, error) {
+	if session != nil {
+		idp, ok := sp.GetIdP(session.IdPID)
+		if !ok {
+			return nil, fmt.Errorf("saml: identity provider %q is no longer configured", session.IdPID)
+		}
+		return idp, nil
+	}
+
+	issuer := envelope.Issuer.Value
+	if issuer == "" {
+		return nil, fmt.Errorf("%w: response has no issuer", ErrWrongIssuer)
+	}
+
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	for _, candidate := range sp.idps {
+		if candidate.EntityID == issuer {
+			return candidate, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: unknown issuer %q", ErrWrongIssuer, issuer)
+}
+
+// verify checks the signature against the identity provider's certificates.
+func (sp *ServiceProvider) verify(ctx context.Context, doc []byte, idp *IdPConfig) (*ValidatedDocument, error) {
+	if sp.verifier == nil {
+		return nil, ErrNoVerifier
+	}
+
+	var certs []*x509.Certificate
+	if idp != nil {
+		if idp.Certificate != nil {
+			certs = append(certs, idp.Certificate)
+		}
+		certs = append(certs, idp.ExtraCertificates...)
+	}
+
+	verified, err := sp.verifier.Verify(ctx, doc, certs)
+	if err != nil {
+		return nil, err
+	}
+	return verified, nil
+}
+
+// parseVerified unmarshals an assertion from verified bytes.
+//
+// It returns the enclosing response as well when the signature covered the
+// response, so validation can trust the envelope's attributes too.
+func parseVerified(verified *ValidatedDocument) (*Assertion, *Response, error) {
+	if verified.SignedAssertion {
+		var assertion Assertion
+		if err := xml.Unmarshal(verified.XML, &assertion); err != nil {
+			return nil, nil, fmt.Errorf("saml: parse verified assertion: %w", err)
+		}
+		return &assertion, nil, nil
+	}
+
+	var response Response
+	if err := xml.Unmarshal(verified.XML, &response); err != nil {
+		return nil, nil, fmt.Errorf("saml: parse verified response: %w", err)
+	}
+	if response.Assertion == nil {
+		return nil, nil, fmt.Errorf("saml: verified response carries no assertion")
+	}
+	return response.Assertion, &response, nil
+}
+
 // extractUser extracts user information from the SAML assertion.
-func (sp *ServiceProvider) extractUser(response *Response, idp *IdPConfig) *SAMLUser {
-	assertion := response.Assertion
+// extractUser reads user information from a verified assertion.
+//
+// It deliberately takes an *Assertion rather than a *Response: the signed
+// element is the only thing that may contribute identity claims, and taking
+// the envelope here would make it possible to read unverified content.
+func (sp *ServiceProvider) extractUser(assertion *Assertion, idp *IdPConfig) *SAMLUser {
 	user := &SAMLUser{
 		NameID:       assertion.Subject.NameID.Value,
 		NameIDFormat: assertion.Subject.NameID.Format,

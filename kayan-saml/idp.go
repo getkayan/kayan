@@ -1,13 +1,17 @@
 package saml
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/getkayan/kayan/core/domain"
@@ -106,10 +110,29 @@ type IdPHooks struct {
 // IdentityProvider represents Kayan acting as a SAML IdP.
 type IdentityProvider struct {
 	config       IdPServerConfig
+	mu           sync.RWMutex
 	sps          map[string]*SPRegistration
 	identityRepo domain.IdentityStorage
 	sessionStore SessionStore
 	hooks        IdPHooks
+
+	signer Signer
+	clock  domain.Clock
+}
+
+// IdPOption configures an [IdentityProvider].
+type IdPOption func(*IdentityProvider)
+
+// WithIdPSigner sets the signer used for outgoing assertions.
+//
+// Implement [Signer] yourself to keep the private key in an HSM or KMS.
+func WithIdPSigner(s Signer) IdPOption {
+	return func(idp *IdentityProvider) { idp.signer = s }
+}
+
+// WithIdPClock sets the clock used for assertion validity windows.
+func WithIdPClock(c domain.Clock) IdPOption {
+	return func(idp *IdentityProvider) { idp.clock = c }
 }
 
 // NewIdentityProvider creates a new SAML IdP.
@@ -117,6 +140,7 @@ func NewIdentityProvider(
 	config IdPServerConfig,
 	identityRepo domain.IdentityStorage,
 	sessionStore SessionStore,
+	opts ...IdPOption,
 ) *IdentityProvider {
 	if config.AssertionTTL == 0 {
 		config.AssertionTTL = 5 * time.Minute
@@ -124,12 +148,27 @@ func NewIdentityProvider(
 	if config.Issuer == "" {
 		config.Issuer = config.EntityID
 	}
-	return &IdentityProvider{
+
+	idp := &IdentityProvider{
 		config:       config,
 		sps:          make(map[string]*SPRegistration),
 		identityRepo: identityRepo,
 		sessionStore: sessionStore,
 	}
+	for _, opt := range opts {
+		opt(idp)
+	}
+	idp.clock = domain.ClockOrDefault(idp.clock)
+
+	// Build a signer from the configured key pair when one was not supplied.
+	// Without a signer, generateResponse refuses to emit an assertion rather
+	// than emitting one nobody can verify.
+	if idp.signer == nil && config.PrivateKey != nil && config.Certificate != nil {
+		if signer, err := NewXMLDSigSigner(config.PrivateKey, config.Certificate); err == nil {
+			idp.signer = signer
+		}
+	}
+	return idp
 }
 
 // SetHooks sets lifecycle hooks.
@@ -227,7 +266,16 @@ func (idp *IdentityProvider) HandleSSORequest(w http.ResponseWriter, r *http.Req
 	}
 
 	// Send response via POST binding
-	idp.sendPostBinding(w, sp.ACSUrl, response, relayState)
+	form, err := idp.PostBindingForm(sp.ACSUrl, response, relayState)
+	if err != nil {
+		if idp.hooks.OnError != nil {
+			idp.hooks.OnError(ctx, err, sp.ID)
+		}
+		http.Error(w, "Failed to generate response", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(form)
 }
 
 // generateResponse creates a SAML response with assertion.
@@ -276,17 +324,40 @@ func (idp *IdentityProvider) generateResponse(
 		}
 	}
 
-	// Build assertion
+	// Build assertion. Every field here exists so the service provider can
+	// verify something: the ID makes replay detectable, the audience binds the
+	// assertion to one service provider, and the subject confirmation binds it
+	// to one endpoint and moment.
+	expiry := now.Add(idp.config.AssertionTTL)
 	assertion := Assertion{
+		ID:           "_" + generateID(),
+		Version:      "2.0",
+		IssueInstant: now,
+		Issuer:       Issuer{Value: idp.config.EntityID},
 		Subject: Subject{
 			NameID: NameID{
 				Value:  nameID,
 				Format: sp.NameIDFormat,
 			},
+			SubjectConfirmations: []SubjectConfirmation{{
+				Method: ConfirmationMethodBearer,
+				SubjectConfirmationData: SubjectConfirmationData{
+					Recipient:    sp.ACSUrl,
+					NotOnOrAfter: expiry,
+					InResponseTo: inResponseTo,
+				},
+			}},
 		},
 		Conditions: Conditions{
 			NotBefore:    now,
-			NotOnOrAfter: now.Add(idp.config.AssertionTTL),
+			NotOnOrAfter: expiry,
+			AudienceRestrictions: []AudienceRestriction{{
+				Audiences: []string{sp.EntityID},
+			}},
+		},
+		AuthnStatement: &AuthnStatement{
+			AuthnInstant: now,
+			SessionIndex: generateID(),
 		},
 	}
 
@@ -306,34 +377,80 @@ func (idp *IdentityProvider) generateResponse(
 		Version:      "2.0",
 		IssueInstant: now,
 		Destination:  sp.ACSUrl,
+		Issuer:       Issuer{Value: idp.config.EntityID},
 		Status: Status{
-			StatusCode: StatusCode{Value: "urn:oasis:names:tc:SAML:2.0:status:Success"},
+			StatusCode: StatusCode{Value: StatusSuccess},
 		},
 		Assertion: &assertion,
 	}
 
-	// Serialize (in production, this should be signed)
-	return xml.Marshal(response)
+	raw, err := xml.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("saml: marshal response: %w", err)
+	}
+
+	// An unsigned assertion authenticates nobody: the service provider has no
+	// way to tell it came from here rather than from whoever posted it.
+	if idp.signer == nil {
+		return nil, ErrNoSigner
+	}
+	signed, err := idp.signer.Sign(ctx, raw)
+	if err != nil {
+		return nil, fmt.Errorf("saml: sign response: %w", err)
+	}
+	return signed, nil
 }
 
-// sendPostBinding sends the response via HTTP POST binding.
-func (idp *IdentityProvider) sendPostBinding(w http.ResponseWriter, acsURL string, response []byte, relayState string) {
-	encoded := base64.StdEncoding.EncodeToString(response)
-
-	html := fmt.Sprintf(`<!DOCTYPE html>
+// postBindingTemplate renders the auto-submitting form for the HTTP-POST
+// binding.
+//
+// html/template escapes every interpolated value according to where it sits in
+// the document. The previous fmt.Sprintf version placed the caller-supplied
+// RelayState straight into an attribute, so a value containing a quote broke
+// out of it and injected script into the page.
+var postBindingTemplate = template.Must(template.New("saml-post").Parse(`<!DOCTYPE html>
 <html>
 <head><title>SAML SSO</title></head>
 <body onload="document.forms[0].submit()">
-<form method="POST" action="%s">
-<input type="hidden" name="SAMLResponse" value="%s"/>
-<input type="hidden" name="RelayState" value="%s"/>
+<form method="POST" action="{{.ACSUrl}}">
+<input type="hidden" name="SAMLResponse" value="{{.SAMLResponse}}"/>
+<input type="hidden" name="RelayState" value="{{.RelayState}}"/>
 <noscript><input type="submit" value="Continue"/></noscript>
 </form>
 </body>
-</html>`, acsURL, encoded, relayState)
+</html>`))
 
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+// PostBindingForm renders the HTML form that delivers a SAML response to the
+// service provider over the HTTP-POST binding.
+//
+// It returns bytes rather than writing to an http.ResponseWriter: transport
+// belongs to the caller.
+//
+//	form, err := idp.PostBindingForm(acsURL, response, relayState)
+//	if err != nil { /* ... */ }
+//	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+//	w.Write(form)
+func (idp *IdentityProvider) PostBindingForm(acsURL string, response []byte, relayState string) ([]byte, error) {
+	if acsURL == "" {
+		return nil, errors.New("saml: empty assertion consumer service URL")
+	}
+
+	var buf bytes.Buffer
+	err := postBindingTemplate.Execute(&buf, struct {
+		ACSUrl       template.URL
+		SAMLResponse string
+		RelayState   string
+	}{
+		// The ACS URL comes from this identity provider's own registration,
+		// not from the request, so it is a trusted value.
+		ACSUrl:       template.URL(acsURL),
+		SAMLResponse: base64.StdEncoding.EncodeToString(response),
+		RelayState:   relayState,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("saml: render POST binding form: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // GetMetadata returns this IdP's metadata XML.

@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewIdentityProvider(t *testing.T) {
+	signer, _ := testSigner(t)
 	config := IdPServerConfig{
 		EntityID: "http://idp.example.com",
 		SSOUrl:   "http://idp.example.com/sso",
@@ -19,17 +20,18 @@ func TestNewIdentityProvider(t *testing.T) {
 	repo := newMockIdentityRepo()
 	store := newMockSessionStore()
 
-	idp := NewIdentityProvider(config, repo, store)
+	idp := NewIdentityProvider(config, repo, store, WithIdPSigner(signer))
 	if idp == nil {
 		t.Fatal("NewIdentityProvider returned nil")
 	}
 }
 
 func TestRegisterSP(t *testing.T) {
+	signer, _ := testSigner(t)
 	config := IdPServerConfig{
 		EntityID: "http://idp.example.com",
 	}
-	idp := NewIdentityProvider(config, nil, nil)
+	idp := NewIdentityProvider(config, nil, nil, WithIdPSigner(signer))
 
 	sp := &SPRegistration{
 		ID:       "sp1",
@@ -57,10 +59,11 @@ func TestRegisterSP(t *testing.T) {
 }
 
 func TestHandleSSORequest_ValidPOST(t *testing.T) {
+	signer, _ := testSigner(t)
 	config := IdPServerConfig{
 		EntityID: "http://idp.example.com",
 	}
-	idp := NewIdentityProvider(config, nil, nil)
+	idp := NewIdentityProvider(config, nil, nil, WithIdPSigner(signer))
 
 	sp := &SPRegistration{
 		ID:       "sp1",
@@ -110,10 +113,11 @@ func TestHandleSSORequest_ValidPOST(t *testing.T) {
 }
 
 func TestHandleSSORequest_UnknownSP(t *testing.T) {
+	signer, _ := testSigner(t)
 	config := IdPServerConfig{
 		EntityID: "http://idp.example.com",
 	}
-	idp := NewIdentityProvider(config, nil, nil)
+	idp := NewIdentityProvider(config, nil, nil, WithIdPSigner(signer))
 
 	req := &AuthnRequest{
 		Issuer: Issuer{Value: "http://unknown-sp.com"},
@@ -132,11 +136,12 @@ func TestHandleSSORequest_UnknownSP(t *testing.T) {
 }
 
 func TestGenerateResponse(t *testing.T) {
+	signer, _ := testSigner(t)
 	config := IdPServerConfig{
 		EntityID:     "http://idp.example.com",
 		AssertionTTL: time.Minute,
 	}
-	idp := NewIdentityProvider(config, nil, nil)
+	idp := NewIdentityProvider(config, nil, nil, WithIdPSigner(signer))
 	idp.SetHooks(IdPHooks{
 		GetUserAttributes: func(ctx context.Context, ident any, sp *SPRegistration) (map[string][]string, error) {
 			return map[string][]string{
