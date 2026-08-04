@@ -114,8 +114,8 @@ func TestOTPStrategy_Initiate_And_Authenticate(t *testing.T) {
 			wantAuthErr: true,
 		},
 		{
-			name:       "code replay (used twice)",
-			identifier: "test@example.com",
+			name:        "code replay (used twice)",
+			identifier:  "test@example.com",
 			wantAuthErr: true, // Second use should fail
 		},
 	}

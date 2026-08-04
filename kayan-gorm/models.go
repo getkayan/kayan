@@ -22,14 +22,14 @@ type gormAuditEvent struct {
 	TenantID     string `gorm:"index"`
 	IPAddress    string `gorm:"index"`
 	UserAgent    string
-	DeviceID     string `gorm:"index"`
-	SessionID    string `gorm:"index"`
-	ResourceType string `gorm:"index"`
-	ResourceID   string `gorm:"index"`
+	DeviceID     string        `gorm:"index"`
+	SessionID    string        `gorm:"index"`
+	ResourceType string        `gorm:"index"`
+	ResourceID   string        `gorm:"index"`
 	OldValue     identity.JSON `gorm:"type:json"`
 	NewValue     identity.JSON `gorm:"type:json"`
-	Risk         string `gorm:"index"`
-	RequestID    string `gorm:"index"`
+	Risk         string        `gorm:"index"`
+	RequestID    string        `gorm:"index"`
 
 	// Geo fields
 	GeoCountry string

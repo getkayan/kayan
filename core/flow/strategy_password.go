@@ -133,7 +133,7 @@ func (s *PasswordStrategy) Register(ctx context.Context, traits identity.JSON, p
 		}
 	}
 
-	if err := s.repo.CreateIdentity(ident); err != nil {
+	if err := s.repo.CreateIdentity(ctx, ident); err != nil {
 		return nil, err
 	}
 
@@ -145,7 +145,7 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, identifier, passwor
 	if s.passwordField != "" {
 		for _, field := range s.identifierFields {
 			query := map[string]any{field: identifier}
-			ident, err := s.repo.FindIdentity(s.factory, query)
+			ident, err := s.repo.FindIdentity(ctx, s.factory, query)
 			if err == nil && ident != nil {
 				// Check password
 				hash := s.getField(ident, s.passwordField)
@@ -158,7 +158,7 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, identifier, passwor
 	}
 
 	// Case 2: Classic
-	cred, err := s.repo.GetCredentialByIdentifier(identifier, "password")
+	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "password")
 	if err != nil || cred == nil {
 		return nil, errors.New("invalid identifier or password")
 	}
@@ -167,7 +167,7 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, identifier, passwor
 		return nil, errors.New("invalid identifier or password")
 	}
 
-	return s.repo.GetIdentity(s.factory, cred.IdentityID)
+	return s.repo.GetIdentity(ctx, s.factory, cred.IdentityID)
 }
 
 func (s *PasswordStrategy) Attach(ctx context.Context, ident any, identifier, secret string) error {
@@ -208,10 +208,10 @@ func (s *PasswordStrategy) Attach(ctx context.Context, ident any, identifier, se
 	// 3. Save
 	if cs, ok := ident.(CredentialSource); ok {
 		cs.SetCredentials(append(cs.GetCredentials(), cred))
-		return s.repo.UpdateIdentity(ident)
+		return s.repo.UpdateIdentity(ctx, ident)
 	}
 
-	return s.repo.CreateCredential(&cred)
+	return s.repo.CreateCredential(ctx, &cred)
 }
 
 func (s *PasswordStrategy) setField(obj any, field string, value any) error {

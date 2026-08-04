@@ -116,10 +116,10 @@ func (m *OIDCManager) reconcileIdentity(ctx context.Context, providerID string, 
 
 	// 1. Check if OIDC credential already exists
 	oidcIdentifier := fmt.Sprintf("%s:%s", providerID, subject)
-	cred, err := m.repo.GetCredentialByIdentifier(oidcIdentifier, "oidc")
+	cred, err := m.repo.GetCredentialByIdentifier(ctx, oidcIdentifier, "oidc")
 	if err == nil {
 		// Existing OIDC user
-		return m.repo.GetIdentity(m.factory, cred.IdentityID)
+		return m.repo.GetIdentity(ctx, m.factory, cred.IdentityID)
 	}
 
 	// 2. Account Linking: Check if user exists by email
@@ -128,13 +128,13 @@ func (m *OIDCManager) reconcileIdentity(ctx context.Context, providerID string, 
 			traits := m.mapClaims(claims)
 			existingIdent, err := m.linker.FindExisting(ctx, traits)
 			if err == nil && existingIdent != nil {
-				return m.linkOIDC(existingIdent, providerID, subject)
+				return m.linkOIDC(ctx, existingIdent, providerID, subject)
 			}
 		} else {
 			// Fallback to legacy email lookup if no linker is set
-			existingIdent, err := m.repo.FindIdentity(m.factory, map[string]any{"email": email})
+			existingIdent, err := m.repo.FindIdentity(ctx, m.factory, map[string]any{"email": email})
 			if err == nil && existingIdent != nil {
-				return m.linkOIDC(existingIdent, providerID, subject)
+				return m.linkOIDC(ctx, existingIdent, providerID, subject)
 			}
 		}
 	}
@@ -171,7 +171,7 @@ func (m *OIDCManager) reconcileIdentity(ctx context.Context, providerID string, 
 		return nil, errors.New("identity model does not implement FlowIdentity")
 	}
 
-	if err := m.repo.CreateIdentity(ident); err != nil {
+	if err := m.repo.CreateIdentity(ctx, ident); err != nil {
 		return nil, err
 	}
 
@@ -187,7 +187,7 @@ func (m *OIDCManager) mapClaims(claims map[string]any) identity.JSON {
 	return identity.JSON(fmt.Sprintf(`{"email": "%s"}`, email))
 }
 
-func (m *OIDCManager) linkOIDC(ident any, providerID, subject string) (any, error) {
+func (m *OIDCManager) linkOIDC(ctx context.Context, ident any, providerID, subject string) (any, error) {
 	fi, ok := ident.(FlowIdentity)
 	if !ok {
 		return nil, errors.New("existing identity does not implement FlowIdentity")
@@ -213,7 +213,7 @@ func (m *OIDCManager) linkOIDC(ident any, providerID, subject string) (any, erro
 	// Using CreateIdentity here might fail if it's meant only for new ones,
 	// but in most GORM implementations it should handle updates or we might need a dedicated Save/Update.
 	// For now, we assume the repo can handle it.
-	if err := m.repo.CreateIdentity(ident); err != nil {
+	if err := m.repo.CreateIdentity(ctx, ident); err != nil {
 		return nil, err
 	}
 
@@ -223,6 +223,6 @@ func (m *OIDCManager) linkOIDC(ident any, providerID, subject string) (any, erro
 // Attach implements the Attacher interface for OIDC.
 // identifier = subject, secret = providerID
 func (m *OIDCManager) Attach(ctx context.Context, ident any, identifier, secret string) error {
-	_, err := m.linkOIDC(ident, secret, identifier)
+	_, err := m.linkOIDC(ctx, ident, secret, identifier)
 	return err
 }

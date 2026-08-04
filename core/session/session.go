@@ -16,10 +16,10 @@ type Session = identity.Session
 
 // Strategy defines the interface for session management strategies.
 type Strategy interface {
-	Create(sessionID, identityID any) (*identity.Session, error)
-	Validate(sessionID any) (*identity.Session, error)
-	Refresh(refreshToken string) (*identity.Session, error)
-	Delete(sessionID any) error
+	Create(ctx context.Context, sessionID, identityID any) (*identity.Session, error)
+	Validate(ctx context.Context, sessionID any) (*identity.Session, error)
+	Refresh(ctx context.Context, refreshToken string) (*identity.Session, error)
+	Delete(ctx context.Context, sessionID any) error
 }
 
 // DatabaseStrategy implements the session strategy using a database.
@@ -32,20 +32,20 @@ func NewDatabaseStrategy(repo domain.SessionStorage) *DatabaseStrategy {
 	return &DatabaseStrategy{repo: repo}
 }
 
-func (s *DatabaseStrategy) Create(sessionID, identityID any) (*identity.Session, error) {
+func (s *DatabaseStrategy) Create(ctx context.Context, sessionID, identityID any) (*identity.Session, error) {
 	sess := NewSession(sessionID, identityID)
 	// Default refresh token strategy for database
 	sess.RefreshToken = uuid.New().String()
 	sess.RefreshExpiresAt = time.Now().Add(7 * 24 * time.Hour)
 
-	if err := s.repo.CreateSession(sess); err != nil {
+	if err := s.repo.CreateSession(ctx, sess); err != nil {
 		return nil, err
 	}
 	return sess, nil
 }
 
-func (s *DatabaseStrategy) Validate(sessionID any) (*identity.Session, error) {
-	sess, err := s.repo.GetSession(sessionID)
+func (s *DatabaseStrategy) Validate(ctx context.Context, sessionID any) (*identity.Session, error) {
+	sess, err := s.repo.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,13 +57,13 @@ func (s *DatabaseStrategy) Validate(sessionID any) (*identity.Session, error) {
 	return sess, nil
 }
 
-func (s *DatabaseStrategy) Refresh(refreshToken string) (*identity.Session, error) {
+func (s *DatabaseStrategy) Refresh(ctx context.Context, refreshToken string) (*identity.Session, error) {
 	if s.RefreshHook != nil {
 		return s.RefreshHook(refreshToken)
 	}
 
 	// Default rotation logic
-	sess, err := s.repo.GetSessionByRefreshToken(refreshToken)
+	sess, err := s.repo.GetSessionByRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token")
 	}
@@ -81,18 +81,18 @@ func (s *DatabaseStrategy) Refresh(refreshToken string) (*identity.Session, erro
 	sess.ExpiresAt = time.Now().Add(24 * time.Hour)
 	sess.RefreshExpiresAt = time.Now().Add(7 * 24 * time.Hour)
 
-	if err := s.repo.CreateSession(sess); err != nil {
+	if err := s.repo.CreateSession(ctx, sess); err != nil {
 		return nil, err
 	}
 
 	// Invalidate old session
-	_ = s.repo.DeleteSession(oldID)
+	_ = s.repo.DeleteSession(ctx, oldID)
 
 	return sess, nil
 }
 
-func (s *DatabaseStrategy) Delete(sessionID any) error {
-	return s.repo.DeleteSession(sessionID)
+func (s *DatabaseStrategy) Delete(ctx context.Context, sessionID any) error {
+	return s.repo.DeleteSession(ctx, sessionID)
 }
 
 // JWTConfig holds the configuration for JWT-based sessions.
@@ -195,7 +195,7 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-func (s *JWTStrategy) Create(sessionID, identityID any) (*identity.Session, error) {
+func (s *JWTStrategy) Create(ctx context.Context, sessionID, identityID any) (*identity.Session, error) {
 	now := time.Now()
 
 	// Access Token
@@ -268,7 +268,7 @@ func (s *JWTStrategy) keyFunc(expected jwt.SigningMethod, key any) jwt.Keyfunc {
 	}
 }
 
-func (s *JWTStrategy) Validate(sessionID any) (*identity.Session, error) {
+func (s *JWTStrategy) Validate(ctx context.Context, sessionID any) (*identity.Session, error) {
 	tokenString, ok := sessionID.(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid token format")
@@ -284,7 +284,7 @@ func (s *JWTStrategy) Validate(sessionID any) (*identity.Session, error) {
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
 		// Distributed revocation check
 		if s.revocation != nil {
-			revoked, err := s.revocation.IsRevoked(context.Background(), tokenString)
+			revoked, err := s.revocation.IsRevoked(ctx, tokenString)
 			if err != nil {
 				return nil, fmt.Errorf("revocation check failed: %w", err)
 			}
@@ -304,7 +304,7 @@ func (s *JWTStrategy) Validate(sessionID any) (*identity.Session, error) {
 	return nil, fmt.Errorf("invalid token")
 }
 
-func (s *JWTStrategy) Refresh(refreshToken string) (*identity.Session, error) {
+func (s *JWTStrategy) Refresh(ctx context.Context, refreshToken string) (*identity.Session, error) {
 	rtMethod := s.config.RefreshSigningMethod
 	if rtMethod == nil {
 		rtMethod = s.config.SigningMethod
@@ -329,13 +329,13 @@ func (s *JWTStrategy) Refresh(refreshToken string) (*identity.Session, error) {
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
 		// Issue new AT and new RT (Rotation)
 		newSessionID := uuid.New().String()
-		return s.Create(newSessionID, claims.Subject)
+		return s.Create(ctx, newSessionID, claims.Subject)
 	}
 
 	return nil, fmt.Errorf("invalid refresh token")
 }
 
-func (s *JWTStrategy) Delete(sessionID any) error {
+func (s *JWTStrategy) Delete(ctx context.Context, sessionID any) error {
 	// Distributed revocation: mark as revoked if store is present.
 	if s.revocation != nil {
 		tokenString, ok := sessionID.(string)
@@ -355,7 +355,7 @@ func (s *JWTStrategy) Delete(sessionID any) error {
 		if !ok || !token.Valid {
 			return fmt.Errorf("invalid token")
 		}
-		return s.revocation.Revoke(context.Background(), tokenString, claims.ExpiresAt.Time)
+		return s.revocation.Revoke(ctx, tokenString, claims.ExpiresAt.Time)
 	}
 	// Stateless, nothing to delete on server side.
 	return nil

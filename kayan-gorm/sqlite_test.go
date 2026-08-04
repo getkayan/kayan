@@ -35,6 +35,7 @@ func setupRepo(t *testing.T) *Repository {
 // --- Identity CRUD ---
 
 func TestSQLite_CreateAndGetIdentity(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
 	ident := &gormIdentity{
@@ -42,12 +43,12 @@ func TestSQLite_CreateAndGetIdentity(t *testing.T) {
 		Traits: []byte(`{"email":"alice@example.com"}`),
 		State:  "active",
 	}
-	if err := repo.CreateIdentity(ident); err != nil {
+	if err := repo.CreateIdentity(ctx, ident); err != nil {
 		t.Fatalf("CreateIdentity: %v", err)
 	}
 
 	factory := func() any { return &gormIdentity{} }
-	got, err := repo.GetIdentity(factory, "id-1")
+	got, err := repo.GetIdentity(ctx, factory, "id-1")
 	if err != nil {
 		t.Fatalf("GetIdentity: %v", err)
 	}
@@ -61,13 +62,14 @@ func TestSQLite_CreateAndGetIdentity(t *testing.T) {
 }
 
 func TestSQLite_FindIdentity(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
-	repo.CreateIdentity(&gormIdentity{ID: "id-1", State: "active"})
-	repo.CreateIdentity(&gormIdentity{ID: "id-2", State: "inactive"})
+	repo.CreateIdentity(ctx, &gormIdentity{ID: "id-1", State: "active"})
+	repo.CreateIdentity(ctx, &gormIdentity{ID: "id-2", State: "inactive"})
 
 	factory := func() any { return &gormIdentity{} }
-	got, err := repo.FindIdentity(factory, map[string]any{"state": "inactive"})
+	got, err := repo.FindIdentity(ctx, factory, map[string]any{"state": "inactive"})
 	if err != nil {
 		t.Fatalf("FindIdentity: %v", err)
 	}
@@ -78,14 +80,15 @@ func TestSQLite_FindIdentity(t *testing.T) {
 }
 
 func TestSQLite_ListIdentities(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
 	for i := 0; i < 5; i++ {
-		repo.CreateIdentity(&gormIdentity{ID: "id-" + string(rune('A'+i)), State: "active"})
+		repo.CreateIdentity(ctx, &gormIdentity{ID: "id-" + string(rune('A'+i)), State: "active"})
 	}
 
 	factory := func() any { return &gormIdentity{} }
-	results, err := repo.ListIdentities(factory, 1, 3)
+	results, err := repo.ListIdentities(ctx, factory, 1, 3)
 	if err != nil {
 		t.Fatalf("ListIdentities: %v", err)
 	}
@@ -95,20 +98,21 @@ func TestSQLite_ListIdentities(t *testing.T) {
 }
 
 func TestSQLite_UpdateIdentity(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
-	repo.CreateIdentity(&gormIdentity{ID: "id-1", State: "active"})
+	repo.CreateIdentity(ctx, &gormIdentity{ID: "id-1", State: "active"})
 
 	factory := func() any { return &gormIdentity{} }
-	got, _ := repo.GetIdentity(factory, "id-1")
+	got, _ := repo.GetIdentity(ctx, factory, "id-1")
 	gi := got.(*gormIdentity)
 	gi.State = "disabled"
 
-	if err := repo.UpdateIdentity(gi); err != nil {
+	if err := repo.UpdateIdentity(ctx, gi); err != nil {
 		t.Fatalf("UpdateIdentity: %v", err)
 	}
 
-	got, _ = repo.GetIdentity(factory, "id-1")
+	got, _ = repo.GetIdentity(ctx, factory, "id-1")
 	gi = got.(*gormIdentity)
 	if gi.State != "disabled" {
 		t.Fatalf("expected State 'disabled', got %q", gi.State)
@@ -116,26 +120,28 @@ func TestSQLite_UpdateIdentity(t *testing.T) {
 }
 
 func TestSQLite_DeleteIdentity(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
-	repo.CreateIdentity(&gormIdentity{ID: "id-1", State: "active"})
+	repo.CreateIdentity(ctx, &gormIdentity{ID: "id-1", State: "active"})
 
 	factory := func() any { return &gormIdentity{} }
-	if err := repo.DeleteIdentity(factory, "id-1"); err != nil {
+	if err := repo.DeleteIdentity(ctx, factory, "id-1"); err != nil {
 		t.Fatalf("DeleteIdentity: %v", err)
 	}
 
-	_, err := repo.GetIdentity(factory, "id-1")
+	_, err := repo.GetIdentity(ctx, factory, "id-1")
 	if err == nil {
 		t.Fatal("expected error after delete")
 	}
 }
 
 func TestSQLite_GetIdentity_NotFound(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
 	factory := func() any { return &gormIdentity{} }
-	_, err := repo.GetIdentity(factory, "nonexistent")
+	_, err := repo.GetIdentity(ctx, factory, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent identity")
 	}
@@ -144,10 +150,11 @@ func TestSQLite_GetIdentity_NotFound(t *testing.T) {
 // --- Credential Operations ---
 
 func TestSQLite_CreateAndGetCredential(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
 	// Create identity first (foreign key)
-	repo.CreateIdentity(&gormIdentity{ID: "id-1", State: "active"})
+	repo.CreateIdentity(ctx, &gormIdentity{ID: "id-1", State: "active"})
 
 	cred := &gormCredential{
 		ID:         "cred-1",
@@ -156,11 +163,11 @@ func TestSQLite_CreateAndGetCredential(t *testing.T) {
 		Identifier: "alice@example.com",
 		Secret:     "$2a$10$hashedpassword",
 	}
-	if err := repo.CreateCredential(cred); err != nil {
+	if err := repo.CreateCredential(ctx, cred); err != nil {
 		t.Fatalf("CreateCredential: %v", err)
 	}
 
-	got, err := repo.GetCredentialByIdentifier("alice@example.com", "password")
+	got, err := repo.GetCredentialByIdentifier(ctx, "alice@example.com", "password")
 	if err != nil {
 		t.Fatalf("GetCredentialByIdentifier: %v", err)
 	}
@@ -170,29 +177,30 @@ func TestSQLite_CreateAndGetCredential(t *testing.T) {
 }
 
 func TestSQLite_UpdateCredentialSecret(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
-	repo.CreateIdentity(&gormIdentity{ID: "id-1", State: "active"})
-	repo.CreateCredential(&gormCredential{
+	repo.CreateIdentity(ctx, &gormIdentity{ID: "id-1", State: "active"})
+	repo.CreateCredential(ctx, &gormCredential{
 		ID: "cred-1", IdentityID: "id-1", Type: "password",
 		Identifier: "alice@example.com", Secret: "old-hash",
 	})
 
-	ctx := context.Background()
 	if err := repo.UpdateCredentialSecret(ctx, "id-1", "password", "new-hash"); err != nil {
 		t.Fatalf("UpdateCredentialSecret: %v", err)
 	}
 
-	got, _ := repo.GetCredentialByIdentifier("alice@example.com", "password")
+	got, _ := repo.GetCredentialByIdentifier(ctx, "alice@example.com", "password")
 	if got.Secret != "new-hash" {
 		t.Fatalf("expected updated secret 'new-hash', got %q", got.Secret)
 	}
 }
 
 func TestSQLite_GetCredentialByIdentifier_NotFound(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
-	_, err := repo.GetCredentialByIdentifier("nobody@example.com", "password")
+	_, err := repo.GetCredentialByIdentifier(ctx, "nobody@example.com", "password")
 	if err == nil {
 		t.Fatal("expected error for nonexistent credential")
 	}
@@ -201,6 +209,7 @@ func TestSQLite_GetCredentialByIdentifier_NotFound(t *testing.T) {
 // --- Session Lifecycle ---
 
 func TestSQLite_SessionCRUD(t *testing.T) {
+	ctx := context.Background()
 	repo := setupRepo(t)
 
 	sess := &identity.Session{
@@ -213,11 +222,11 @@ func TestSQLite_SessionCRUD(t *testing.T) {
 		Active:           true,
 	}
 
-	if err := repo.CreateSession(sess); err != nil {
+	if err := repo.CreateSession(ctx, sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	got, err := repo.GetSession("sess-1")
+	got, err := repo.GetSession(ctx, "sess-1")
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -229,7 +238,7 @@ func TestSQLite_SessionCRUD(t *testing.T) {
 	}
 
 	// Get by refresh token
-	got, err = repo.GetSessionByRefreshToken("rt-abc")
+	got, err = repo.GetSessionByRefreshToken(ctx, "rt-abc")
 	if err != nil {
 		t.Fatalf("GetSessionByRefreshToken: %v", err)
 	}
@@ -238,10 +247,10 @@ func TestSQLite_SessionCRUD(t *testing.T) {
 	}
 
 	// Delete
-	if err := repo.DeleteSession("sess-1"); err != nil {
+	if err := repo.DeleteSession(ctx, "sess-1"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
-	_, err = repo.GetSession("sess-1")
+	_, err = repo.GetSession(ctx, "sess-1")
 	if err == nil {
 		t.Fatal("expected error after session delete")
 	}

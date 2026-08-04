@@ -17,47 +17,51 @@ func TestMemoryStoreSatisfiesContract(t *testing.T) {
 }
 
 func TestResetEmptiesTheStore(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 	factory := func() any { return &SuiteIdentity{} }
 
-	if err := store.CreateIdentity(&SuiteIdentity{ID: "u1"}); err != nil {
+	if err := store.CreateIdentity(ctx, &SuiteIdentity{ID: "u1"}); err != nil {
 		t.Fatalf("CreateIdentity: %v", err)
 	}
 	store.Reset()
 
-	if _, err := store.GetIdentity(factory, "u1"); err == nil {
+	if _, err := store.GetIdentity(ctx, factory, "u1"); err == nil {
 		t.Error("identity survived Reset")
 	}
 }
 
 func TestCreateIdentityRejectsDuplicates(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
-	if err := store.CreateIdentity(&SuiteIdentity{ID: "u1"}); err != nil {
+	if err := store.CreateIdentity(ctx, &SuiteIdentity{ID: "u1"}); err != nil {
 		t.Fatalf("CreateIdentity: %v", err)
 	}
-	if err := store.CreateIdentity(&SuiteIdentity{ID: "u1"}); err == nil {
+	if err := store.CreateIdentity(ctx, &SuiteIdentity{ID: "u1"}); err == nil {
 		t.Error("a duplicate ID was accepted")
 	}
 }
 
 func TestCreateIdentityRejectsMissingID(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
 	// An empty ID would collide with every other empty-ID identity.
-	if err := store.CreateIdentity(&SuiteIdentity{Email: "a@example.test"}); err == nil {
+	if err := store.CreateIdentity(ctx, &SuiteIdentity{Email: "a@example.test"}); err == nil {
 		t.Error("an identity with no ID was accepted")
 	}
-	if err := store.CreateIdentity(nil); err == nil {
+	if err := store.CreateIdentity(ctx, nil); err == nil {
 		t.Error("a nil identity was accepted")
 	}
 }
 
 func TestUpdateIdentityRequiresAnExistingRecord(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
 	// Update must not silently create; that would mask a caller bug.
-	if err := store.UpdateIdentity(&SuiteIdentity{ID: "absent"}); err == nil {
+	if err := store.UpdateIdentity(ctx, &SuiteIdentity{ID: "absent"}); err == nil {
 		t.Error("UpdateIdentity created a record that did not exist")
 	}
 }

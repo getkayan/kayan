@@ -40,6 +40,7 @@ func (i *customIdentity) MarkVerified(at time.Time) {
 }
 
 func TestLoginSupportsBYOSIdentity(t *testing.T) {
+	ctx := context.Background()
 	repo := &mockRepo{
 		identities: make(map[string]any),
 		creds:      make(map[string]*identity.Credential),
@@ -79,7 +80,7 @@ func TestLoginSupportsBYOSIdentity(t *testing.T) {
 
 	ident.MFAEnabled = true
 	ident.MFASecret = "JBSWY3DPEHPK3PXP"
-	if err := repo.UpdateIdentity(ident); err != nil {
+	if err := repo.UpdateIdentity(ctx, ident); err != nil {
 		t.Fatalf("failed to update custom identity: %v", err)
 	}
 
@@ -108,6 +109,7 @@ func TestLoginSupportsBYOSIdentity(t *testing.T) {
 }
 
 func TestVerificationSupportsBYOSIdentity(t *testing.T) {
+	ctx := context.Background()
 	repo := &mockRepo{
 		identities: make(map[string]any),
 		creds:      make(map[string]*identity.Credential),
@@ -115,7 +117,7 @@ func TestVerificationSupportsBYOSIdentity(t *testing.T) {
 	tokenStore := &mockTokenStore{tokens: make(map[string]*domain.AuthToken)}
 
 	ident := &customIdentity{ID: uuid.NewString(), Email: "verify@example.com"}
-	if err := repo.CreateIdentity(ident); err != nil {
+	if err := repo.CreateIdentity(ctx, ident); err != nil {
 		t.Fatalf("failed to seed custom identity: %v", err)
 	}
 
@@ -130,7 +132,7 @@ func TestVerificationSupportsBYOSIdentity(t *testing.T) {
 		t.Fatalf("failed to verify identity: %v", err)
 	}
 
-	stored, err := repo.GetIdentity(func() any { return &customIdentity{} }, ident.ID)
+	stored, err := repo.GetIdentity(ctx, func() any { return &customIdentity{} }, ident.ID)
 	if err != nil {
 		t.Fatalf("failed to reload custom identity: %v", err)
 	}

@@ -61,12 +61,12 @@ func (l *defaultLinker) FindExisting(ctx context.Context, traits identity.JSON) 
 	// Search in the repo.
 	// NOTE: This assumes the repo knows how to search by traits/email.
 	// For BYOS models, the Repo might need a custom FindIdentity implementation.
-	ident, err := l.repo.FindIdentity(l.factory, map[string]any{"email": email})
+	ident, err := l.repo.FindIdentity(ctx, l.factory, map[string]any{"email": email})
 	if err == nil && ident != nil {
 		return ident, nil
 	}
 
-	idents, listErr := l.repo.ListIdentities(l.factory, 0, 0)
+	idents, listErr := l.repo.ListIdentities(ctx, l.factory, 0, 0)
 	if listErr != nil {
 		return nil, listErr
 	}

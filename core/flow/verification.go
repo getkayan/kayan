@@ -97,7 +97,7 @@ func (m *VerificationManager) Verify(ctx context.Context, tokenStr string) error
 	}
 
 	// 2. Get Identity
-	identRaw, err := m.repo.GetIdentity(m.factory, token.IdentityID)
+	identRaw, err := m.repo.GetIdentity(ctx, m.factory, token.IdentityID)
 	if err != nil {
 		return fmt.Errorf("verification: identity not found")
 	}
@@ -116,7 +116,7 @@ func (m *VerificationManager) Verify(ctx context.Context, tokenStr string) error
 	now := time.Now()
 	vi.MarkVerified(now)
 
-	if err := m.repo.UpdateIdentity(identRaw); err != nil {
+	if err := m.repo.UpdateIdentity(ctx, identRaw); err != nil {
 		return err
 	}
 

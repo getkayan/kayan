@@ -96,7 +96,7 @@ func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, err
 	}
 
 	// 1. Find identity by credential identifier
-	cred, err := s.repo.GetCredentialByIdentifier(identifier, "")
+	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
 	if err != nil || cred == nil {
 		return nil, fmt.Errorf("otp: user not found")
 	}
@@ -149,7 +149,7 @@ func (s *OTPStrategy) Authenticate(ctx context.Context, identifier, secret strin
 	}
 
 	// 4. Find the identity
-	ident, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, token.IdentityID)
+	ident, err := s.repo.GetIdentity(ctx, func() any { return &identity.Identity{} }, token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("otp: identity not found")
 	}

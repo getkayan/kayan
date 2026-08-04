@@ -308,7 +308,7 @@ func (s *WebAuthnStrategy) FinishRegistration(
 	// If identity supports CredentialSource, add to it
 	if cs, ok := ident.(CredentialSource); ok {
 		cs.SetCredentials(append(cs.GetCredentials(), *cred))
-		if err := s.repo.CreateIdentity(ident); err != nil {
+		if err := s.repo.CreateIdentity(ctx, ident); err != nil {
 			return nil, fmt.Errorf("webauthn: failed to save credential: %w", err)
 		}
 	}
@@ -323,12 +323,12 @@ func (s *WebAuthnStrategy) BeginLogin(
 	identifier string,
 ) (*protocol.CredentialAssertion, string, error) {
 	// Find identity by identifier
-	cred, err := s.repo.GetCredentialByIdentifier(identifier, "")
+	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
 	if err != nil {
 		return nil, "", errors.New("webauthn: user not found")
 	}
 
-	ident, err := s.repo.GetIdentity(s.factory, cred.IdentityID)
+	ident, err := s.repo.GetIdentity(ctx, s.factory, cred.IdentityID)
 	if err != nil {
 		return nil, "", errors.New("webauthn: user not found")
 	}
@@ -414,12 +414,12 @@ func (s *WebAuthnStrategy) FinishLogin(
 	}
 
 	// Find identity
-	cred, err := s.repo.GetCredentialByIdentifier(identifier, "")
+	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
 	if err != nil {
 		return nil, errors.New("webauthn: user not found")
 	}
 
-	ident, err := s.repo.GetIdentity(s.factory, cred.IdentityID)
+	ident, err := s.repo.GetIdentity(ctx, s.factory, cred.IdentityID)
 	if err != nil {
 		return nil, errors.New("webauthn: user not found")
 	}
@@ -526,7 +526,7 @@ func (s *WebAuthnStrategy) updateSignCount(ctx context.Context, ident any, crede
 	}
 
 	cs.SetCredentials(creds)
-	s.repo.UpdateIdentity(ident)
+	s.repo.UpdateIdentity(ctx, ident)
 }
 
 func (s *WebAuthnStrategy) generateSessionID() string {

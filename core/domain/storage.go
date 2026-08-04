@@ -60,36 +60,40 @@ type Storage interface {
 //
 //	// Create
 //	user := &User{ID: "123", Email: "user@example.com"}
-//	repo.CreateIdentity(user)
+//	repo.CreateIdentity(ctx, user)
 //
 //	// Get by ID
-//	ident, _ := repo.GetIdentity(func() any { return &User{} }, "123")
+//	ident, _ := repo.GetIdentity(ctx, func() any { return &User{} }, "123")
 //	user := ident.(*User)
 //
 //	// Find by field
-//	ident, _ := repo.FindIdentity(func() any { return &User{} }, map[string]any{"Email": "user@example.com"})
+//	ident, _ := repo.FindIdentity(ctx, func() any { return &User{} }, map[string]any{"Email": "user@example.com"})
+//
+// Every method takes a context so a storage implementation can honor
+// cancellation and read request-scoped values — the ambient tenant among them.
+// Without it, tenant isolation cannot reach the query.
 //
 // See kgorm package for a reference implementation.
 type IdentityStorage interface {
 	CredentialStorage
-	CreateIdentity(ident any) error
-	GetIdentity(factory func() any, id any) (any, error)
-	FindIdentity(factory func() any, query map[string]any) (any, error)
-	ListIdentities(factory func() any, page, limit int) ([]any, error)
-	UpdateIdentity(ident any) error
-	DeleteIdentity(factory func() any, id any) error
-	CreateCredential(cred any) error
+	CreateIdentity(ctx context.Context, ident any) error
+	GetIdentity(ctx context.Context, factory func() any, id any) (any, error)
+	FindIdentity(ctx context.Context, factory func() any, query map[string]any) (any, error)
+	ListIdentities(ctx context.Context, factory func() any, page, limit int) ([]any, error)
+	UpdateIdentity(ctx context.Context, ident any) error
+	DeleteIdentity(ctx context.Context, factory func() any, id any) error
+	CreateCredential(ctx context.Context, cred any) error
 }
 
 type SessionStorage interface {
-	CreateSession(s *identity.Session) error
-	GetSession(id any) (*identity.Session, error)
-	GetSessionByRefreshToken(token string) (*identity.Session, error)
-	DeleteSession(id any) error
+	CreateSession(ctx context.Context, s *identity.Session) error
+	GetSession(ctx context.Context, id any) (*identity.Session, error)
+	GetSessionByRefreshToken(ctx context.Context, token string) (*identity.Session, error)
+	DeleteSession(ctx context.Context, id any) error
 }
 
 type CredentialStorage interface {
-	GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error)
+	GetCredentialByIdentifier(ctx context.Context, identifier string, method string) (*identity.Credential, error)
 	UpdateCredentialSecret(ctx context.Context, identityID, method, secret string) error
 }
 

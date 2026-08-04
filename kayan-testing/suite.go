@@ -152,14 +152,15 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 	t.Helper()
 
 	t.Run("create then get", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		want := newIdentity(t, factory, "u1", "a@example.test", "A")
 
-		if err := store.CreateIdentity(want); err != nil {
+		if err := store.CreateIdentity(ctx, want); err != nil {
 			t.Fatalf("CreateIdentity: %v", err)
 		}
 
-		got, err := store.GetIdentity(factory, "u1")
+		got, err := store.GetIdentity(ctx, factory, "u1")
 		if err != nil {
 			t.Fatalf("GetIdentity: %v", err)
 		}
@@ -169,19 +170,21 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 	})
 
 	t.Run("get missing reports an error", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if _, err := store.GetIdentity(factory, "nope"); err == nil {
+		if _, err := store.GetIdentity(ctx, factory, "nope"); err == nil {
 			t.Error("GetIdentity returned no error for a missing identity")
 		}
 	})
 
 	t.Run("find by field", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateIdentity(newIdentity(t, factory, "u1", "find@example.test", "")); err != nil {
+		if err := store.CreateIdentity(ctx, newIdentity(t, factory, "u1", "find@example.test", "")); err != nil {
 			t.Fatalf("CreateIdentity: %v", err)
 		}
 
-		got, err := store.FindIdentity(factory, map[string]any{"Email": "find@example.test"})
+		got, err := store.FindIdentity(ctx, factory, map[string]any{"Email": "find@example.test"})
 		if err != nil {
 			t.Fatalf("FindIdentity: %v", err)
 		}
@@ -191,22 +194,24 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 	})
 
 	t.Run("find with no match reports an error", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateIdentity(newIdentity(t, factory, "u1", "a@example.test", "")); err != nil {
+		if err := store.CreateIdentity(ctx, newIdentity(t, factory, "u1", "a@example.test", "")); err != nil {
 			t.Fatalf("CreateIdentity: %v", err)
 		}
-		if _, err := store.FindIdentity(factory, map[string]any{"Email": "absent@example.test"}); err == nil {
+		if _, err := store.FindIdentity(ctx, factory, map[string]any{"Email": "absent@example.test"}); err == nil {
 			t.Error("FindIdentity returned no error for a query matching nothing")
 		}
 	})
 
 	t.Run("find requires every field to match", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateIdentity(newIdentity(t, factory, "u1", "a@example.test", "A")); err != nil {
+		if err := store.CreateIdentity(ctx, newIdentity(t, factory, "u1", "a@example.test", "A")); err != nil {
 			t.Fatalf("CreateIdentity: %v", err)
 		}
 		// Email matches, Name does not: the identity must not be returned.
-		_, err := store.FindIdentity(factory, map[string]any{
+		_, err := store.FindIdentity(ctx, factory, map[string]any{
 			"Email": "a@example.test",
 			"Name":  "different",
 		})
@@ -216,18 +221,19 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 	})
 
 	t.Run("update", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		user := newIdentity(t, factory, "u1", "before@example.test", "")
-		if err := store.CreateIdentity(user); err != nil {
+		if err := store.CreateIdentity(ctx, user); err != nil {
 			t.Fatalf("CreateIdentity: %v", err)
 		}
 
 		reflect.ValueOf(user).Elem().FieldByName("Email").SetString("after@example.test")
-		if err := store.UpdateIdentity(user); err != nil {
+		if err := store.UpdateIdentity(ctx, user); err != nil {
 			t.Fatalf("UpdateIdentity: %v", err)
 		}
 
-		got, err := store.GetIdentity(factory, "u1")
+		got, err := store.GetIdentity(ctx, factory, "u1")
 		if err != nil {
 			t.Fatalf("GetIdentity: %v", err)
 		}
@@ -237,29 +243,31 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 	})
 
 	t.Run("delete", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateIdentity(newIdentity(t, factory, "u1", "", "")); err != nil {
+		if err := store.CreateIdentity(ctx, newIdentity(t, factory, "u1", "", "")); err != nil {
 			t.Fatalf("CreateIdentity: %v", err)
 		}
-		if err := store.DeleteIdentity(factory, "u1"); err != nil {
+		if err := store.DeleteIdentity(ctx, factory, "u1"); err != nil {
 			t.Fatalf("DeleteIdentity: %v", err)
 		}
-		if _, err := store.GetIdentity(factory, "u1"); err == nil {
+		if _, err := store.GetIdentity(ctx, factory, "u1"); err == nil {
 			t.Error("identity is still readable after deletion")
 		}
 	})
 
 	t.Run("list paginates", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		const total = 5
 		for i := range total {
 			id := string(rune('a' + i))
-			if err := store.CreateIdentity(newIdentity(t, factory, id, id+"@example.test", "")); err != nil {
+			if err := store.CreateIdentity(ctx, newIdentity(t, factory, id, id+"@example.test", "")); err != nil {
 				t.Fatalf("CreateIdentity: %v", err)
 			}
 		}
 
-		first, err := store.ListIdentities(factory, 1, 2)
+		first, err := store.ListIdentities(ctx, factory, 1, 2)
 		if err != nil {
 			t.Fatalf("ListIdentities: %v", err)
 		}
@@ -268,7 +276,7 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 		}
 
 		// A page past the end must be empty, not an error.
-		beyond, err := store.ListIdentities(factory, 99, 2)
+		beyond, err := store.ListIdentities(ctx, factory, 99, 2)
 		if err != nil {
 			t.Fatalf("ListIdentities beyond the end: %v", err)
 		}
@@ -280,9 +288,9 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 
 func suiteCredential(t *testing.T, newStore func() domain.Storage) {
 	t.Helper()
-	ctx := context.Background()
 
 	t.Run("create then look up", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		cred := &identity.Credential{
 			ID:         "c1",
@@ -291,11 +299,11 @@ func suiteCredential(t *testing.T, newStore func() domain.Storage) {
 			Identifier: "user@example.test",
 			Secret:     "hashed-secret",
 		}
-		if err := store.CreateCredential(cred); err != nil {
+		if err := store.CreateCredential(ctx, cred); err != nil {
 			t.Fatalf("CreateCredential: %v", err)
 		}
 
-		got, err := store.GetCredentialByIdentifier("user@example.test", "password")
+		got, err := store.GetCredentialByIdentifier(ctx, "user@example.test", "password")
 		if err != nil {
 			t.Fatalf("GetCredentialByIdentifier: %v", err)
 		}
@@ -305,29 +313,32 @@ func suiteCredential(t *testing.T, newStore func() domain.Storage) {
 	})
 
 	t.Run("method scopes the lookup", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateCredential(&identity.Credential{
+		if err := store.CreateCredential(ctx, &identity.Credential{
 			ID: "c1", IdentityID: "u1", Type: "password", Identifier: "shared@example.test", Secret: "pw",
 		}); err != nil {
 			t.Fatalf("CreateCredential: %v", err)
 		}
 
 		// The same identifier under a different method must not be found.
-		if _, err := store.GetCredentialByIdentifier("shared@example.test", "totp"); err == nil {
+		if _, err := store.GetCredentialByIdentifier(ctx, "shared@example.test", "totp"); err == nil {
 			t.Error("credential was returned for the wrong method")
 		}
 	})
 
 	t.Run("missing credential reports an error", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if _, err := store.GetCredentialByIdentifier("absent@example.test", "password"); err == nil {
+		if _, err := store.GetCredentialByIdentifier(ctx, "absent@example.test", "password"); err == nil {
 			t.Error("GetCredentialByIdentifier returned no error for a missing credential")
 		}
 	})
 
 	t.Run("update secret", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateCredential(&identity.Credential{
+		if err := store.CreateCredential(ctx, &identity.Credential{
 			ID: "c1", IdentityID: "u1", Type: "password", Identifier: "user@example.test", Secret: "old",
 		}); err != nil {
 			t.Fatalf("CreateCredential: %v", err)
@@ -337,7 +348,7 @@ func suiteCredential(t *testing.T, newStore func() domain.Storage) {
 			t.Fatalf("UpdateCredentialSecret: %v", err)
 		}
 
-		got, err := store.GetCredentialByIdentifier("user@example.test", "password")
+		got, err := store.GetCredentialByIdentifier(ctx, "user@example.test", "password")
 		if err != nil {
 			t.Fatalf("GetCredentialByIdentifier: %v", err)
 		}
@@ -362,12 +373,13 @@ func suiteSession(t *testing.T, newStore func() domain.Storage) {
 	}
 
 	t.Run("create then get", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateSession(newSession()); err != nil {
+		if err := store.CreateSession(ctx, newSession()); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}
 
-		got, err := store.GetSession("s1")
+		got, err := store.GetSession(ctx, "s1")
 		if err != nil {
 			t.Fatalf("GetSession: %v", err)
 		}
@@ -377,12 +389,13 @@ func suiteSession(t *testing.T, newStore func() domain.Storage) {
 	})
 
 	t.Run("get by refresh token", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateSession(newSession()); err != nil {
+		if err := store.CreateSession(ctx, newSession()); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}
 
-		got, err := store.GetSessionByRefreshToken("refresh-token")
+		got, err := store.GetSessionByRefreshToken(ctx, "refresh-token")
 		if err != nil {
 			t.Fatalf("GetSessionByRefreshToken: %v", err)
 		}
@@ -392,26 +405,28 @@ func suiteSession(t *testing.T, newStore func() domain.Storage) {
 	})
 
 	t.Run("delete", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if err := store.CreateSession(newSession()); err != nil {
+		if err := store.CreateSession(ctx, newSession()); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}
-		if err := store.DeleteSession("s1"); err != nil {
+		if err := store.DeleteSession(ctx, "s1"); err != nil {
 			t.Fatalf("DeleteSession: %v", err)
 		}
-		if _, err := store.GetSession("s1"); err == nil {
+		if _, err := store.GetSession(ctx, "s1"); err == nil {
 			t.Error("session is still readable after deletion")
 		}
 		// The refresh-token index must not outlive the session, or a deleted
 		// session stays refreshable.
-		if _, err := store.GetSessionByRefreshToken("refresh-token"); err == nil {
+		if _, err := store.GetSessionByRefreshToken(ctx, "refresh-token"); err == nil {
 			t.Error("refresh token still resolves after the session was deleted")
 		}
 	})
 
 	t.Run("missing session reports an error", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
-		if _, err := store.GetSession("absent"); err == nil {
+		if _, err := store.GetSession(ctx, "absent"); err == nil {
 			t.Error("GetSession returned no error for a missing session")
 		}
 	})
@@ -419,9 +434,9 @@ func suiteSession(t *testing.T, newStore func() domain.Storage) {
 
 func suiteToken(t *testing.T, newStore func() domain.Storage) {
 	t.Helper()
-	ctx := context.Background()
 
 	t.Run("save then get", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		token := &domain.AuthToken{
 			Token:      "tok-1",
@@ -443,6 +458,7 @@ func suiteToken(t *testing.T, newStore func() domain.Storage) {
 	})
 
 	t.Run("delete", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		if err := store.SaveToken(ctx, &domain.AuthToken{
 			Token: "tok-1", IdentityID: "u1", Type: "recovery", ExpiresAt: time.Now().Add(time.Hour),
@@ -458,6 +474,7 @@ func suiteToken(t *testing.T, newStore func() domain.Storage) {
 	})
 
 	t.Run("expired token is not returned", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		if err := store.SaveToken(ctx, &domain.AuthToken{
 			Token: "expired", IdentityID: "u1", Type: "recovery",
@@ -473,6 +490,7 @@ func suiteToken(t *testing.T, newStore func() domain.Storage) {
 	})
 
 	t.Run("delete expired sweeps only expired tokens", func(t *testing.T) {
+		ctx := context.Background()
 		store := newStore()
 		if err := store.SaveToken(ctx, &domain.AuthToken{
 			Token: "live", IdentityID: "u1", Type: "recovery", ExpiresAt: time.Now().Add(time.Hour),

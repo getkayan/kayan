@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
@@ -15,18 +16,18 @@ type mockStorage struct {
 	sessions map[string]*identity.Session
 }
 
-func (m *mockStorage) CreateSession(s *identity.Session) error {
+func (m *mockStorage) CreateSession(ctx context.Context, s *identity.Session) error {
 	m.sessions[s.ID] = s
 	return nil
 }
-func (m *mockStorage) GetSession(id any) (*identity.Session, error) {
+func (m *mockStorage) GetSession(ctx context.Context, id any) (*identity.Session, error) {
 	s, ok := m.sessions[fmt.Sprintf("%v", id)]
 	if !ok {
 		return nil, fmt.Errorf("not found")
 	}
 	return s, nil
 }
-func (m *mockStorage) GetSessionByRefreshToken(token string) (*identity.Session, error) {
+func (m *mockStorage) GetSessionByRefreshToken(ctx context.Context, token string) (*identity.Session, error) {
 	for _, s := range m.sessions {
 		if s.RefreshToken == token {
 			return s, nil
@@ -34,18 +35,19 @@ func (m *mockStorage) GetSessionByRefreshToken(token string) (*identity.Session,
 	}
 	return nil, fmt.Errorf("not found")
 }
-func (m *mockStorage) DeleteSession(id any) error {
+func (m *mockStorage) DeleteSession(ctx context.Context, id any) error {
 	delete(m.sessions, fmt.Sprintf("%v", id))
 	return nil
 }
 
 func TestDatabaseStrategy(t *testing.T) {
+	ctx := context.Background()
 	storage := &mockStorage{sessions: make(map[string]*identity.Session)}
 	strategy := NewDatabaseStrategy(storage)
 	manager := NewManager(strategy)
 
 	// Test Create
-	sess, err := manager.Create("test-session", "test-user")
+	sess, err := manager.Create(ctx, "test-session", "test-user")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -57,7 +59,7 @@ func TestDatabaseStrategy(t *testing.T) {
 	}
 
 	// Test Validate
-	sess, err = manager.Validate(sess.ID)
+	sess, err = manager.Validate(ctx, sess.ID)
 	if err != nil {
 		t.Fatalf("failed to validate session: %v", err)
 	}
@@ -65,7 +67,7 @@ func TestDatabaseStrategy(t *testing.T) {
 	// Test Refresh (Rotation)
 	oldID := sess.ID
 	oldRT := sess.RefreshToken
-	newSess, err := manager.Refresh(oldRT)
+	newSess, err := manager.Refresh(ctx, oldRT)
 	if err != nil {
 		t.Fatalf("failed to refresh session: %v", err)
 	}
@@ -78,19 +80,20 @@ func TestDatabaseStrategy(t *testing.T) {
 	}
 
 	// Old session should be deleted
-	_, err = manager.Validate(oldID)
+	_, err = manager.Validate(ctx, oldID)
 	if err == nil {
 		t.Error("expected old session to be deleted after rotation")
 	}
 }
 
 func TestJWTStrategy(t *testing.T) {
+	ctx := context.Background()
 	secret := "my-secret-key"
 	strategy := NewHS256Strategy(secret, time.Hour)
 	manager := NewManager(strategy)
 
 	// Test Create
-	sess, err := manager.Create("test-session", "test-user")
+	sess, err := manager.Create(ctx, "test-session", "test-user")
 	if err != nil {
 		t.Fatalf("failed to create JWT session: %v", err)
 	}
@@ -99,7 +102,7 @@ func TestJWTStrategy(t *testing.T) {
 	}
 
 	// Test Refresh
-	newSess, err := manager.Refresh(sess.RefreshToken)
+	newSess, err := manager.Refresh(ctx, sess.RefreshToken)
 	if err != nil {
 		t.Fatalf("failed to refresh JWT: %v", err)
 	}
@@ -108,6 +111,7 @@ func TestJWTStrategy(t *testing.T) {
 	}
 }
 func TestJWTRSAStrategy(t *testing.T) {
+	ctx := context.Background()
 	// Generate RSA keys
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -124,13 +128,13 @@ func TestJWTRSAStrategy(t *testing.T) {
 	manager := NewManager(strategy)
 
 	// Test Create
-	sess, err := manager.Create("test-session", "test-user")
+	sess, err := manager.Create(ctx, "test-session", "test-user")
 	if err != nil {
 		t.Fatalf("failed to create RSA JWT: %v", err)
 	}
 
 	// Test Validate
-	validatedSess, err := manager.Validate(sess.ID)
+	validatedSess, err := manager.Validate(ctx, sess.ID)
 	if err != nil {
 		t.Fatalf("failed to validate RSA JWT: %v", err)
 	}

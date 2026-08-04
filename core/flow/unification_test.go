@@ -54,6 +54,7 @@ func TestUnification_ImplicitLinking(t *testing.T) {
 }
 
 func TestUnification_ExplicitLinking(t *testing.T) {
+	ctx := context.Background()
 	repo := &mockRepo{
 		identities: make(map[string]any),
 		creds:      make(map[string]*identity.Credential),
@@ -75,7 +76,7 @@ func TestUnification_ExplicitLinking(t *testing.T) {
 	}
 
 	// 3. Verify credential exists
-	cred, err := repo.GetCredentialByIdentifier("new-login", "password")
+	cred, err := repo.GetCredentialByIdentifier(ctx, "new-login", "password")
 	if err != nil || cred == nil {
 		t.Fatal("linked credential not found in repo")
 	}
@@ -85,6 +86,7 @@ func TestUnification_ExplicitLinking(t *testing.T) {
 }
 
 func TestUnification_LinkerLink(t *testing.T) {
+	ctx := context.Background()
 	repo := &mockRepo{
 		identities: make(map[string]any),
 		creds:      make(map[string]*identity.Credential),
@@ -108,7 +110,7 @@ func TestUnification_LinkerLink(t *testing.T) {
 	}
 
 	// Verify credential was created
-	cred, err := repo.GetCredentialByIdentifier("linked@example.com", "password")
+	cred, err := repo.GetCredentialByIdentifier(ctx, "linked@example.com", "password")
 	if err != nil || cred == nil {
 		t.Fatal("linked credential not found")
 	}

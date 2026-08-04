@@ -114,7 +114,7 @@ func (s *MemoryStore) Reset() {
 // --- IdentityStorage ---
 
 // CreateIdentity stores ident, which must expose a non-empty ID.
-func (s *MemoryStore) CreateIdentity(ident any) error {
+func (s *MemoryStore) CreateIdentity(ctx context.Context, ident any) error {
 	id, err := identityID(ident)
 	if err != nil {
 		return err
@@ -134,7 +134,7 @@ func (s *MemoryStore) CreateIdentity(ident any) error {
 //
 // The factory is accepted for parity with the storage contract; the stored
 // value is returned as-is, since an in-memory store has nothing to decode.
-func (s *MemoryStore) GetIdentity(_ func() any, id any) (any, error) {
+func (s *MemoryStore) GetIdentity(ctx context.Context, _ func() any, id any) (any, error) {
 	key := fmt.Sprintf("%v", id)
 
 	s.mu.RLock()
@@ -150,7 +150,7 @@ func (s *MemoryStore) GetIdentity(_ func() any, id any) (any, error) {
 //
 // Keys are Go struct field names, matched by reflection, exactly as the GORM
 // adapter and the flow strategies expect.
-func (s *MemoryStore) FindIdentity(_ func() any, query map[string]any) (any, error) {
+func (s *MemoryStore) FindIdentity(ctx context.Context, _ func() any, query map[string]any) (any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -166,7 +166,7 @@ func (s *MemoryStore) FindIdentity(_ func() any, query map[string]any) (any, err
 // zero or less returns every identity.
 //
 // Order is not specified, matching a store with no explicit sort.
-func (s *MemoryStore) ListIdentities(_ func() any, page, limit int) ([]any, error) {
+func (s *MemoryStore) ListIdentities(ctx context.Context, _ func() any, page, limit int) ([]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -191,7 +191,7 @@ func (s *MemoryStore) ListIdentities(_ func() any, page, limit int) ([]any, erro
 }
 
 // UpdateIdentity replaces the stored identity with the same ID.
-func (s *MemoryStore) UpdateIdentity(ident any) error {
+func (s *MemoryStore) UpdateIdentity(ctx context.Context, ident any) error {
 	id, err := identityID(ident)
 	if err != nil {
 		return err
@@ -208,7 +208,7 @@ func (s *MemoryStore) UpdateIdentity(ident any) error {
 }
 
 // DeleteIdentity removes the identity with the given ID.
-func (s *MemoryStore) DeleteIdentity(_ func() any, id any) error {
+func (s *MemoryStore) DeleteIdentity(ctx context.Context, _ func() any, id any) error {
 	key := fmt.Sprintf("%v", id)
 
 	s.mu.Lock()
@@ -224,7 +224,7 @@ func (s *MemoryStore) DeleteIdentity(_ func() any, id any) error {
 // --- CredentialStorage ---
 
 // CreateCredential stores cred, which must be an *identity.Credential.
-func (s *MemoryStore) CreateCredential(cred any) error {
+func (s *MemoryStore) CreateCredential(ctx context.Context, cred any) error {
 	c, ok := cred.(*identity.Credential)
 	if !ok {
 		return fmt.Errorf("kayantesting: credential is %T, want *identity.Credential", cred)
@@ -240,7 +240,7 @@ func (s *MemoryStore) CreateCredential(cred any) error {
 }
 
 // GetCredentialByIdentifier returns the credential for an identifier and method.
-func (s *MemoryStore) GetCredentialByIdentifier(identifier, method string) (*identity.Credential, error) {
+func (s *MemoryStore) GetCredentialByIdentifier(ctx context.Context, identifier, method string) (*identity.Credential, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -272,7 +272,7 @@ func (s *MemoryStore) UpdateCredentialSecret(_ context.Context, identityID, meth
 // --- SessionStorage ---
 
 // CreateSession stores a session and indexes it by refresh token.
-func (s *MemoryStore) CreateSession(sess *identity.Session) error {
+func (s *MemoryStore) CreateSession(ctx context.Context, sess *identity.Session) error {
 	if sess == nil {
 		return errors.New("kayantesting: nil session")
 	}
@@ -288,7 +288,7 @@ func (s *MemoryStore) CreateSession(sess *identity.Session) error {
 }
 
 // GetSession returns the session with the given ID.
-func (s *MemoryStore) GetSession(id any) (*identity.Session, error) {
+func (s *MemoryStore) GetSession(ctx context.Context, id any) (*identity.Session, error) {
 	key := fmt.Sprintf("%v", id)
 
 	s.mu.RLock()
@@ -301,7 +301,7 @@ func (s *MemoryStore) GetSession(id any) (*identity.Session, error) {
 }
 
 // GetSessionByRefreshToken returns the session holding the given refresh token.
-func (s *MemoryStore) GetSessionByRefreshToken(token string) (*identity.Session, error) {
+func (s *MemoryStore) GetSessionByRefreshToken(ctx context.Context, token string) (*identity.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -312,7 +312,7 @@ func (s *MemoryStore) GetSessionByRefreshToken(token string) (*identity.Session,
 }
 
 // DeleteSession removes a session and its refresh-token index entry.
-func (s *MemoryStore) DeleteSession(id any) error {
+func (s *MemoryStore) DeleteSession(ctx context.Context, id any) error {
 	key := fmt.Sprintf("%v", id)
 
 	s.mu.Lock()

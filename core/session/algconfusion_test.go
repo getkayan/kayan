@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -108,6 +109,7 @@ func forgedTokens(t *testing.T, key *rsa.PrivateKey) map[string]string {
 // TestAlgorithmConfusionRejectedOnEveryPath drives the corpus through every
 // method that parses a token. A gap on any one of them is exploitable.
 func TestAlgorithmConfusionRejectedOnEveryPath(t *testing.T) {
+	ctx := context.Background()
 	strategy, key := newRSAStrategy(t)
 	corpus := forgedTokens(t, key)
 
@@ -123,19 +125,19 @@ func TestAlgorithmConfusionRejectedOnEveryPath(t *testing.T) {
 	for name, token := range corpus {
 		t.Run(name, func(t *testing.T) {
 			t.Run("Validate", func(t *testing.T) {
-				if _, err := strategy.Validate(token); err == nil {
+				if _, err := strategy.Validate(ctx, token); err == nil {
 					t.Fatal("forged token accepted")
 				}
 			})
 
 			t.Run("Refresh", func(t *testing.T) {
-				if _, err := strategy.Refresh(token); err == nil {
+				if _, err := strategy.Refresh(ctx, token); err == nil {
 					t.Fatal("forged token accepted")
 				}
 			})
 
 			t.Run("Delete", func(t *testing.T) {
-				err := revoking.Delete(token)
+				err := revoking.Delete(ctx, token)
 				if err == nil {
 					t.Fatal("forged token accepted: an attacker could revoke any session")
 				}
@@ -152,6 +154,7 @@ func TestAlgorithmConfusionRejectedOnEveryPath(t *testing.T) {
 
 // TestGenuineTokenStillWorks guards against the fix rejecting everything.
 func TestGenuineTokenStillWorks(t *testing.T) {
+	ctx := context.Background()
 	strategy, key := newRSAStrategy(t)
 	revoking := NewJWTStrategy(JWTConfig{
 		SigningMethod: jwt.SigningMethodRS256,
@@ -160,18 +163,18 @@ func TestGenuineTokenStillWorks(t *testing.T) {
 		Expiry:        time.Hour,
 	}).WithRevocationStore(NewMemoryRevocationStore())
 
-	sess, err := revoking.Create("ignored", "user-1")
+	sess, err := revoking.Create(ctx, "ignored", "user-1")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if _, err := strategy.Validate(sess.ID); err != nil {
+	if _, err := strategy.Validate(ctx, sess.ID); err != nil {
 		t.Fatalf("a genuine token failed to validate: %v", err)
 	}
-	if err := revoking.Delete(sess.ID); err != nil {
+	if err := revoking.Delete(ctx, sess.ID); err != nil {
 		t.Fatalf("a genuine token failed to delete: %v", err)
 	}
-	if _, err := revoking.Validate(sess.ID); err == nil {
+	if _, err := revoking.Validate(ctx, sess.ID); err == nil {
 		t.Error("the session validated after being revoked")
 	}
 }
@@ -179,6 +182,7 @@ func TestGenuineTokenStillWorks(t *testing.T) {
 // TestHMACStrategyRejectsAsymmetricTokens covers the mirror case: a strategy
 // configured for HS256 must not accept an RS256 token.
 func TestHMACStrategyRejectsAsymmetricTokens(t *testing.T) {
+	ctx := context.Background()
 	strategy := NewHS256Strategy("test-secret-not-for-production", time.Hour)
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -197,7 +201,7 @@ func TestHMACStrategyRejectsAsymmetricTokens(t *testing.T) {
 		t.Fatalf("sign: %v", err)
 	}
 
-	if _, err := strategy.Validate(raw); err == nil {
+	if _, err := strategy.Validate(ctx, raw); err == nil {
 		t.Fatal("an RS256 token was accepted by an HS256 strategy")
 	}
 }

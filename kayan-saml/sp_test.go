@@ -65,28 +65,28 @@ func newMockIdentityRepo() *mockIdentityRepo {
 	}
 }
 
-func (m *mockIdentityRepo) GetIdentity(factory func() any, id any) (any, error) {
+func (m *mockIdentityRepo) GetIdentity(ctx context.Context, factory func() any, id any) (any, error) {
 	return nil, nil
 }
-func (m *mockIdentityRepo) CreateIdentity(identity any) error {
+func (m *mockIdentityRepo) CreateIdentity(ctx context.Context, identity any) error {
 	return nil
 }
-func (m *mockIdentityRepo) UpdateIdentity(identity any) error {
+func (m *mockIdentityRepo) UpdateIdentity(ctx context.Context, identity any) error {
 	return nil
 }
-func (m *mockIdentityRepo) DeleteIdentity(factory func() any, id any) error {
+func (m *mockIdentityRepo) DeleteIdentity(ctx context.Context, factory func() any, id any) error {
 	return nil
 }
-func (m *mockIdentityRepo) CreateCredential(cred any) error {
+func (m *mockIdentityRepo) CreateCredential(ctx context.Context, cred any) error {
 	return nil
 }
-func (m *mockIdentityRepo) FindIdentity(factory func() any, query map[string]any) (any, error) {
+func (m *mockIdentityRepo) FindIdentity(ctx context.Context, factory func() any, query map[string]any) (any, error) {
 	return nil, nil
 }
-func (m *mockIdentityRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
+func (m *mockIdentityRepo) ListIdentities(ctx context.Context, factory func() any, page, limit int) ([]any, error) {
 	return nil, nil
 }
-func (m *mockIdentityRepo) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error) {
+func (m *mockIdentityRepo) GetCredentialByIdentifier(ctx context.Context, identifier string, method string) (*identity.Credential, error) {
 	return nil, fmt.Errorf("credential not found") // domain.ErrCredentialNotFound invalid
 }
 func (m *mockIdentityRepo) UpdateCredentialSecret(ctx context.Context, identityID, method, secret string) error {

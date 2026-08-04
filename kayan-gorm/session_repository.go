@@ -1,6 +1,7 @@
 package gormstore
 
 import (
+	"context"
 	"github.com/getkayan/kayan/core/identity"
 	"gorm.io/gorm"
 )
@@ -15,11 +16,11 @@ func NewSessionRepository(db *gorm.DB) *SessionRepository {
 	return &SessionRepository{db: db}
 }
 
-func (r *SessionRepository) CreateSession(s *identity.Session) error {
+func (r *SessionRepository) CreateSession(ctx context.Context, s *identity.Session) error {
 	return r.db.Create(s).Error
 }
 
-func (r *SessionRepository) GetSession(id any) (*identity.Session, error) {
+func (r *SessionRepository) GetSession(ctx context.Context, id any) (*identity.Session, error) {
 	var s identity.Session
 	if err := r.db.First(&s, "id = ?", id).Error; err != nil {
 		return nil, err
@@ -27,7 +28,7 @@ func (r *SessionRepository) GetSession(id any) (*identity.Session, error) {
 	return &s, nil
 }
 
-func (r *SessionRepository) GetSessionByRefreshToken(token string) (*identity.Session, error) {
+func (r *SessionRepository) GetSessionByRefreshToken(ctx context.Context, token string) (*identity.Session, error) {
 	var s identity.Session
 	if err := r.db.Where("refresh_token = ?", token).First(&s).Error; err != nil {
 		return nil, err
@@ -35,6 +36,6 @@ func (r *SessionRepository) GetSessionByRefreshToken(token string) (*identity.Se
 	return &s, nil
 }
 
-func (r *SessionRepository) DeleteSession(id any) error {
+func (r *SessionRepository) DeleteSession(ctx context.Context, id any) error {
 	return r.db.Delete(&identity.Session{}, "id = ?", id).Error
 }

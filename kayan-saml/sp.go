@@ -902,9 +902,9 @@ func (sp *ServiceProvider) reconcileIdentity(ctx context.Context, user *SAMLUser
 	}
 
 	// Check for existing credential
-	cred, err := sp.identityRepo.GetCredentialByIdentifier(identifier, "saml")
+	cred, err := sp.identityRepo.GetCredentialByIdentifier(ctx, identifier, "saml")
 	if err == nil {
-		return sp.identityRepo.GetIdentity(sp.factory, cred.IdentityID)
+		return sp.identityRepo.GetIdentity(ctx, sp.factory, cred.IdentityID)
 	}
 
 	// Try custom factory
@@ -921,7 +921,7 @@ func (sp *ServiceProvider) reconcileIdentity(ctx context.Context, user *SAMLUser
 		ts.SetTraits(traits)
 	}
 
-	return ident, sp.identityRepo.CreateIdentity(ident)
+	return ident, sp.identityRepo.CreateIdentity(ctx, ident)
 }
 
 // GetMetadata returns this SP's metadata XML.

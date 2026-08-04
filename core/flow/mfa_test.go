@@ -11,6 +11,7 @@ import (
 )
 
 func TestMFAFlow(t *testing.T) {
+	ctx := context.Background()
 	// 1. Setup
 	repo := &mockRepo{
 		identities: make(map[string]any),
@@ -41,7 +42,7 @@ func TestMFAFlow(t *testing.T) {
 	secret := "JBSWY3DPEHPK3PXP"
 	ident.MFAEnabled = true
 	ident.MFASecret = secret
-	repo.UpdateIdentity(ident)
+	repo.UpdateIdentity(ctx, ident)
 
 	// 4. Attempt Login - Should expect MFA Error
 	res, err := logMgr.Authenticate(context.Background(), "password", "mfa@example.com", password)

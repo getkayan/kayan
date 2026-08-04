@@ -31,30 +31,31 @@ func TestMemoryRevocationStore_Basic(t *testing.T) {
 }
 
 func TestJWTStrategy_Revocation(t *testing.T) {
+	ctx := context.Background()
 	secret := "test-secret"
 	strategy := NewHS256Strategy(secret, 1*time.Hour)
 	store := NewMemoryRevocationStore()
 	strategy.WithRevocationStore(store)
 
-	sess, err := strategy.Create("sess-1", "user-1")
+	sess, err := strategy.Create(ctx, "sess-1", "user-1")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
 	// Validate should succeed
-	_, err = strategy.Validate(sess.ID)
+	_, err = strategy.Validate(ctx, sess.ID)
 	if err != nil {
 		t.Fatalf("Validate failed: %v", err)
 	}
 
 	// Revoke
-	err = strategy.Delete(sess.ID)
+	err = strategy.Delete(ctx, sess.ID)
 	if err != nil {
 		t.Fatalf("Delete (revoke) failed: %v", err)
 	}
 
 	// Validate should now fail
-	_, err = strategy.Validate(sess.ID)
+	_, err = strategy.Validate(ctx, sess.ID)
 	if err == nil || err.Error() != "session revoked" {
 		t.Fatalf("expected session revoked error, got %v", err)
 	}

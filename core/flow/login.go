@@ -139,7 +139,7 @@ func (m *LoginManager) FindIdentity(ctx context.Context, identifier string) (any
 	if m.factory == nil {
 		return nil, fmt.Errorf("login: factory not set")
 	}
-	return m.repo.FindIdentity(m.factory, map[string]any{"identifier": identifier})
+	return m.repo.FindIdentity(ctx, m.factory, map[string]any{"identifier": identifier})
 }
 
 // VerifyMFA checks the second factor (e.g. TOTP) for an identity.

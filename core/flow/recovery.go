@@ -71,7 +71,7 @@ func (m *RecoveryManager) Initiate(ctx context.Context, identifier string) (*dom
 	}
 
 	// 1. Find Credential (password type usually)
-	cred, err := m.repo.GetCredentialByIdentifier(identifier, "password")
+	cred, err := m.repo.GetCredentialByIdentifier(ctx, identifier, "password")
 	if err != nil {
 		// Security: Don't leak user existence.
 		return nil, fmt.Errorf("recovery: user not found or no password credential")

@@ -49,7 +49,7 @@ func (s *MagicLinkStrategy) Authenticate(ctx context.Context, identifier, secret
 
 	// 4. Find Identity
 	// We use the IdentityID from the token
-	ident, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, token.IdentityID)
+	ident, err := s.repo.GetIdentity(ctx, func() any { return &identity.Identity{} }, token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("magic_link: identity not found")
 	}
@@ -68,7 +68,7 @@ func (s *MagicLinkStrategy) Initiate(ctx context.Context, identifier string) (an
 	// or specifically "magic_link" if we enforce it.
 	// Usually magic link sends to the "email" associated with the account.
 	// If the user registered with password (email), we find that credential.
-	cred, err := s.repo.GetCredentialByIdentifier(identifier, "")
+	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
 	if err != nil {
 		return nil, fmt.Errorf("magic_link: user not found")
 	}

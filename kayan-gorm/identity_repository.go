@@ -17,11 +17,11 @@ func NewIdentityRepository(db *gorm.DB) *IdentityRepository {
 	return &IdentityRepository{db: db}
 }
 
-func (r *IdentityRepository) CreateIdentity(ident any) error {
+func (r *IdentityRepository) CreateIdentity(ctx context.Context, ident any) error {
 	return r.db.Create(ident).Error
 }
 
-func (r *IdentityRepository) CreateCredential(cred any) error {
+func (r *IdentityRepository) CreateCredential(ctx context.Context, cred any) error {
 	// Convert to gormCredential if it's identity.Credential
 	if c, ok := cred.(*identity.Credential); ok {
 		gc := fromCoreCredential(c)
@@ -30,7 +30,7 @@ func (r *IdentityRepository) CreateCredential(cred any) error {
 	return r.db.Create(cred).Error
 }
 
-func (r *IdentityRepository) GetIdentity(factory func() any, id any) (any, error) {
+func (r *IdentityRepository) GetIdentity(ctx context.Context, factory func() any, id any) (any, error) {
 	ident := factory()
 	if err := r.db.First(ident, "id = ?", id).Error; err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func (r *IdentityRepository) GetIdentity(factory func() any, id any) (any, error
 	return ident, nil
 }
 
-func (r *IdentityRepository) FindIdentity(factory func() any, query map[string]any) (any, error) {
+func (r *IdentityRepository) FindIdentity(ctx context.Context, factory func() any, query map[string]any) (any, error) {
 	ident := factory()
 	if err := r.db.Where(query).First(ident).Error; err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func (r *IdentityRepository) FindIdentity(factory func() any, query map[string]a
 	return ident, nil
 }
 
-func (r *IdentityRepository) ListIdentities(factory func() any, page, limit int) ([]any, error) {
+func (r *IdentityRepository) ListIdentities(ctx context.Context, factory func() any, page, limit int) ([]any, error) {
 	// Create a slice to hold results
 	results := make([]any, 0)
 	offset := (page - 1) * limit
@@ -72,7 +72,7 @@ func (r *IdentityRepository) ListIdentities(factory func() any, page, limit int)
 	return results, nil
 }
 
-func (r *IdentityRepository) UpdateIdentity(ident any) error {
+func (r *IdentityRepository) UpdateIdentity(ctx context.Context, ident any) error {
 	// Convert to gormIdentity if it's identity.Identity
 	if i, ok := ident.(*identity.Identity); ok {
 		gi := fromCoreIdentity(i)
@@ -82,11 +82,11 @@ func (r *IdentityRepository) UpdateIdentity(ident any) error {
 	return r.db.Save(ident).Error
 }
 
-func (r *IdentityRepository) DeleteIdentity(factory func() any, id any) error {
+func (r *IdentityRepository) DeleteIdentity(ctx context.Context, factory func() any, id any) error {
 	return r.db.Delete(factory(), "id = ?", id).Error
 }
 
-func (r *IdentityRepository) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error) {
+func (r *IdentityRepository) GetCredentialByIdentifier(ctx context.Context, identifier string, method string) (*identity.Credential, error) {
 	var cred gormCredential
 	query := r.db.Where("identifier = ?", identifier)
 	if method != "" {

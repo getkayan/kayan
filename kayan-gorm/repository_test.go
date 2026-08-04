@@ -27,10 +27,10 @@ func TestRepository_AuditEventLifecycle(t *testing.T) {
 	}
 	// Save event
 	event := &audit.AuditEvent{
-		Type:    audit.EventLoginSuccess,
-		ActorID: "actor-1",
-		Status:  "success",
-		Message: "ok",
+		Type:      audit.EventLoginSuccess,
+		ActorID:   "actor-1",
+		Status:    "success",
+		Message:   "ok",
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 	}
 	if err := repo.SaveEvent(context.Background(), event); err != nil {

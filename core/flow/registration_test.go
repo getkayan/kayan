@@ -19,7 +19,7 @@ type mockRepo struct {
 	creds      map[string]*identity.Credential
 }
 
-func (m *mockRepo) CreateIdentity(id any) error {
+func (m *mockRepo) CreateIdentity(ctx context.Context, id any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if fi, ok := id.(FlowIdentity); ok {
@@ -33,13 +33,13 @@ func (m *mockRepo) CreateIdentity(id any) error {
 	return nil
 }
 
-func (m *mockRepo) GetIdentity(factory func() any, id any) (any, error) {
+func (m *mockRepo) GetIdentity(ctx context.Context, factory func() any, id any) (any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.identities[fmt.Sprintf("%v", id)], nil
 }
 
-func (m *mockRepo) FindIdentity(factory func() any, query map[string]any) (any, error) {
+func (m *mockRepo) FindIdentity(ctx context.Context, factory func() any, query map[string]any) (any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, ident := range m.identities {
@@ -62,7 +62,7 @@ func (m *mockRepo) FindIdentity(factory func() any, query map[string]any) (any, 
 	return nil, errors.New("not found")
 }
 
-func (m *mockRepo) GetCredentialByIdentifier(identifier string, method string) (*identity.Credential, error) {
+func (m *mockRepo) GetCredentialByIdentifier(ctx context.Context, identifier string, method string) (*identity.Credential, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if method == "" {
@@ -88,7 +88,7 @@ func (m *mockRepo) UpdateCredentialSecret(ctx context.Context, identityID, metho
 	return errors.New("credential not found")
 }
 
-func (m *mockRepo) UpdateIdentity(ident any) error {
+func (m *mockRepo) UpdateIdentity(ctx context.Context, ident any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if fi, ok := ident.(FlowIdentity); ok {
@@ -102,7 +102,7 @@ func (m *mockRepo) UpdateIdentity(ident any) error {
 	return nil
 }
 
-func (m *mockRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
+func (m *mockRepo) ListIdentities(ctx context.Context, factory func() any, page, limit int) ([]any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]any, 0, len(m.identities))
@@ -112,7 +112,7 @@ func (m *mockRepo) ListIdentities(factory func() any, page, limit int) ([]any, e
 	return result, nil
 }
 
-func (m *mockRepo) DeleteIdentity(factory func() any, id any) error {
+func (m *mockRepo) DeleteIdentity(ctx context.Context, factory func() any, id any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := fmt.Sprintf("%v", id)
@@ -120,7 +120,7 @@ func (m *mockRepo) DeleteIdentity(factory func() any, id any) error {
 	return nil
 }
 
-func (m *mockRepo) CreateCredential(cred any) error {
+func (m *mockRepo) CreateCredential(ctx context.Context, cred any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if c, ok := cred.(*identity.Credential); ok {
