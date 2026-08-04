@@ -14,7 +14,7 @@ import (
 //
 // Keys are generated per test rather than checked in, so a fixture can never
 // become a real credential someone reuses.
-func testKeyPair(t *testing.T) (*rsa.PrivateKey, *x509.Certificate) {
+func testKeyPair(t testing.TB) (*rsa.PrivateKey, *x509.Certificate) {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -23,11 +23,11 @@ func testKeyPair(t *testing.T) (*rsa.PrivateKey, *x509.Certificate) {
 	}
 
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "kayan-saml-test"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "kayan-saml-test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 	}
@@ -44,7 +44,7 @@ func testKeyPair(t *testing.T) (*rsa.PrivateKey, *x509.Certificate) {
 }
 
 // testSigner returns a signer and the certificate that verifies it.
-func testSigner(t *testing.T) (Signer, *x509.Certificate) {
+func testSigner(t testing.TB) (Signer, *x509.Certificate) {
 	t.Helper()
 
 	key, cert := testKeyPair(t)

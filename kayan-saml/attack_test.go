@@ -34,7 +34,7 @@ type attackHarness struct {
 	context context.Context
 }
 
-func newAttackHarness(t *testing.T) *attackHarness {
+func newAttackHarness(t testing.TB) *attackHarness {
 	t.Helper()
 
 	signer, cert := testSigner(t)
@@ -59,7 +59,7 @@ func newAttackHarness(t *testing.T) *attackHarness {
 }
 
 // newSession records a pending authentication request.
-func (h *attackHarness) newSession(t *testing.T) {
+func (h *attackHarness) newSession(t testing.TB) {
 	t.Helper()
 	if err := h.store.Save(h.context, &Session{
 		ID:        testSessionID,
@@ -114,7 +114,7 @@ func validResponse() Response {
 	}
 }
 
-func (h *attackHarness) sign(t *testing.T, resp Response) string {
+func (h *attackHarness) sign(t testing.TB, resp Response) string {
 	t.Helper()
 
 	raw, err := xml.Marshal(resp)
@@ -128,7 +128,7 @@ func (h *attackHarness) sign(t *testing.T, resp Response) string {
 	return base64.StdEncoding.EncodeToString(signed)
 }
 
-func encode(t *testing.T, resp Response) string {
+func encode(t testing.TB, resp Response) string {
 	t.Helper()
 	raw, err := xml.Marshal(resp)
 	if err != nil {

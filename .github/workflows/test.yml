@@ -66,3 +66,36 @@ jobs:
   # against zero build-tagged files, so it reported success while executing
   # nothing. It returns with the migration tests in Phase 5, which need a real
   # Postgres service to verify the migration chain across dialects.
+
+  fuzz:
+    name: Fuzz (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [kayan-oidc-provider/oauth2, kayan-saml, kayan-scim]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # A short budget per target on every push. Anything in testdata/fuzz is a
+      # previously-found crasher and runs as a regression test regardless.
+      - name: Run fuzz targets
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          targets="$(grep -rho 'func Fuzz[A-Za-z0-9_]*' . --include='*_test.go' | sed 's/func //' | sort -u)"
+          if [ -z "${targets}" ]; then
+            echo "no fuzz targets in ${PWD}"
+            exit 0
+          fi
+          for target in ${targets}; do
+            echo "::group::${target}"
+            go test -run "^$" -fuzz "^${target}$" -fuzztime 30s ./... || exit 1
+            echo "::endgroup::"
+          done
