@@ -18,20 +18,23 @@
 >
 > Known gaps:
 >
-> - **Multi-tenancy** (`core/tenant`) — tenant context is resolved but not
->   enforced at the storage layer. Isolation is advisory, not guaranteed. Do not
->   rely on it to separate customers.
 > - **ReBAC** (`core/rebac`) — `ListDirectObjects` returns direct grants only and
 >   does not walk the relation graph, so it can omit access that `Check` allows.
 >   `Check` is the authoritative answer.
+> - **RBAC** (`core/rbac`) — no role hierarchy and no wildcard permissions;
+>   `users:*` does not match `users:delete`. Role definitions are held per
+>   process, so every replica must register the same ones at startup.
+> - **Migrations** — `AutoMigrate` only. No versioned migrations, so schema
+>   changes cannot be rolled back or replayed.
 > - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code`,
 >   `refresh_token`, and `client_credentials`. No device code, token exchange,
 >   DPoP, `private_key_jwt`, or dynamic client registration.
 > - **SCIM** (`kayan-scim`) — no `/Schemas`, `/ResourceTypes`,
 >   `/ServiceProviderConfig`, or bulk operations. Value filters
 >   (`emails[type eq "work"]`) work in PATCH but not in list queries.
-> - **Persistence** — MFA enrollments, device trust, and SSO sessions are
->   in-memory only and are lost on restart.
+> - **SSO sessions** (`core/session`) — the cross-application session store is
+>   in-memory only, so single sign-on is single-process. MFA enrollments and
+>   device trust are persisted by `kayan-gorm`.
 
 Kayan is a headless, non-generic, extensible IAM library for Go. It gives you authentication, session management, authorization, federation, provisioning, audit, compliance, and observability primitives without forcing an HTTP framework, a UI, or a fixed user schema.
 
