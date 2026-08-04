@@ -99,14 +99,18 @@ type ClientStore interface {
 
 // AuthCode represents a temporary authorization code.
 type AuthCode struct {
-	Code                string    `json:"code"`
-	ClientID            string    `json:"client_id"`
-	IdentityID          string    `json:"identity_id"`
-	RedirectURI         string    `json:"redirect_uri"`
-	Scopes              []string  `json:"scopes"`
-	CodeChallenge       string    `json:"code_challenge"`
-	CodeChallengeMethod string    `json:"code_challenge_method"`
-	ExpiresAt           time.Time `json:"expires_at"`
+	Code                string   `json:"code"`
+	ClientID            string   `json:"client_id"`
+	IdentityID          string   `json:"identity_id"`
+	RedirectURI         string   `json:"redirect_uri"`
+	Scopes              []string `json:"scopes"`
+	CodeChallenge       string   `json:"code_challenge"`
+	CodeChallengeMethod string   `json:"code_challenge_method"`
+	// Nonce binds the ID token to this authorization request, so a token
+	// captured from one sign-in cannot be replayed into another (OIDC Core
+	// section 15.5.2).
+	Nonce     string    `json:"nonce,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // AuthCodeStore defines the interface for managing authorization codes.

@@ -135,7 +135,7 @@ const (
 	testRedirectURI  = "https://app.example.test/callback"
 )
 
-func newSecureProvider(t *testing.T, opts ...ProviderOption) (*Provider, *securityStore) {
+func newSecureProvider(t testing.TB, opts ...ProviderOption) (*Provider, *securityStore) {
 	t.Helper()
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

@@ -53,6 +53,7 @@ import (
 
 	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/domain"
+	"github.com/getkayan/kayan/core/keys"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -67,11 +68,21 @@ type Provider struct {
 	keyID             string
 	revocationStore   RevocationStore
 
+	keyProvider  keys.Provider
 	hasher       domain.Hasher
 	tokens       domain.TokenGenerator
 	clock        domain.Clock
 	requirePKCE  bool
 	allowPlainCC bool
+}
+
+// WithKeyProvider supplies the signing keys used for tokens and published in
+// JWKS.
+//
+// Without it, the provider signs with the key passed to NewProvider and cannot
+// publish a key set — there is no way to enumerate a bare key.
+func WithKeyProvider(kp keys.Provider) ProviderOption {
+	return func(p *Provider) { p.keyProvider = kp }
 }
 
 // WithClientSecretHasher sets the hasher used to verify client secrets.
@@ -233,6 +244,7 @@ func (p *Provider) GenerateAuthCode(ctx context.Context, clientID, identityID, r
 const (
 	GrantAuthorizationCode = "authorization_code"
 	GrantRefreshToken      = "refresh_token"
+	GrantClientCredentials = "client_credentials"
 )
 
 // authCodeTTL bounds how long an authorization code is valid. RFC 6749
@@ -749,4 +761,88 @@ func (p *Provider) Revoke(ctx context.Context, tokenString string) error {
 
 	p.logAudit(ctx, "oauth2.revoke.success", "", "", "success", "token revoked")
 	return nil
+}
+
+// GenerateAuthCodeFor issues an authorization code for a validated request.
+//
+// Prefer it over [Provider.GenerateAuthCode]: the request has already been
+// checked by [Provider.ParseAuthorizeRequest], and the nonce is carried
+// through to the ID token.
+func (p *Provider) GenerateAuthCodeFor(ctx context.Context, req *AuthorizeRequest, identityID string) (string, error) {
+	if req == nil {
+		return "", ErrInvalidRequest.WithDescription("no authorization request")
+	}
+
+	code, err := p.tokens()
+	if err != nil {
+		return "", ErrServerError.WithCause(err)
+	}
+
+	authCode := &AuthCode{
+		Code:                code,
+		ClientID:            req.ClientID,
+		IdentityID:          identityID,
+		RedirectURI:         req.RedirectURI,
+		Scopes:              req.Scopes,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		Nonce:               req.Nonce,
+		ExpiresAt:           p.clock.Now().Add(authCodeTTL),
+	}
+	if err := p.authCodeStore.SaveAuthCode(ctx, authCode); err != nil {
+		return "", ErrServerError.WithCause(err)
+	}
+	return code, nil
+}
+
+// ClientCredentials issues an access token for the client itself.
+//
+// The token authenticates the client, not a user, so it carries no subject
+// identity and no refresh token: the client can always request another by
+// re-authenticating (RFC 6749 section 4.4.3).
+func (p *Provider) ClientCredentials(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
+	if req == nil || req.Client == nil {
+		return nil, ErrInvalidRequest.WithDescription("no token request")
+	}
+	if req.GrantType != GrantClientCredentials {
+		return nil, ErrUnsupportedGrantType.WithDescription("not a client credentials request")
+	}
+
+	scopes := req.Scopes
+	if len(scopes) == 0 {
+		scopes = req.Client.Scopes
+	}
+
+	// The subject is the client, per RFC 9068 section 5.
+	accessToken, err := p.GenerateAccessToken(req.Client.ID, req.Client.ID, scopes)
+	if err != nil {
+		return nil, ErrServerError.WithCause(err)
+	}
+
+	p.logAudit(ctx, "oauth2.client_credentials.success", req.Client.ID, req.Client.ID, "success", "")
+
+	return &TokenResponse{
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+		ExpiresIn:   int64(accessTokenTTL.Seconds()),
+		Sub:         req.Client.ID,
+	}, nil
+}
+
+// JWKS returns the key set to publish at the JWKS endpoint.
+//
+// It requires a key provider (WithKeyProvider). The caller serves the result;
+// Kayan does not write HTTP responses.
+//
+//	set, err := provider.JWKS(ctx)
+//	json.NewEncoder(w).Encode(set)
+func (p *Provider) JWKS(ctx context.Context) (keys.JWKS, error) {
+	if p.keyProvider == nil {
+		return keys.JWKS{}, ErrServerError.WithDescription("no key provider configured")
+	}
+	set, err := keys.BuildJWKS(ctx, p.keyProvider)
+	if err != nil {
+		return keys.JWKS{}, ErrServerError.WithCause(err)
+	}
+	return set, nil
 }
