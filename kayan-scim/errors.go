@@ -10,6 +10,14 @@ var (
 	ErrInvalidFilter = errors.New("scim: invalid filter")
 	ErrUnsupported   = errors.New("scim: operation not supported")
 	ErrConflict      = errors.New("scim: resource already exists")
+
+	// ErrFilterUnsupported reports that a storage implementation cannot
+	// evaluate the supplied filter.
+	//
+	// Implementations must return this rather than ignoring the filter and
+	// returning every resource: a caller that filtered a list expects a subset,
+	// and silently widening it discloses resources they did not ask for.
+	ErrFilterUnsupported = errors.New("scim: filtering is not supported by this storage implementation")
 )
 
 // ErrorResponse represents a SCIM error response (RFC 7644 Section 3.12)

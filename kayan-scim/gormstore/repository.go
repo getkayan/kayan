@@ -1,10 +1,15 @@
+// Package gormstore persists SCIM resources with GORM.
+//
+// It is one implementation of [scim.ScimStorage]. Any other backend — Mongo,
+// a filesystem, a bespoke service — satisfies the same interface and drops in
+// without changes elsewhere.
 package gormstore
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/getkayan/kayan/core/scim"
+	scim "github.com/getkayan/kayan/kayan-scim"
 	"gorm.io/gorm"
 )
 
@@ -73,7 +78,13 @@ func (r *ScimRepository) DeleteScimUser(ctx context.Context, id string) error {
 }
 
 func (r *ScimRepository) ListScimUsers(ctx context.Context, filter string, startIndex, count int) ([]*scim.User, int, error) {
-	// Basic implementation without complex filter parsing
+	// Filtering is not implemented yet. Returning every user for a filtered
+	// request would silently disclose resources the caller did not ask for, so
+	// the request is refused instead.
+	if filter != "" {
+		return nil, 0, scim.ErrFilterUnsupported
+	}
+
 	var total int64
 	m := r.mapper.ToModelPlaceholder()
 	r.db.WithContext(ctx).Model(m).Count(&total)
@@ -132,6 +143,11 @@ func (r *ScimRepository) DeleteScimGroup(ctx context.Context, id string) error {
 }
 
 func (r *ScimRepository) ListScimGroups(ctx context.Context, filter string, startIndex, count int) ([]*scim.Group, int, error) {
+	// See ListScimUsers: an unimplemented filter must fail, not over-return.
+	if filter != "" {
+		return nil, 0, scim.ErrFilterUnsupported
+	}
+
 	var total int64
 	r.db.WithContext(ctx).Model(&gormGroup{}).Count(&total)
 
@@ -157,4 +173,20 @@ func (r *ScimRepository) getIdentityModel(ctx context.Context, id string) (any, 
 		return nil, err
 	}
 	return model, nil
+}
+
+// gormGroup is the persisted form of a SCIM group.
+type gormGroup struct {
+	ID          string `gorm:"primaryKey"`
+	DisplayName string `gorm:"uniqueIndex"`
+}
+
+func (gormGroup) TableName() string { return "scim_groups" }
+
+// AutoMigrate creates the tables this repository needs.
+//
+// For development only. Production deployments should run versioned
+// migrations; see the module README.
+func (r *ScimRepository) AutoMigrate() error {
+	return r.db.AutoMigrate(&gormGroup{})
 }

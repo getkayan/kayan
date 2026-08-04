@@ -20,6 +20,30 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: gomod
+    directory: /kayan-oidc-provider
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /kayan-saml
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /kayan-scim
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /kayan-testing
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
     directory: /cmd/kayan-cli
     schedule:
       interval: weekly

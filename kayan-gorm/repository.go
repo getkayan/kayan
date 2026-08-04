@@ -58,10 +58,14 @@ import (
 
 // Repository is a facade that combines all sub-repositories.
 // It implements domain.Storage by embedding specialized repositories.
+//
+// Protocol storage lives with its protocol, not here: OAuth 2.0 in
+// kayan-oidc-provider/gormstore and SCIM in kayan-scim/gormstore. A
+// deployment that only needs password authentication therefore carries no
+// OAuth 2.0 or SCIM code at all.
 type Repository struct {
 	*IdentityRepository
 	*SessionRepository
-	*OAuth2Repository
 	db *gorm.DB
 }
 
@@ -70,7 +74,6 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{
 		IdentityRepository: NewIdentityRepository(db),
 		SessionRepository:  NewSessionRepository(db),
-		OAuth2Repository:   NewOAuth2Repository(db),
 		db:                 db,
 	}
 }
@@ -92,13 +95,9 @@ func (r *Repository) AutoMigrate(models ...any) error {
 		&gormIdentity{},
 		&gormCredential{},
 		&gormSession{},
-		&gormClient{},
-		&gormAuthCode{},
-		&gormRefreshToken{},
 		&gormAuditEvent{},
 		&gormAuthToken{},
 		&gormRelationTuple{},
-		&gormGroup{},
 	}
 	allModels := append(baseModels, models...)
 	return r.db.AutoMigrate(allModels...)

@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/getkayan/kayan/core/oauth2"
+	"github.com/getkayan/kayan/kayan-oidc-provider/oauth2"
 	"github.com/golang-jwt/jwt/v5"
 )
 

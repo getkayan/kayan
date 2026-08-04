@@ -34,6 +34,22 @@ jobs:
         working-directory: kayan-redis
         run: go test -race ./...
 
+      - name: Run kayan-oidc-provider Tests
+        working-directory: kayan-oidc-provider
+        run: go test -race ./...
+
+      - name: Run kayan-saml Tests
+        working-directory: kayan-saml
+        run: go test -race ./...
+
+      - name: Run kayan-scim Tests
+        working-directory: kayan-scim
+        run: go test -race ./...
+
+      - name: Run kayan-testing Tests
+        working-directory: kayan-testing
+        run: go test -race ./...
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:

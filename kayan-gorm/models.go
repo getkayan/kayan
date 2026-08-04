@@ -6,7 +6,6 @@ import (
 	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/identity"
-	"github.com/getkayan/kayan/core/oauth2"
 )
 
 type gormAuditEvent struct {
@@ -39,13 +38,6 @@ type gormAuditEvent struct {
 	GeoLat     float64
 	GeoLong    float64
 }
-
-type gormGroup struct {
-	ID          string `gorm:"primaryKey"`
-	DisplayName string `gorm:"uniqueIndex"`
-}
-
-func (gormGroup) TableName() string { return "scim_groups" }
 
 func (gormAuditEvent) TableName() string { return "audit_events" }
 
@@ -261,126 +253,3 @@ type gormSession struct {
 }
 
 func (gormSession) TableName() string { return "sessions" }
-
-type gormClient struct {
-	ID                   string `gorm:"primaryKey"`
-	Secret               string
-	RedirectURIs         []string `gorm:"type:text;serializer:json"`
-	GrantTypes           []string `gorm:"type:text;serializer:json"`
-	Scopes               []string `gorm:"type:text;serializer:json"`
-	AppName              string
-	BackChannelLogoutURI string
-}
-
-func (gormClient) TableName() string { return "oauth2_clients" }
-
-func toCoreClient(gc *gormClient) *oauth2.Client {
-	if gc == nil {
-		return nil
-	}
-	return &oauth2.Client{
-		ID:                   gc.ID,
-		Secret:               gc.Secret,
-		RedirectURIs:         gc.RedirectURIs,
-		GrantTypes:           gc.GrantTypes,
-		Scopes:               gc.Scopes,
-		AppName:              gc.AppName,
-		BackChannelLogoutURI: gc.BackChannelLogoutURI,
-	}
-}
-
-func fromCoreClient(c *oauth2.Client) *gormClient {
-	if c == nil {
-		return nil
-	}
-	return &gormClient{
-		ID:                   c.ID,
-		Secret:               c.Secret,
-		RedirectURIs:         c.RedirectURIs,
-		GrantTypes:           c.GrantTypes,
-		Scopes:               c.Scopes,
-		AppName:              c.AppName,
-		BackChannelLogoutURI: c.BackChannelLogoutURI,
-	}
-}
-
-type gormAuthCode struct {
-	Code                string `gorm:"primaryKey"`
-	ClientID            string `gorm:"index"`
-	IdentityID          string `gorm:"index"`
-	RedirectURI         string
-	Scopes              []string `gorm:"type:text;serializer:json"`
-	CodeChallenge       string
-	CodeChallengeMethod string
-	ExpiresAt           time.Time `gorm:"index"`
-}
-
-func (gormAuthCode) TableName() string { return "oauth2_auth_codes" }
-
-func toCoreAuthCode(gc *gormAuthCode) *oauth2.AuthCode {
-	if gc == nil {
-		return nil
-	}
-	return &oauth2.AuthCode{
-		Code:                gc.Code,
-		ClientID:            gc.ClientID,
-		IdentityID:          gc.IdentityID,
-		RedirectURI:         gc.RedirectURI,
-		Scopes:              gc.Scopes,
-		CodeChallenge:       gc.CodeChallenge,
-		CodeChallengeMethod: gc.CodeChallengeMethod,
-		ExpiresAt:           gc.ExpiresAt,
-	}
-}
-
-func fromCoreAuthCode(c *oauth2.AuthCode) *gormAuthCode {
-	if c == nil {
-		return nil
-	}
-	return &gormAuthCode{
-		Code:                c.Code,
-		ClientID:            c.ClientID,
-		IdentityID:          c.IdentityID,
-		RedirectURI:         c.RedirectURI,
-		Scopes:              c.Scopes,
-		CodeChallenge:       c.CodeChallenge,
-		CodeChallengeMethod: c.CodeChallengeMethod,
-		ExpiresAt:           c.ExpiresAt,
-	}
-}
-
-type gormRefreshToken struct {
-	Token      string    `gorm:"primaryKey"`
-	ClientID   string    `gorm:"index"`
-	IdentityID string    `gorm:"index"`
-	Scopes     []string  `gorm:"type:text;serializer:json"`
-	ExpiresAt  time.Time `gorm:"index"`
-}
-
-func (gormRefreshToken) TableName() string { return "oauth2_refresh_tokens" }
-
-func toCoreRefreshToken(gr *gormRefreshToken) *oauth2.RefreshToken {
-	if gr == nil {
-		return nil
-	}
-	return &oauth2.RefreshToken{
-		Token:      gr.Token,
-		ClientID:   gr.ClientID,
-		IdentityID: gr.IdentityID,
-		Scopes:     gr.Scopes,
-		ExpiresAt:  gr.ExpiresAt,
-	}
-}
-
-func fromCoreRefreshToken(r *oauth2.RefreshToken) *gormRefreshToken {
-	if r == nil {
-		return nil
-	}
-	return &gormRefreshToken{
-		Token:      r.Token,
-		ClientID:   r.ClientID,
-		IdentityID: r.IdentityID,
-		Scopes:     r.Scopes,
-		ExpiresAt:  r.ExpiresAt,
-	}
-}
