@@ -13,18 +13,24 @@
 > [!WARNING]
 > **Pre-1.0. Not ready for production use.**
 >
-> Kayan is under active development toward a 1.0 release. Some subsystems are
-> incomplete, and the following have known security gaps that are being worked on:
+> Kayan is under active development toward a 1.0 release. The public API will
+> change without a deprecation cycle before then — see [VERSIONING.md](./VERSIONING.md).
 >
-> - **SAML** (`core/saml`) — assertion signatures are not verified and outgoing
->   assertions are not signed. Do not use for SSO against untrusted input.
-> - **OAuth 2.0** (`core/oauth2`) — client authentication and PKCE are currently
->   optional, and `redirect_uri` is not checked against a client allowlist.
-> - **Multi-tenancy** (`core/tenant`) — tenant context is resolved but not enforced
->   at the storage layer. Isolation is advisory, not guaranteed.
+> Known gaps:
 >
-> The public API will change without a deprecation cycle before 1.0. See
-> [VERSIONING.md](./VERSIONING.md).
+> - **Multi-tenancy** (`core/tenant`) — tenant context is resolved but not
+>   enforced at the storage layer. Isolation is advisory, not guaranteed. Do not
+>   rely on it to separate customers.
+> - **ReBAC** (`core/rebac`) — `ListDirectObjects` returns direct grants only and
+>   does not walk the relation graph, so it can omit access that `Check` allows.
+>   `Check` is the authoritative answer.
+> - **SCIM** (`kayan-scim`) — no PATCH support, and filtering returns an error
+>   rather than an unfiltered list. Provisioning from Okta or Entra ID will not
+>   work yet.
+> - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code` and
+>   `refresh_token` only. No `client_credentials`, device code, or DPoP.
+> - **Persistence** — MFA enrollments, device trust, and SSO sessions are
+>   in-memory only and are lost on restart.
 
 Kayan is a headless, non-generic, extensible IAM library for Go. It gives you authentication, session management, authorization, federation, provisioning, audit, compliance, and observability primitives without forcing an HTTP framework, a UI, or a fixed user schema.
 
