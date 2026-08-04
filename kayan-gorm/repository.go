@@ -1,4 +1,4 @@
-// Package kgorm provides a GORM-based storage adapter for Kayan IAM.
+// Package gormstore provides a GORM-based storage adapter for Kayan IAM.
 //
 // This package implements all core storage interfaces using GORM, supporting
 // PostgreSQL, MySQL, and SQLite databases. It provides a plug-and-play persistence
@@ -8,7 +8,7 @@
 //
 //   - Full domain.Storage interface implementation
 //   - Support for PostgreSQL, MySQL, and SQLite
-//   - Automatic schema migration
+//   - Versioned SQL migrations for PostgreSQL, MySQL, and SQLite
 //   - Identity repository with credential management
 //   - Session repository with refresh token support
 //   - OAuth2 repository for authorization server
@@ -26,17 +26,20 @@
 //	db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 //	repo := gormstore.NewRepository(db)
 //
-//	// Run migrations
-//	repo.AutoMigrate()
+//	// Development: create tables from the Go models.
+//	repo.AutoMigrateDev()
+//
+//	// Production: apply the versioned SQL with your own migration tool.
+//	files, _ := gormstore.Migrations(gormstore.DialectPostgres)
 //
 //	// Use with flow manager
 //	flow.NewManager(repo, ...)
 //
 // # Custom Models
 //
-// To extend the default models, pass them to AutoMigrate:
+// To extend the default models, pass them to AutoMigrateDev:
 //
-//	repo.AutoMigrate(&MyCustomModel{}, &AnotherModel{})
+//	repo.AutoMigrateDev(&MyCustomModel{}, &AnotherModel{})
 package gormstore
 
 import (
@@ -89,8 +92,16 @@ func init() {
 	Register("mysql", mysql.Open)
 }
 
-// AutoMigrate runs database migrations for all GORM models.
-func (r *Repository) AutoMigrate(models ...any) error {
+// AutoMigrateDev creates or updates tables from the Go models.
+//
+// For development and tests only. GORM's AutoMigrate cannot drop a column,
+// cannot transform existing rows, keeps no record of what it ran, and offers
+// no way back — a schema change that turns out to be wrong cannot be
+// reversed, and on a table holding accounts that is not recoverable.
+//
+// Production deployments should apply the versioned SQL from [Migrations]
+// with a real migration tool.
+func (r *Repository) AutoMigrateDev(models ...any) error {
 	baseModels := []any{
 		&gormIdentity{},
 		&gormCredential{},
@@ -207,7 +218,7 @@ func (r *Repository) Query(ctx context.Context, filter audit.Filter) ([]audit.Au
 	db := r.applyFilter(r.db.WithContext(ctx), filter)
 
 	if err := db.Find(&gormEvents).Error; err != nil {
-		return nil, fmt.Errorf("kgorm: failed to query audit events: %w", err)
+		return nil, fmt.Errorf("gormstore: failed to query audit events: %w", err)
 	}
 
 	events := make([]audit.AuditEvent, len(gormEvents))
@@ -225,7 +236,7 @@ func (r *Repository) Count(ctx context.Context, filter audit.Filter) (int64, err
 	db = db.Order(nil).Limit(-1).Offset(-1)
 
 	if err := db.Model(&gormAuditEvent{}).Count(&count).Error; err != nil {
-		return 0, fmt.Errorf("kgorm: failed to count audit events: %w", err)
+		return 0, fmt.Errorf("gormstore: failed to count audit events: %w", err)
 	}
 	return count, nil
 }
@@ -266,3 +277,12 @@ var (
 	_ domain.TokenStore      = (*Repository)(nil)
 	_ audit.AuditStore       = (*Repository)(nil)
 )
+
+// AutoMigrate creates or updates tables from the Go models.
+//
+// Deprecated: use [Repository.AutoMigrateDev] for development, or apply the
+// versioned SQL from [Migrations] in production. The name did not say which
+// of those it was for.
+func (r *Repository) AutoMigrate(models ...any) error {
+	return r.AutoMigrateDev(models...)
+}
