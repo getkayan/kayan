@@ -5,6 +5,7 @@ package admin
 
 import (
 	"context"
+	"github.com/getkayan/kayan/core/domain"
 	"strings"
 	"time"
 )
@@ -216,12 +217,30 @@ type AuditStore interface {
 }
 
 // PasswordHasher defines password hashing operations.
+//
+// Deprecated: use [domain.Hasher]. This interface took its arguments in the
+// opposite order — Verify(hash, password) against Compare(password, hash) —
+// with the same types and no compile-time distinction between them, which is
+// how a hasher gets wired up backwards and silently accepts every password.
 type PasswordHasher interface {
 	Hash(password string) (string, error)
 	Verify(hash, password string) bool
 }
 
+// hasherAdapter presents a [PasswordHasher] as a [domain.Hasher], correcting
+// the argument order at the boundary.
+type hasherAdapter struct{ inner PasswordHasher }
+
+func (a hasherAdapter) Hash(password string) (string, error) { return a.inner.Hash(password) }
+
+func (a hasherAdapter) Compare(password, hash string) bool { return a.inner.Verify(hash, password) }
+
 // IDGenerator defines ID generation.
+// IDGenerator generates identifiers for records this manager creates.
+//
+// Deprecated: use [domain.IDGenerator], the function type the rest of Kayan
+// uses. Two interfaces of the same name with different shapes is a trap for
+// anyone wiring them up.
 type IDGenerator interface {
 	Generate() any
 }
@@ -235,8 +254,8 @@ type Manager struct {
 	tenants  TenantStore
 	roles    RoleStore
 	audit    AuditStore
-	hasher   PasswordHasher
-	idGen    IDGenerator
+	hasher   domain.Hasher
+	idGen    domain.IDGenerator
 }
 
 // ManagerOption configures the Manager.
@@ -251,13 +270,39 @@ func NewManager(opts ...ManagerOption) *Manager {
 	return m
 }
 
-func WithUserStore(s UserStore) ManagerOption           { return func(m *Manager) { m.users = s } }
-func WithSessionStore(s SessionStore) ManagerOption     { return func(m *Manager) { m.sessions = s } }
-func WithTenantStore(s TenantStore) ManagerOption       { return func(m *Manager) { m.tenants = s } }
-func WithRoleStore(s RoleStore) ManagerOption           { return func(m *Manager) { m.roles = s } }
-func WithAuditStore(s AuditStore) ManagerOption         { return func(m *Manager) { m.audit = s } }
-func WithPasswordHasher(h PasswordHasher) ManagerOption { return func(m *Manager) { m.hasher = h } }
-func WithIDGenerator(g IDGenerator) ManagerOption       { return func(m *Manager) { m.idGen = g } }
+func WithUserStore(s UserStore) ManagerOption       { return func(m *Manager) { m.users = s } }
+func WithSessionStore(s SessionStore) ManagerOption { return func(m *Manager) { m.sessions = s } }
+func WithTenantStore(s TenantStore) ManagerOption   { return func(m *Manager) { m.tenants = s } }
+func WithRoleStore(s RoleStore) ManagerOption       { return func(m *Manager) { m.roles = s } }
+func WithAuditStore(s AuditStore) ManagerOption     { return func(m *Manager) { m.audit = s } }
+
+// WithPasswordHasher sets the hasher used for administrative password
+// operations. Defaults to bcrypt.
+func WithPasswordHasher(h domain.Hasher) ManagerOption {
+	return func(m *Manager) { m.hasher = h }
+}
+
+// WithLegacyPasswordHasher accepts the deprecated [PasswordHasher] shape.
+//
+// Deprecated: use [WithPasswordHasher] with a [domain.Hasher].
+func WithLegacyPasswordHasher(h PasswordHasher) ManagerOption {
+	return func(m *Manager) { m.hasher = hasherAdapter{inner: h} }
+}
+
+// WithIDGenerator sets the generator used for record identifiers.
+//
+// Use [domain.TokenGenerator] for anything an attacker must not predict; this
+// is for record IDs only.
+func WithIDGenerator(g domain.IDGenerator) ManagerOption {
+	return func(m *Manager) { m.idGen = g }
+}
+
+// WithLegacyIDGenerator accepts the deprecated [IDGenerator] interface.
+//
+// Deprecated: use [WithIDGenerator] with a [domain.IDGenerator].
+func WithLegacyIDGenerator(g IDGenerator) ManagerOption {
+	return func(m *Manager) { m.idGen = g.Generate }
+}
 
 // ---- User Operations ----
 
@@ -326,7 +371,7 @@ func (m *Manager) CreateUser(ctx context.Context, caller *Caller, input CreateUs
 
 	// Generate ID
 	if m.idGen != nil {
-		user.ID = m.idGen.Generate()
+		user.ID = m.idGen()
 	}
 
 	// Set traits email if not set
@@ -495,7 +540,7 @@ func (m *Manager) CreateTenant(ctx context.Context, caller *Caller, input Create
 	}
 
 	if m.idGen != nil {
-		if id, ok := m.idGen.Generate().(string); ok {
+		if id, ok := m.idGen().(string); ok {
 			tenant.ID = id
 		}
 	}
@@ -564,7 +609,7 @@ func (m *Manager) CreateRole(ctx context.Context, caller *Caller, input CreateRo
 	}
 
 	if m.idGen != nil {
-		if id, ok := m.idGen.Generate().(string); ok {
+		if id, ok := m.idGen().(string); ok {
 			role.ID = id
 		}
 	}
