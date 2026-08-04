@@ -1,0 +1,32 @@
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /core
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /kgorm
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /kredis
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /cmd/kayan-cli
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # An auth library whose CI runs floating action tags is a supply-chain target.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -4,10 +4,27 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/getkayan/kayan)](https://go.dev/)
 [![Build Status](https://github.com/getkayan/kayan/actions/workflows/ci.yml/badge.svg)](https://github.com/getkayan/kayan/actions/workflows/ci.yml)
 [![Test Status](https://github.com/getkayan/kayan/actions/workflows/test.yml/badge.svg)](https://github.com/getkayan/kayan/actions/workflows/test.yml)
+[![Security](https://github.com/getkayan/kayan/actions/workflows/security.yml/badge.svg)](https://github.com/getkayan/kayan/actions/workflows/security.yml)
 [![Coverage](https://codecov.io/gh/getkayan/kayan/branch/main/graph/badge.svg)](https://codecov.io/gh/getkayan/kayan)
 [![Go Report Card](https://goreportcard.com/badge/github.com/getkayan/kayan)](https://goreportcard.com/report/github.com/getkayan/kayan)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/getkayan/kayan)](https://github.com/getkayan/kayan/releases)
+
+> [!WARNING]
+> **Pre-1.0. Not ready for production use.**
+>
+> Kayan is under active development toward a 1.0 release. Some subsystems are
+> incomplete, and the following have known security gaps that are being worked on:
+>
+> - **SAML** (`core/saml`) — assertion signatures are not verified and outgoing
+>   assertions are not signed. Do not use for SSO against untrusted input.
+> - **OAuth 2.0** (`core/oauth2`) — client authentication and PKCE are currently
+>   optional, and `redirect_uri` is not checked against a client allowlist.
+> - **Multi-tenancy** (`core/tenant`) — tenant context is resolved but not enforced
+>   at the storage layer. Isolation is advisory, not guaranteed.
+>
+> The public API will change without a deprecation cycle before 1.0. See
+> [VERSIONING.md](./VERSIONING.md).
 
 Kayan is a headless, non-generic, extensible IAM library for Go. It gives you authentication, session management, authorization, federation, provisioning, audit, compliance, and observability primitives without forcing an HTTP framework, a UI, or a fixed user schema.
 
