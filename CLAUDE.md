@@ -143,6 +143,58 @@ cd core && go test -race ./...
 cd kayan-gorm && go test -race ./...
 ```
 
+### Committing and pushing
+
+**Every change ships as its own commit, pushed when it is done.** One feature
+or one fix per commit — not a day's work batched together.
+
+The reason is review, not tidiness. A commit that fixes an authentication
+bypass and also renames three files and updates a doc cannot be reviewed for
+the part that matters, and cannot be reverted without taking the rest with it.
+Security fixes especially must be readable in isolation.
+
+```bash
+# After a feature or fix is complete and its tests pass:
+git add <the files for this change>
+git commit -F - <<'EOF'
+<type>(<scope>): <what changed, imperative>
+
+<why it changed, and what breaks without it. Name the failure mode.>
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+EOF
+git push
+```
+
+Types follow the existing history: `feat`, `fix`, `refactor`, `docs`, `test`,
+`chore`, `ci`. Append `!` for a breaking change (`refactor!:`).
+
+**What belongs in the message:**
+
+- **The failure mode, concretely.** "Silent wrong denial whose behavior depends
+  on which replica served the request" beats "fixes RBAC bug."
+- **Why the fix is shaped that way**, when the shape is not obvious — why a
+  callback rather than a per-method predicate, why the interface rather than
+  the implementation.
+- **Corrections to earlier claims.** If a fix turns out narrower than first
+  described, say so in the commit rather than leaving an overstated claim in
+  the history.
+
+**What does not:**
+
+- Several unrelated changes. Split them.
+- A fix whose tests do not pass. Commit the work in progress or keep it local,
+  but do not push a red state to `main`.
+
+**Before pushing**, the touched modules must build, vet, and test clean:
+
+```bash
+cd <module> && go build ./... && go vet ./... && go test -race ./...
+```
+
+For a security fix, also revert it and confirm the test fails. A test that
+passes either way proves nothing, and this repository has had several.
+
 ### Non-negotiables
 
 **Storage and strategy methods take `context.Context`.** Not for style — the
