@@ -249,18 +249,33 @@ func (s *JWTStrategy) Create(sessionID, identityID any) (*identity.Session, erro
 	}, nil
 }
 
+// keyFunc returns a jwt.Keyfunc that accepts only tokens signed with expected.
+//
+// Pinning the algorithm is what stops an attacker re-signing an RS256 token as
+// HS256 using the PEM of the public key as the HMAC secret: the forged token
+// verifies against the public key, which is not a secret. Every parse in this
+// package goes through here so the check cannot be present on some paths and
+// missing on others.
+func (s *JWTStrategy) keyFunc(expected jwt.SigningMethod, key any) jwt.Keyfunc {
+	return func(token *jwt.Token) (any, error) {
+		if expected == nil {
+			return nil, fmt.Errorf("session: no signing method configured")
+		}
+		if token.Method.Alg() != expected.Alg() {
+			return nil, fmt.Errorf("session: unexpected signing method: %v", token.Header["alg"])
+		}
+		return key, nil
+	}
+}
+
 func (s *JWTStrategy) Validate(sessionID any) (*identity.Session, error) {
 	tokenString, ok := sessionID.(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid token format")
 	}
 
-	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if token.Method.Alg() != s.config.SigningMethod.Alg() {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return s.config.VerifyingKey, nil
-	})
+	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{},
+		s.keyFunc(s.config.SigningMethod, s.config.VerifyingKey))
 
 	if err != nil {
 		return nil, err
@@ -299,12 +314,7 @@ func (s *JWTStrategy) Refresh(refreshToken string) (*identity.Session, error) {
 		rtKey = s.config.VerifyingKey
 	}
 
-	token, err := jwt.ParseWithClaims(refreshToken, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if token.Method.Alg() != rtMethod.Alg() {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return rtKey, nil
-	})
+	token, err := jwt.ParseWithClaims(refreshToken, &JWTClaims{}, s.keyFunc(rtMethod, rtKey))
 
 	if err != nil {
 		return nil, err
@@ -332,10 +342,12 @@ func (s *JWTStrategy) Delete(sessionID any) error {
 		if !ok {
 			return fmt.Errorf("invalid token format")
 		}
-		// Parse token to get expiry
-		token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-			return s.config.VerifyingKey, nil
-		})
+		// Parse the token to read its expiry. The algorithm is pinned here for
+		// the same reason as on every other path: without it, a token forged
+		// with the public key as an HMAC secret would revoke an arbitrary
+		// session.
+		token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{},
+			s.keyFunc(s.config.SigningMethod, s.config.VerifyingKey))
 		if err != nil {
 			return err
 		}

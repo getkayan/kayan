@@ -54,7 +54,7 @@ func TestManager_Check_NoRelation(t *testing.T) {
 	}
 }
 
-func TestManager_ListObjects(t *testing.T) {
+func TestManager_ListDirectObjects(t *testing.T) {
 	store := NewMemoryStore()
 	mgr := NewManager(store)
 	ctx := context.Background()
@@ -63,9 +63,9 @@ func TestManager_ListObjects(t *testing.T) {
 	mgr.Grant(ctx, "user", "alice", "viewer", "document", "2")
 	mgr.Grant(ctx, "user", "alice", "editor", "document", "3")
 
-	objects, err := mgr.ListObjects(ctx, "user", "alice", "viewer", "document")
+	objects, err := mgr.ListDirectObjects(ctx, "user", "alice", "viewer", "document")
 	if err != nil {
-		t.Fatalf("ListObjects failed: %v", err)
+		t.Fatalf("ListDirectObjects failed: %v", err)
 	}
 	if len(objects) != 2 {
 		t.Fatalf("expected 2 objects, got %d", len(objects))
@@ -80,7 +80,7 @@ func TestManager_ListObjects(t *testing.T) {
 	}
 }
 
-func TestManager_ListSubjects(t *testing.T) {
+func TestManager_ListDirectSubjects(t *testing.T) {
 	store := NewMemoryStore()
 	mgr := NewManager(store)
 	ctx := context.Background()
@@ -88,9 +88,9 @@ func TestManager_ListSubjects(t *testing.T) {
 	mgr.Grant(ctx, "user", "alice", "viewer", "document", "1")
 	mgr.Grant(ctx, "user", "bob", "viewer", "document", "1")
 
-	subjects, err := mgr.ListSubjects(ctx, "viewer", "document", "1")
+	subjects, err := mgr.ListDirectSubjects(ctx, "viewer", "document", "1")
 	if err != nil {
-		t.Fatalf("ListSubjects failed: %v", err)
+		t.Fatalf("ListDirectSubjects failed: %v", err)
 	}
 	if len(subjects) != 2 {
 		t.Fatalf("expected 2 subjects, got %d", len(subjects))
@@ -308,5 +308,50 @@ func TestManager_RevokeUserset(t *testing.T) {
 	}
 	if ok {
 		t.Error("expected Check to return false after RevokeUserset")
+	}
+}
+
+// TestListDirectObjectsDoesNotTraverseGraph documents the divergence the
+// narrower name exists to advertise: Check evaluates the relation graph, and
+// ListDirectObjects does not, so the two disagree on indirect access.
+//
+// If a traversing implementation lands, replace this with a test asserting the
+// two agree — do not delete it.
+func TestListDirectObjectsDoesNotTraverseGraph(t *testing.T) {
+	ctx := context.Background()
+	mgr := NewManager(NewMemoryStore(), WithSchema(Schema{
+		Type: "document",
+		Relations: map[string]RelationConfig{
+			"viewer": {},
+		},
+	}))
+
+	// alice is a member of the engineering group, and that group is a viewer
+	// of document:1. alice can therefore see the document, but holds no direct
+	// tuple against it.
+	if err := mgr.AddToGroup(ctx, "alice", "engineering"); err != nil {
+		t.Fatalf("AddToGroup: %v", err)
+	}
+	if err := mgr.GrantUserset(ctx, "group", "engineering", "member", "viewer", "document", "1"); err != nil {
+		t.Fatalf("GrantUserset: %v", err)
+	}
+
+	// Check walks the graph and finds the access.
+	allowed, err := mgr.Check(ctx, "user", "alice", "viewer", "document", "1")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if !allowed {
+		t.Fatal("Check denied access granted through group membership")
+	}
+
+	// ListDirectObjects does not, and returns nothing. This is the documented
+	// limitation the method name now states.
+	objects, err := mgr.ListDirectObjects(ctx, "user", "alice", "viewer", "document")
+	if err != nil {
+		t.Fatalf("ListDirectObjects: %v", err)
+	}
+	if len(objects) != 0 {
+		t.Errorf("ListDirectObjects returned %d objects, want 0; the access here is indirect", len(objects))
 	}
 }

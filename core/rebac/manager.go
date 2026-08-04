@@ -82,9 +82,20 @@ func (m *Manager) Check(ctx context.Context, subjectType, subjectID, relation, o
 	return m.checker.Check(ctx, subject, relation, object)
 }
 
-// ListObjects returns all objects of a type where the subject has the given relation.
-// This performs a reverse lookup to find all accessible resources.
-func (m *Manager) ListObjects(ctx context.Context, subjectType, subjectID, relation, objectType string) ([]ObjectRef, error) {
+// ListDirectObjects returns objects the subject is related to by a stored
+// tuple.
+//
+// It does not walk the relation graph. Access granted through group
+// membership, a computed relation, or a parent object is not returned, so a
+// subject that [Manager.Check] would allow on an object may not appear here.
+//
+// Use it to enumerate direct grants. To decide whether access exists, call
+// [Manager.Check] — it evaluates the full graph and is the authoritative
+// answer.
+//
+// A traversing implementation is planned; until then the narrower name states
+// what the method actually does.
+func (m *Manager) ListDirectObjects(ctx context.Context, subjectType, subjectID, relation, objectType string) ([]ObjectRef, error) {
 	// Get all tuples where the subject has this relation with objects of the type
 	tuples, err := m.store.ReadTuples(ctx, TupleFilter{
 		SubjectType: subjectType,
@@ -110,8 +121,12 @@ func (m *Manager) ListObjects(ctx context.Context, subjectType, subjectID, relat
 	return result, nil
 }
 
-// ListSubjects returns all subjects that have the given relation to an object.
-func (m *Manager) ListSubjects(ctx context.Context, relation, objectType, objectID string) ([]SubjectRef, error) {
+// ListDirectSubjects returns subjects related to an object by a stored tuple.
+//
+// Like [Manager.ListDirectObjects], it does not walk the relation graph.
+// Returned subjects may include usersets such as "group:eng#member" rather
+// than the individual users those expand to.
+func (m *Manager) ListDirectSubjects(ctx context.Context, relation, objectType, objectID string) ([]SubjectRef, error) {
 	tuples, err := m.store.ReadTuples(ctx, TupleFilter{
 		Relation:   relation,
 		ObjectType: objectType,
