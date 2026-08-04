@@ -41,6 +41,7 @@
 package rbac
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -56,24 +57,24 @@ func NewManager(strategy Strategy) *Manager {
 }
 
 // Authorize checks if the given identity has the required role.
-func (m *Manager) Authorize(identityID any, role string) (bool, error) {
+func (m *Manager) Authorize(ctx context.Context, identityID any, role string) (bool, error) {
 	if m.strategy == nil {
 		return false, fmt.Errorf("rbac strategy not configured")
 	}
-	return m.strategy.HasRole(identityID, role)
+	return m.strategy.HasRole(ctx, identityID, role)
 }
 
 // GetRoles returns all roles for the given identity.
-func (m *Manager) GetRoles(identityID any) ([]string, error) {
+func (m *Manager) GetRoles(ctx context.Context, identityID any) ([]string, error) {
 	if m.strategy == nil {
 		return nil, fmt.Errorf("rbac strategy not configured")
 	}
-	return m.strategy.GetRoles(identityID)
+	return m.strategy.GetRoles(ctx, identityID)
 }
 
 // RequireRole is a helper that returns an error if the identity does not have the role.
-func (m *Manager) RequireRole(identityID any, role string) error {
-	allowed, err := m.Authorize(identityID, role)
+func (m *Manager) RequireRole(ctx context.Context, identityID any, role string) error {
+	allowed, err := m.Authorize(ctx, identityID, role)
 	if err != nil {
 		return err
 	}
@@ -84,24 +85,24 @@ func (m *Manager) RequireRole(identityID any, role string) error {
 }
 
 // AuthorizePermission checks if the given identity has the required permission.
-func (m *Manager) AuthorizePermission(identityID any, permission string) (bool, error) {
+func (m *Manager) AuthorizePermission(ctx context.Context, identityID any, permission string) (bool, error) {
 	if m.strategy == nil {
 		return false, fmt.Errorf("rbac strategy not configured")
 	}
-	return m.strategy.HasPermission(identityID, permission)
+	return m.strategy.HasPermission(ctx, identityID, permission)
 }
 
 // GetPermissions returns all permissions for the given identity.
-func (m *Manager) GetPermissions(identityID any) ([]string, error) {
+func (m *Manager) GetPermissions(ctx context.Context, identityID any) ([]string, error) {
 	if m.strategy == nil {
 		return nil, fmt.Errorf("rbac strategy not configured")
 	}
-	return m.strategy.GetPermissions(identityID)
+	return m.strategy.GetPermissions(ctx, identityID)
 }
 
 // RequirePermission is a helper that returns an error if the identity does not have the permission.
-func (m *Manager) RequirePermission(identityID any, permission string) error {
-	allowed, err := m.AuthorizePermission(identityID, permission)
+func (m *Manager) RequirePermission(ctx context.Context, identityID any, permission string) error {
+	allowed, err := m.AuthorizePermission(ctx, identityID, permission)
 	if err != nil {
 		return err
 	}

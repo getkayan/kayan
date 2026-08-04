@@ -1,6 +1,9 @@
 package rbac
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 type loaderIdentity struct {
 	roles       []string
@@ -16,6 +19,7 @@ func (i *loaderIdentity) GetPermissions() []string {
 }
 
 func TestBasicStrategyUsesLoader(t *testing.T) {
+	ctx := context.Background()
 	strategy := NewBasicStrategy(func(identityID any) (any, error) {
 		if identityID != "user-1" {
 			return nil, nil
@@ -26,7 +30,7 @@ func TestBasicStrategyUsesLoader(t *testing.T) {
 		}, nil
 	})
 
-	hasRole, err := strategy.HasRole("user-1", "admin")
+	hasRole, err := strategy.HasRole(ctx, "user-1", "admin")
 	if err != nil {
 		t.Fatalf("HasRole returned error: %v", err)
 	}
@@ -34,7 +38,7 @@ func TestBasicStrategyUsesLoader(t *testing.T) {
 		t.Fatal("expected loader-backed role lookup to succeed")
 	}
 
-	hasPermission, err := strategy.HasPermission("user-1", "users:write")
+	hasPermission, err := strategy.HasPermission(ctx, "user-1", "users:write")
 	if err != nil {
 		t.Fatalf("HasPermission returned error: %v", err)
 	}

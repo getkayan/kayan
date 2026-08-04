@@ -7,10 +7,10 @@ import (
 
 // Strategy defines the interface for authorization checks.
 type Strategy interface {
-	HasRole(identityID any, role string) (bool, error)
-	GetRoles(identityID any) ([]string, error)
-	HasPermission(identityID any, permission string) (bool, error)
-	GetPermissions(identityID any) ([]string, error)
+	HasRole(ctx context.Context, identityID any, role string) (bool, error)
+	GetRoles(ctx context.Context, identityID any) ([]string, error)
+	HasPermission(ctx context.Context, identityID any, permission string) (bool, error)
+	GetPermissions(ctx context.Context, identityID any) ([]string, error)
 }
 
 // RoleSource is an interface for objects that can provide their own roles.
@@ -37,7 +37,7 @@ func NewBasicStrategy(loader IdentityLoader) *BasicStrategy {
 	return &BasicStrategy{loader: loader}
 }
 
-func (s *BasicStrategy) GetRoles(identityID any) ([]string, error) {
+func (s *BasicStrategy) GetRoles(ctx context.Context, identityID any) ([]string, error) {
 	if rs, ok := identityID.(RoleSource); ok {
 		return rs.GetRoles(), nil
 	}
@@ -55,8 +55,8 @@ func (s *BasicStrategy) GetRoles(identityID any) ([]string, error) {
 	return rs.GetRoles(), nil
 }
 
-func (s *BasicStrategy) HasRole(identityID any, role string) (bool, error) {
-	roles, err := s.GetRoles(identityID)
+func (s *BasicStrategy) HasRole(ctx context.Context, identityID any, role string) (bool, error) {
+	roles, err := s.GetRoles(ctx, identityID)
 	if err != nil {
 		return false, err
 	}
@@ -70,7 +70,7 @@ func (s *BasicStrategy) HasRole(identityID any, role string) (bool, error) {
 	return false, nil
 }
 
-func (s *BasicStrategy) GetPermissions(identityID any) ([]string, error) {
+func (s *BasicStrategy) GetPermissions(ctx context.Context, identityID any) ([]string, error) {
 	if ps, ok := identityID.(PermissionSource); ok {
 		return ps.GetPermissions(), nil
 	}
@@ -88,8 +88,8 @@ func (s *BasicStrategy) GetPermissions(identityID any) ([]string, error) {
 	return ps.GetPermissions(), nil
 }
 
-func (s *BasicStrategy) HasPermission(identityID any, permission string) (bool, error) {
-	perms, err := s.GetPermissions(identityID)
+func (s *BasicStrategy) HasPermission(ctx context.Context, identityID any, permission string) (bool, error) {
+	perms, err := s.GetPermissions(ctx, identityID)
 	if err != nil {
 		return false, err
 	}
@@ -108,7 +108,7 @@ func (s *BasicStrategy) HasPermission(identityID any, permission string) (bool, 
 // The 'resource' parameter is ignored for basic RBAC.
 // Example: Can(ctx, identityID, "admin", nil) checks if identity has "admin" role.
 func (s *BasicStrategy) Can(ctx context.Context, subject any, action string, resource any) (bool, error) {
-	return s.HasRole(subject, action)
+	return s.HasRole(ctx, subject, action)
 }
 
 func (s *BasicStrategy) load(identityID any) (any, error) {
