@@ -1,107 +1,223 @@
-# Session Management
+# Sessions
 
-`core/session` separates authentication from session issuance. A flow authenticates an identity. A session strategy decides how that authenticated identity becomes a reusable login state.
-
-## Session Strategy Interface
+A session is what turns one successful authentication into many authorized
+requests. Kayan ships two strategies behind one interface, and the choice
+between them is a genuine trade rather than a default with an exotic
+alternative.
 
 ```go
 type Strategy interface {
-	Create(sessionID, identityID any) (*identity.Session, error)
-	Validate(sessionID any) (*identity.Session, error)
-	Refresh(refreshToken string) (*identity.Session, error)
-	Delete(sessionID any) error
+    Create(ctx context.Context, sessionID, identityID any) (*identity.Session, error)
+    Validate(ctx context.Context, sessionID any) (*identity.Session, error)
+    Refresh(ctx context.Context, refreshToken string) (*identity.Session, error)
+    Delete(ctx context.Context, sessionID any) error
 }
 ```
 
-The built-in manager wraps this interface and provides a stable application-facing API.
+Every method takes a context. That is not decoration: a database-backed
+strategy issues queries, and those queries need to be cancellable and
+tenant-scoped like any other.
 
-## Database Strategy
+---
 
-`session.NewDatabaseStrategy(repo)` is stateful and revocable.
+## The trade
 
-Characteristics:
+**Stateless (JWT).** The token carries its own claims and a signature.
+Validating it is a signature check and an expiry comparison — no database, no
+shared state, no coordination between replicas.
 
-- persists sessions through `domain.SessionStorage`
-- generates refresh tokens automatically
-- rotates both session ID and refresh token on refresh
-- invalidates the old session after successful rotation
-- is the best default when you need admin-driven session termination
+The cost is that you cannot take it back. A token is valid until it expires,
+which is why a stateless session should be short-lived. "Log out everywhere"
+does not work, because there is nothing to delete.
 
-Use it when you need:
+**Revocable (database).** Every validation is a lookup, and deleting the row
+ends the session immediately. Logout works. Administrative revocation works.
+Compromise response works.
 
-- hard revocation guarantees
-- session analytics
-- per-session metadata and auditability
-- easy admin visibility into active sessions
+The cost is a database round trip on every authenticated request, and a store
+that has to be available for anyone to stay logged in.
 
-## JWT Strategy
+**Neither is the correct answer.** Short-lived stateless access tokens with a
+revocable refresh token is the common compromise, and Kayan supports that
+directly.
 
-`session.NewJWTStrategy` and `session.NewHS256Strategy` support stateless access tokens plus refresh tokens.
+---
 
-Characteristics:
+## Stateless sessions
 
-- configurable signing and verification keys
-- configurable access and refresh expiries
-- optional refresh-token validation hook
-- optional revocation store for distributed invalidation
+```go
+sessions := session.NewManager(
+    session.NewHS256Strategy(os.Getenv("SESSION_SECRET"), 15*time.Minute),
+)
 
-Use it when you need:
+sess, err := sessions.Create(ctx, uuid.NewString(), userID)
+// sess.ID is the token to return to the client.
+```
 
-- horizontally scalable validation without database reads on every request
-- interoperability with standard JWT tooling
-- short-lived access tokens backed by a revocation channel
+`NewHS256Strategy` is a convenience for a symmetric secret. The general form
+takes any algorithm:
 
-## Revocation Stores
+```go
+sessions := session.NewManager(session.NewJWTStrategy(session.JWTConfig{
+    SigningMethod: jwt.SigningMethodES256,
+    SigningKey:    ecPrivateKey,
+    VerifyingKey:  &ecPrivateKey.PublicKey,
+    Expiry:        15 * time.Minute,
 
-JWT sessions are only truly operationally safe in multi-instance deployments when revocation is backed by shared storage. The built-in memory store is suitable for tests and local development. Use Redis or another distributed backend in production.
+    // Refresh tokens may use a different key, and usually a longer life.
+    RefreshSigningMethod: jwt.SigningMethodES256,
+    RefreshSigningKey:    ecPrivateKey,
+    RefreshVerifyingKey:  &ecPrivateKey.PublicKey,
+    RefreshExpiry:        7 * 24 * time.Hour,
+}))
+```
 
-Recommended pattern:
+RS256, ES256, EdDSA, and HS256 all work through identical wiring. When the
+refresh fields are left unset, refresh tokens use the access-token key.
 
-- short access-token TTL
-- refresh-token rotation
-- Redis-backed revocation for logout and emergency invalidation
+### Algorithm confusion is pinned out
 
-## Session Shape
+Every parse path checks that the token's `alg` matches the algorithm the
+strategy was configured with.
 
-The default session model contains:
+The attack this prevents: under an asymmetric configuration the verifying key
+is public. An attacker re-signs a token as `HS256` using that public key as
+the HMAC secret. A verifier that trusts the token's own `alg` header will
+happily verify it, because the "secret" is a value the attacker has.
 
-- session ID
-- identity ID
-- access token or session identifier
-- refresh token
-- issued, access expiry, and refresh expiry timestamps
-- active flag
+`Validate`, `Refresh`, and `Delete` share one `keyFunc` rather than each
+implementing the check. The reason is direct: the check was once copy-pasted
+into two of the three and missed on the third, and a per-path check is a check
+that can go missing on one path.
 
-Identity ID is distinct from session ID. Preserve that distinction in your own stores and handlers.
+### Revoking a stateless token
 
-## Refresh Semantics
+Attach a revocation store and the strategy gains a denylist:
 
-Kayan intentionally treats refresh as a security-sensitive state transition.
+```go
+strategy := session.NewJWTStrategy(config).
+    WithRevocationStore(session.NewMemoryRevocationStore())
+```
 
-For database sessions, refresh issues a new session identity and invalidates the old one. For JWT sessions, refresh issues new signed tokens and can be augmented with custom token validation.
+`Delete` then records the token until its natural expiry, and `Validate`
+consults the list.
 
-Design your clients to replace both access and refresh tokens atomically.
+**Without a revocation store, `Delete` is a no-op.** There is genuinely
+nothing server-side to remove. That is documented rather than hidden, because
+a logout endpoint that silently does nothing is worse than one that returns an
+error.
 
-## Recommended Deployment Modes
+`MemoryRevocationStore` is per-process. Several replicas each keep their own
+list, so a token revoked on one is still accepted by the others — use a shared
+store for anything running more than one instance.
 
-### Monolith or single instance
+---
 
-- database sessions are simplest
-- memory revocation is acceptable for local-only JWT experiments
+## Revocable sessions
 
-### Distributed API fleet
+```go
+sessions := session.NewManager(session.NewDatabaseStrategy(repo))
+```
 
-- JWT access tokens for read-heavy request validation
-- Redis-backed revocation and refresh-token persistence
-- centralized audit and telemetry
+`repo` is any `domain.SessionStorage`. Sessions are rows; `Delete` removes
+one; validation reads it.
 
-### Strict admin-control environments
+Refresh rotates: redeeming a refresh token issues a new session and deletes
+the old row, so the presented token stops working.
 
-- database sessions with admin listing and forced termination
-- strong audit correlation on issue, refresh, and revoke operations
+---
 
-## Related Features
+## Refresh and rotation
 
-- `core/flow/stepup.go` supports elevated authentication requirements around sensitive actions.
-- `core/device` and `core/risk` can influence whether a session should be issued or challenged.
-- `core/admin` exposes session querying and revocation patterns for back-office tools.
+```go
+sess, err := sessions.Refresh(ctx, refreshToken)
+```
+
+Rotation on every refresh limits the value of a stolen token — it works until
+the legitimate client next refreshes, not indefinitely.
+
+Detecting the theft is a separate problem, and one Kayan solves in the OAuth 2.0
+provider rather than here. There, refresh tokens carry a family identifier and
+a used marker: presenting a token that was already redeemed revokes the whole
+family, because two parties holding the same token means one of them stole it.
+See the [OIDC provider reference](../reference/oidc-provider.md).
+
+**The stateless session path cannot do this.** A JWT refresh token is valid
+because it is signed, not because a server remembers it, so a replay is
+indistinguishable from a legitimate use. Rotation there limits exposure; it
+does not detect compromise. That limitation is stated in the API
+documentation rather than left for you to discover.
+
+---
+
+## Single sign-on across applications
+
+`SSOManager` models one authentication shared by several applications:
+
+```go
+sso := session.NewSSOManager(session.NewMemorySSOStore())
+```
+
+A parent session is created once; each application joins it and receives its
+own child session. Global logout ends the parent and returns the child
+sessions for the caller to tear down — Kayan does not call other services, so
+propagation is yours.
+
+**`MemorySSOStore` is the only implementation that ships**, which makes single
+sign-on single-process today. This is listed in the root
+[README](../../README.md) as a known gap rather than left to be discovered.
+
+---
+
+## Session binding
+
+`identity.Session` records what a session is, not where it came from:
+
+```go
+type Session struct {
+    ID               string
+    IdentityID       string
+    RefreshToken     string
+    ExpiresAt        time.Time
+    RefreshExpiresAt time.Time
+    IssuedAt         time.Time
+    Active           bool
+}
+```
+
+There is no IP address or user-agent field, and no binding to either. That is
+a deliberate omission rather than an oversight: IP binding breaks users on
+mobile networks and behind rotating proxies, and user-agent binding breaks on
+browser update. Both are commonly requested and both cause more support load
+than they prevent attacks.
+
+If your threat model justifies it, `core/device` provides device
+identification and `core/risk` scores signals — but note that a device
+fingerprint is supplied by the client and therefore spoofable. It identifies a
+device; it does not authenticate one.
+
+---
+
+## Practical guidance
+
+**Keep stateless access tokens short.** Fifteen minutes is a reasonable
+default. The window is exactly how long a stolen token stays useful.
+
+**Read the secret from the environment.** Never from source. A secret
+committed in a repository is the one that ends up signing production sessions;
+the examples enforce this by refusing to start without `SESSION_SECRET`.
+
+**Give logout something to do.** Either a database strategy or a revocation
+store. Otherwise the endpoint returns 200 and changes nothing.
+
+**Rotate keys with `core/keys`.** `keys.StaticProvider` serves an active key
+for signing and retains superseded ones for verification, so rotation does not
+invalidate every live session at once.
+
+---
+
+## Related
+
+- [core reference](../reference/core.md) — `session` in full
+- [Strategies](./strategies.md) — producing the identity a session is created for
+- [Security Model](../architecture/security-model.md) — what session handling defends against

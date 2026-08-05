@@ -1,425 +1,233 @@
-# Kayan Quick Start Guide
+# Quick Start
 
-**5-minute integration guide for AI assistants and developers.**
+A working authentication service in about five minutes. For the reasoning
+behind each step — and the choices you will eventually want to change — read
+[Getting Started](./getting-started.md) afterwards.
+
+Every sample here is typechecked against the real modules.
 
 ---
 
-## 1. Install Kayan
+## Install
 
 ```bash
 go get github.com/getkayan/kayan/core
-go get github.com/getkayan/kayan/kayan-gorm  # For SQL databases
+go get github.com/getkayan/kayan/kayan-gorm
 ```
 
----
-
-## 2. Define Your User Model
+## The whole thing
 
 ```go
 package main
 
-import "time"
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
-// Use your existing model — Kayan adapts to YOUR schema
+	"github.com/getkayan/kayan/core/flow"
+	"github.com/getkayan/kayan/core/identity"
+	"github.com/getkayan/kayan/core/session"
+	gormstore "github.com/getkayan/kayan/kayan-gorm"
+	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// Your model. Kayan stores it as-is.
 type User struct {
-    ID        string `gorm:"primaryKey"`
-    Email     string `gorm:"uniqueIndex"`
-    Name      string
-    CreatedAt time.Time
+	ID    string `gorm:"primaryKey"`
+	Email string `gorm:"uniqueIndex"`
 }
 
-// Only requirement: implement FlowIdentity
-func (u *User) GetID() any { return u.ID }
+func (u *User) GetID() any   { return u.ID }
 func (u *User) SetID(id any) { u.ID = id.(string) }
-```
 
----
-
-## 3. Set Up Storage
-
-```go
-import (
-    "github.com/getkayan/kayan/kayan-gorm"
-    "gorm.io/driver/postgres"
-    "gorm.io/gorm"
-)
-
-// Connect to your database
-db, _ := gorm.Open(postgres.Open("postgres://user:pass@localhost/dbname"), &gorm.Config{})
-
-// Create storage adapter
-repo := gormstore.NewRepository(db)
-
-// Auto-migrate Kayan's tables (or pass your own models)
-repo.AutoMigrate()
-```
-
----
-
-## 4. Configure Authentication
-
-```go
-import (
-    "github.com/getkayan/kayan/core/flow"
-    "github.com/getkayan/kayan/core/session"
-    "os"
-    "time"
-)
-
-// Set up password authentication (one-liner)
-reg, login := flow.PasswordAuth(
-    repo,
-    func() any { return &User{} },
-    "email", // identifier field name in your User struct
-)
-
-// Set up JWT sessions
-sessions := session.NewHS256Strategy(
-    os.Getenv("JWT_SECRET"), // Use environment variable in production
-    24 * time.Hour,          // Access token expiry
-)
-```
-
----
-
-## 5. Add HTTP Handlers
-
-The snippets below show the shape of a minimal integration. For a complete, runnable backend with request validation, CORS, in-memory storage, and error handling, use [`examples/01-password/backend/main.go`](../examples/01-password/backend/main.go).
-
-### Registration Endpoint
-
-```go
-func handleRegister(w http.ResponseWriter, r *http.Request) {
-    var body struct {
-        Email    string `json:"email"`
-        Password string `json:"password"`
-    }
-    json.NewDecoder(r.Body).Decode(&body)
-    
-    // Validate input
-    if body.Email == "" || body.Password == "" {
-        http.Error(w, "email and password required", http.StatusBadRequest)
-        return
-    }
-    
-    // Register user
-    traits := identity.JSON(fmt.Sprintf(`{"email":%q}`, body.Email))
-    ident, err := reg.Submit(r.Context(), "password", traits, body.Password)
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
-    
-    user := ident.(*User)
-    json.NewEncoder(w).Encode(map[string]string{"id": user.ID, "email": body.Email})
+type server struct {
+	reg      *flow.RegistrationManager
+	login    *flow.LoginManager
+	sessions *session.Manager
 }
-```
 
-### Login Endpoint
-
-```go
-func handleLogin(w http.ResponseWriter, r *http.Request) {
-    var body struct {
-        Email    string `json:"email"`
-        Password string `json:"password"`
-    }
-    json.NewDecoder(r.Body).Decode(&body)
-    
-    // Authenticate
-    ident, err := login.Authenticate(r.Context(), "password", body.Email, body.Password)
-    if err != nil {
-        http.Error(w, "invalid credentials", http.StatusUnauthorized)
-        return
-    }
-    
-    user := ident.(*User)
-    
-    // Create session
-    sess, _ := sessions.Create(uuid.New().String(), user.ID)
-    
-    // Return tokens
-    json.NewEncoder(w).Encode(map[string]string{
-        "token":         sess.ID,
-        "refresh_token": sess.RefreshToken,
-    })
-}
-```
-
-### Protected Endpoint (Me)
-
-```go
-func handleMe(w http.ResponseWriter, r *http.Request) {
-    // Extract Bearer token
-    auth := r.Header.Get("Authorization")
-    token := strings.TrimPrefix(auth, "Bearer ")
-    
-    // Validate session
-    sess, err := sessions.Validate(token)
-    if err != nil {
-        http.Error(w, "unauthorized", http.StatusUnauthorized)
-        return
-    }
-    
-    // Get user from database
-    ident, _ := repo.GetIdentity(func() any { return &User{} }, sess.IdentityID)
-    user := ident.(*User)
-    
-    json.NewEncoder(w).Encode(map[string]string{
-        "id":    user.ID,
-        "email": user.Email,
-        "name":  user.Name,
-    })
-}
-```
-
-### Logout Endpoint
-
-```go
-func handleLogout(w http.ResponseWriter, r *http.Request) {
-    auth := r.Header.Get("Authorization")
-    token := strings.TrimPrefix(auth, "Bearer ")
-    
-    sess, err := sessions.Validate(token)
-    if err != nil {
-        http.Error(w, "unauthorized", http.StatusUnauthorized)
-        return
-    }
-    
-    // Invalidate session (best-effort)
-    _ = sessions.Delete(sess.ID)
-    
-    json.NewEncoder(w).Encode(map[string]string{"message": "logged out"})
-}
-```
-
----
-
-## 6. Wire Everything Together
-
-```go
 func main() {
-    // Set up routes
-    http.HandleFunc("/register", handleRegister)
-    http.HandleFunc("/login", handleLogin)
-    http.HandleFunc("/me", handleMe)
-    http.HandleFunc("/logout", handleLogout)
-    
-    // Start server
-    log.Println("Server running on :8080")
-    http.ListenAndServe(":8080", nil)
+	db, err := gorm.Open(sqlite.Open("app.db"), &gorm.Config{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	repo := gormstore.NewRepository(db)
+	if err := repo.AutoMigrateDev(&User{}); err != nil { // development only
+		log.Fatal(err)
+	}
+
+	factory := func() any { return &User{} }
+
+	reg, login := flow.PasswordAuth(repo, factory, "email",
+		flow.WithPasswordPolicy(&flow.PasswordPolicy{
+			MinLength:        12,
+			RequireUppercase: true,
+			RequireDigit:     true,
+		}),
+	)
+
+	s := &server{
+		reg:   reg,
+		login: login,
+		sessions: session.NewManager(
+			session.NewHS256Strategy(sessionSecret(), 15*time.Minute),
+		),
+	}
+
+	http.HandleFunc("/register", s.handleRegister)
+	http.HandleFunc("/login", s.handleLogin)
+	http.HandleFunc("/me", s.handleMe)
+
+	log.Println("listening on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	traits := identity.JSON(`{"email":"` + body.Email + `"}`)
+
+	user, err := s.reg.Submit(r.Context(), "password", traits, body.Password)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": user.(*User).ID})
+}
+
+func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	user, err := s.login.Authenticate(ctx, "password", body.Email, body.Password)
+	if err != nil {
+		// Deliberately the same response for "no such user" and "wrong
+		// password". Distinguishing them lets an attacker enumerate accounts.
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	sess, err := s.sessions.Create(ctx, uuid.NewString(), user.(*User).ID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"token": sess.ID})
+}
+
+func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("Authorization")
+	token = strings.TrimPrefix(token, "Bearer ")
+
+	sess, err := s.sessions.Validate(r.Context(), token)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"user_id": sess.IdentityID})
+}
+
+// sessionSecret reads the signing secret from the environment.
+//
+// Never hardcode one. A secret committed in a sample is the one that ends up
+// signing production sessions.
+func sessionSecret() string {
+	secret := os.Getenv("SESSION_SECRET")
+	if secret == "" {
+		log.Fatal("SESSION_SECRET is not set. Generate one with: openssl rand -base64 32")
+	}
+	return secret
 }
 ```
 
----
-
-## Complete Example
-
-See [`examples/01-password/backend/main.go`](../examples/01-password/backend/main.go) for a working implementation with CORS, proper error handling, and in-memory storage (for testing).
-
----
-
-## Next Steps
-
-### Add More Auth Methods
-
-```go
-// Magic Link (passwordless email)
-magic := flow.NewMagicLinkStrategy(repo, emailSender, func() any { return &User{} })
-login.RegisterStrategy(magic)
-
-// TOTP (Google Authenticator)
-totp := flow.NewTOTPStrategy(repo, func() any { return &User{} })
-login.RegisterStrategy(totp)
-
-// WebAuthn (Passkeys)
-webauthn := flow.NewWebAuthnStrategy(repo, webauthnConfig, func() any { return &User{} })
-reg.RegisterStrategy(webauthn)
-```
-
-### Add Authorization
-
-```go
-import "github.com/getkayan/kayan/core/rbac"
-
-// Define roles and permissions
-rbac := rbac.New()
-rbac.AddRole("admin", []string{"users:read", "users:write", "users:delete"})
-rbac.AddRole("user", []string{"users:read"})
-
-// Check permissions
-if rbac.Can("admin", "users:delete") {
-    // Allow action
-}
-```
-
-### Add Multi-Tenancy
-
-```go
-import "github.com/getkayan/kayan/core/tenant"
-
-// Resolve tenant from request
-resolver := tenant.NewSubdomainResolver()
-tenantID, _ := resolver.Resolve(ctx, r)
-
-// Scope queries to tenant
-ident, _ := repo.GetIdentity(func() any { return &User{} }, userID, tenant.WithTenant(tenantID))
-```
-
----
-
-## Framework Integration
-
-Kayan works with **any HTTP framework**. See [`docs/adapters/http-frameworks.md`](adapters/http-frameworks.md) for complete examples with:
-- Go Fiber
-- Echo
-- Gin
-- Chi
-- net/http (stdlib)
-
----
-
-## Common Patterns
-
-### Custom Response Shape
-
-```go
-type LoginResponse struct {
-    Token        string    `json:"token"`
-    RefreshToken string    `json:"refresh_token"`
-    User         UserDTO   `json:"user"`
-    ExpiresAt    time.Time `json:"expires_at"`
-}
-
-func handleLogin(w http.ResponseWriter, r *http.Request) {
-    // ... authenticate ...
-    
-    resp := LoginResponse{
-        Token:        sess.ID,
-        RefreshToken: sess.RefreshToken,
-        User:         toUserDTO(user),
-        ExpiresAt:    sess.ExpiresAt,
-    }
-    json.NewEncoder(w).Encode(resp)
-}
-```
-
-### Add Validation
-
-```go
-import "github.com/go-playground/validator/v10"
-
-validate := validator.New()
-
-type RegisterRequest struct {
-    Email    string `json:"email" validate:"required,email"`
-    Password string `json:"password" validate:"required,min=8"`
-}
-
-func handleRegister(w http.ResponseWriter, r *http.Request) {
-    var req RegisterRequest
-    json.NewDecoder(r.Body).Decode(&req)
-    
-    if err := validate.Struct(&req); err != nil {
-        http.Error(w, "validation failed", http.StatusBadRequest)
-        return
-    }
-    
-    // ... proceed with registration ...
-}
-```
-
-### Add Rate Limiting
-
-```go
-import "github.com/getkayan/kayan/kayan-redis"
-import "github.com/redis/go-redis/v9"
-
-rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-limiter := redisstore.NewRateLimiter(rdb)
-
-func handleLogin(w http.ResponseWriter, r *http.Request) {
-    // Check rate limit (5 attempts per 15 minutes)
-    if !limiter.Allow(r.RemoteAddr, 5, 15*time.Minute) {
-        http.Error(w, "too many requests", http.StatusTooManyRequests)
-        return
-    }
-    
-    // ... proceed with login ...
-}
-```
-
----
-
-## Environment Variables
+## Run it
 
 ```bash
-# Production checklist
-export JWT_SECRET="random-256-bit-secret"
-export DATABASE_URL="postgres://user:pass@localhost/prod_db"
-export REDIS_URL="redis://localhost:6379"
+export SESSION_SECRET=$(openssl rand -base64 32)
+go run .
+```
+
+```bash
+curl -X POST localhost:8080/register \
+  -d '{"email":"ada@example.com","password":"correct horse battery"}'
+
+curl -X POST localhost:8080/login \
+  -d '{"email":"ada@example.com","password":"correct horse battery"}'
+# {"token":"eyJhbGci..."}
+
+curl localhost:8080/me -H "Authorization: Bearer eyJhbGci..."
+# {"user_id":"..."}
 ```
 
 ---
 
-## Testing
+## What you just did
 
-```go
-func TestRegistration(t *testing.T) {
-    // Use in-memory database for tests
-    db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-    db.AutoMigrate(&identity.Identity{}, &identity.Credential{})
-    
-    repo := gormstore.New(db)
-    reg, _ := flow.PasswordAuth(repo, func() any { return &identity.Identity{} }, "email")
-    
-    ident, err := reg.Submit(context.Background(), "password", 
-        identity.JSON(`{"email":"test@example.com"}`), "password123")
-    
-    assert.NoError(t, err)
-    assert.NotNil(t, ident)
-}
+**Your struct is the user model.** No base type, no reserved columns. Kayan
+addressed it through `GetID`/`SetID` and the factory. See
+[BYOS](./concepts/byos.md).
+
+**`PasswordAuth` wired registration and login together** with bcrypt at cost
+12 and the password policy you specified. Every part of that is replaceable —
+see [Strategies](./concepts/strategies.md).
+
+**Sessions are stateless.** Validation is a signature check with no database
+round trip, and the 15-minute expiry is doing real work, because a stateless
+token cannot be revoked before it expires. When you need logout to mean
+something, attach a revocation store or use the database strategy. See
+[Sessions](./concepts/sessions.md).
+
+**Kayan wrote no HTTP.** It parsed and validated; the handlers are yours. That
+is what headless means here, and it is why this works identically behind chi,
+gin, echo, or fiber.
+
+---
+
+## Before this is production
+
+`AutoMigrateDev` is named for its environment. It cannot drop a column,
+transform existing rows, or roll back — on a table holding accounts, a wrong
+schema change is not recoverable. Use the versioned SQL instead:
+
+```go notest
+files, err := gormstore.Migrations(gormstore.DialectPostgres)
+// Apply with golang-migrate, Atlas, goose, or your own runner.
 ```
 
----
-
-## Production Checklist
-
-- ✅ Use environment variables for secrets
-- ✅ Enable HTTPS/TLS
-- ✅ Add rate limiting (`redisstore.NewRateLimiter`)
-- ✅ Add account lockout (`redisstore.NewLockoutStore`)
-- ✅ Enable audit logging (built into Kayan)
-- ✅ Set up monitoring (Prometheus/OTLP via `core/telemetry`)
-- ✅ Use strong JWT secrets (256-bit minimum)
-- ✅ Implement refresh token rotation
-- ✅ Add CORS middleware for web clients
+The [production checklist](./getting-started.md#before-production) covers the
+rest.
 
 ---
 
-## Troubleshooting
+## Next
 
-**"Identity not found" error**  
-→ Check that your User model implements `FlowIdentity`
-
-**"Type assertion failed"**  
-→ Ensure you're using the correct factory function: `func() any { return &YourModel{} }`
-
-**"Duplicate key error"**  
-→ User already exists with that email. Handle in your app logic.
-
-**Session validation fails**  
-→ Check JWT secret matches and token hasn't expired
-
----
-
-## Learn More
-
-- **Architecture**: `docs/architecture/README.md`
-- **BYOS Concepts**: `docs/concepts/byos.md`
-- **Extending Kayan**: `docs/architecture/extending-kayan.md`
-- **Complete Examples**: `examples/` directory
-- **AI Instructions**: `.ai-instructions.md`
-
----
-
-**You're ready to build!** 🚀
+- [Getting Started](./getting-started.md) — the same ground with the reasoning
+- [Authorization](./concepts/authorization.md) — deciding who may do what
+- [Multi-Tenancy](./concepts/multi-tenancy.md) — serving several customers
+- [examples/](../examples/README.md) — a runnable backend per strategy
+- [core reference](./reference/core.md) — the whole API

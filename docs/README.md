@@ -1,104 +1,127 @@
 # Kayan Documentation
 
-Kayan is a headless IAM library for Go. It is not an HTTP framework, not a hosted service, and not an opinionated user schema. The core packages give you authentication, sessions, authorization, federation, provisioning, compliance, and observability primitives that you compose inside your own application.
+Headless, non-generic, extensible IAM for Go.
 
-The codebase is organized around three hard constraints:
+If you are new here, read [Getting Started](./getting-started.md). It builds a
+working password-authentication service and then shows what each piece is
+actually doing, which is the fastest route to understanding the rest.
 
-- Headless only. `core/` contains no UI and no framework-specific transport logic.
-- Non-generic public APIs. Extension points use interfaces, `any`, and factory functions instead of Go type parameters.
-- BYOS. Your identity model, ID type, field names, and storage adapter remain yours.
+---
 
-## Reading Path
+## By task
 
-Start here if you are integrating Kayan into an application for the first time:
+**"I want to authenticate users."**
+[Getting Started](./getting-started.md) → [Strategies](./concepts/strategies.md) → [Sessions](./concepts/sessions.md)
 
-1. [Quick Start](./QUICKSTART.md)
-2. [Getting Started](./getting-started.md)
-3. [Examples Guide](../examples/README.md)
-4. [BYOS](./concepts/byos.md)
-5. [Authentication Strategies](./concepts/strategies.md)
-6. [Session Management](./concepts/sessions.md)
-7. [Authorization](./concepts/authorization.md)
-8. [Multi-Tenancy](./concepts/multi-tenancy.md)
+**"I have my own user table and I am not changing it."**
+[BYOS](./concepts/byos.md) — Kayan stores your struct as-is. No embedded base
+type, no reserved column names, no generics.
 
-Use these sections when you are designing or extending the library:
+**"I need to decide who can do what."**
+[Authorization](./concepts/authorization.md) — RBAC with inheritance and
+wildcards, ABAC, and relationship-based access control, plus which to reach
+for.
 
-- [Architecture Overview](./architecture/README.md)
-- [Authentication Flows](./architecture/authentication-flows.md)
-- [Authorization Models](./architecture/authorization-models.md)
-- [Security Model](./architecture/security-model.md)
-- [Storage Layer](./architecture/storage-layer.md)
-- [Strategy Internals](./architecture/strategy-internals.md)
-- [Extending Kayan](./architecture/extending-kayan.md)
+**"I am serving several customers from one deployment."**
+[Multi-Tenancy](./concepts/multi-tenancy.md) — resolution strategies, and how
+isolation is enforced in storage rather than left to application discipline.
 
-Use these package-level references when you need feature-specific guidance:
+**"I need SSO with an enterprise identity provider."**
+[SAML reference](./reference/saml.md) for SAML 2.0, or
+[OIDC provider reference](./reference/oidc-provider.md) if you are the one
+issuing tokens.
 
-- [Infrastructure Packages](./core/infrastructure.md)
-- [OIDC and OAuth 2.0](./core/oidc.md)
-- [SAML 2.0](./core/saml.md)
-- [SCIM 2.0](./core/scim.md)
-- [Storage Adapters](./adapters/storage.md)
-- [Operations](./operations/README.md)
-- [Configuration](./reference/configuration.md)
-- [API Reference](./reference/api.md)
-- [JavaScript and TypeScript Integration](./sdk/javascript.md)
+**"Okta or Entra needs to provision users into my service."**
+[SCIM reference](./reference/scim.md) — including the PATCH shapes both
+products actually send.
 
-## Practical References
+**"I want to store this somewhere Kayan does not ship an adapter for."**
+[Storage Layer](./architecture/storage-layer.md) then
+[Adapters reference](./reference/adapters.md). `kayantesting.StorageSuite` is
+the contract your implementation must satisfy, and it will tell you where you
+diverge.
 
-- [Examples Guide](../examples/README.md)
-- [Contributing](../CONTRIBUTING.md)
-- [Architecture Guardrails](../AGENTS.md)
-- [Versioning and Support](../VERSIONING.md)
-- [Deprecation Policy](../DEPRECATION.md)
+**"I am reviewing this for production use."**
+[Security Model](./architecture/security-model.md) — what is enforced, what
+fails closed, and what is still missing. The gaps are listed in the root
+[README](../README.md) and kept current.
 
-## Package Map
+---
 
-### Identity and authentication
+## Reference
 
-- `core/identity`: default identity, credential, session, JSON helpers
-- `core/domain`: persistence contracts and helper interfaces
-- `core/flow`: registration, login, MFA checks, magic link, OTP, WebAuthn, password policy, rate limiting, lockout, recovery, step-up
-- `core/session`: JWT and database-backed sessions
-- `core/device`: device trust and fingerprinting
-- `core/mfa`: standalone MFA enrollment, challenge, and verification orchestration
-- `core/risk`: adaptive risk evaluation
+Generated from the source, not from memory. Every signature here was read from
+the code.
 
-### Authorization and tenancy
+| Document | Covers |
+|---|---|
+| [core](./reference/core.md) | `domain`, `identity`, `keys`, `flow`, `session`, `rbac`, `rebac`, `policy`, `tenant`, `mfa`, `device`, `audit`, and the rest of `core` |
+| [oidc-provider](./reference/oidc-provider.md) | OAuth 2.0 and OpenID Connect: provider, request parsers, discovery, JWKS, ID tokens |
+| [saml](./reference/saml.md) | SAML 2.0 service provider and identity provider, signature verification, replay protection |
+| [scim](./reference/scim.md) | SCIM 2.0 resources, PATCH, and the filter grammar |
+| [adapters](./reference/adapters.md) | `kayan-gorm`, `kayan-redis`, `kayan-ldap`, `kayan-testing` |
+| [configuration](./reference/configuration.md) | Environment variables and configuration types |
 
-- `core/rbac`: role and permission checks
-- `core/rebac`: relation graph authorization
-- `core/policy`: ABAC and hybrid policies
-- `core/tenant`: tenant resolution, hooks, scoped storage
-- `core/admin`: framework-agnostic admin management APIs
+## Concepts
 
-### Federation and provisioning
+Narrative explanations of the ideas the API assumes you already hold.
 
-- `core/oauth2`: OAuth 2.0 authorization server
-- `core/oidc`: OIDC discovery, ID tokens, logout helpers
-- `core/saml`: SAML 2.0 service provider
-- `core/scim`: SCIM 2.0 provisioning and mapping
+- [BYOS](./concepts/byos.md) — why there are no generics, and what that buys you
+- [Strategies](./concepts/strategies.md) — how authentication methods compose
+- [Sessions](./concepts/sessions.md) — stateless versus revocable, and the trade
+- [Authorization](./concepts/authorization.md) — RBAC, ABAC, ReBAC, and when each fits
+- [Multi-Tenancy](./concepts/multi-tenancy.md) — resolution and enforcement
 
-### Compliance and operations
+## Architecture
 
-- `core/audit`: audit event model and store interface
-- `core/events`: event dispatch and topic model
-- `core/consent`: consent tracking and export
-- `core/compliance`: retention and encryption helpers
-- `core/config`: environment-backed configuration loader
-- `core/logger`: zap-backed logging
-- `core/telemetry`: OpenTelemetry traces and metrics
-- `core/health`: liveness, readiness, and detailed health checks
+For contributors, and for anyone deciding whether to depend on this.
 
-### Adapters
+- [Overview](./architecture/README.md) — module topology and the one-way dependency rule
+- [Security Model](./architecture/security-model.md) — the threat model and what defends against it
+- [Authentication Flows](./architecture/authentication-flows.md) — request paths end to end
+- [Authorization Models](./architecture/authorization-models.md) — how the engines evaluate
+- [Storage Layer](./architecture/storage-layer.md) — the contract, and writing your own backend
+- [Strategy Internals](./architecture/strategy-internals.md) — what a strategy is and how one is built
+- [Extending Kayan](./architecture/extending-kayan.md) — adding a strategy, store, or protocol
 
-- `kgorm`: GORM-backed persistence for identities, sessions, audit, OAuth 2.0, RBAC, ReBAC, and SCIM
-- `kredis`: Redis-backed session, rate-limit, lockout, and WebAuthn-related support
+## Operations
 
-## What Kayan Does Not Do
+- [Operations](./operations/README.md) — migrations, health checks, telemetry, audit
+- [HTTP Framework Integration](./adapters/http-frameworks.md) — wiring Kayan behind chi, gin, echo, fiber, or `net/http`
 
-- It does not choose your HTTP framework.
-- It does not require the default identity structs.
-- It does not force a single authorization model.
-- It does not own your migrations, tenant topology, or UI.
+## Examples
 
-That separation is deliberate. The recommended pattern is to keep Kayan in your domain layer and adapt it outward into handlers, middleware, CLIs, jobs, and background workers.
+[examples/](../examples/README.md) has a runnable backend per authentication
+strategy. Each is a single `main.go` you can read start to finish.
+
+They read `SESSION_SECRET` from the environment and refuse to start without
+it. That is deliberate: a secret hardcoded in a sample is the one that ends up
+signing real sessions.
+
+---
+
+## The three rules
+
+Everything in this documentation follows from these. If something here
+contradicts one of them, the documentation is wrong.
+
+**Headless.** Kayan has no router and never writes to an
+`http.ResponseWriter`. It parses and validates; you transport. The reason is
+not minimalism — it is that security checks belong inside the parser.
+`ParseAuthorizeRequest` enforces the `redirect_uri` allowlist, the PKCE
+policy, and the supported response types, so a caller cannot skip them by
+hand-parsing a query string.
+
+**Nothing is forced.** Every algorithm, hash, store, and clock sits behind an
+interface with a secure default you can replace. PKCE is required unless you
+turn it off. Unsigned SAML assertions are refused unless you allow them. Each
+escape hatch documents what it costs.
+
+**BYOS.** Your identity model, field names, ID type, and storage topology stay
+yours.
+
+## Project
+
+- [Versioning and Support](../VERSIONING.md) · [Deprecation Policy](../DEPRECATION.md)
+- [Security Policy](../SECURITY.md) · [Contributing](../CONTRIBUTING.md)
+- [AGENTS.md](../AGENTS.md) / [CLAUDE.md](../CLAUDE.md) — architectural rules
