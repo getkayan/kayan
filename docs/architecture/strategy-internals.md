@@ -419,9 +419,12 @@ Practical guidance:
 - Hooks run inline and unlocked. A slow hook is slow login latency.
 
 `ServiceProvider` in `kayan-saml` and `WebAuthnStrategy` use a different,
-struct-of-function-fields hook shape rather than this one. Note that
-`WebAuthnHooks` fields are currently **declared but never invoked** — the
-struct is assigned and then not read. Do not rely on them.
+struct-of-function-fields hook shape rather than this one. Unlike the `Hook`
+slices here, the `Before*` fields on `WebAuthnHooks` gate their ceremony:
+returning an error aborts it, so they enforce rather than observe.
+
+The whole `WebAuthnHooks` struct was previously assigned and never read, so
+setting any field did nothing. All of them are now invoked.
 
 ---
 

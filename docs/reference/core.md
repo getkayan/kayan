@@ -1690,6 +1690,20 @@ type WebAuthnHooks struct {
 produce unpredictable values: a guessable session ID lets an attacker complete a
 ceremony the server started for someone else.
 
+The `Before*` hooks gate their ceremony — returning an error aborts the call,
+so they are the place to enforce a policy rather than merely observe one. The
+`After*` hooks run on success and can still fail the call, which matters for
+`AfterFinishLogin`: a hook that rejects there prevents the identity from being
+returned.
+
+`UserLoader` replaces the credential-then-identity lookup on both login entry
+points. Supply it if you do not store WebAuthn credentials the way Kayan does.
+`CredentialSaver` replaces the `CredentialSource` persistence path in
+`FinishRegistration` — when set, Kayan writes nothing itself.
+`CredentialFilter` narrows the credential set offered during a ceremony;
+returning false for every credential leaves the user unable to authenticate,
+which is a deliberate way to disable a key without deleting it.
+
 ### `LDAPStrategy`
 
 ```go

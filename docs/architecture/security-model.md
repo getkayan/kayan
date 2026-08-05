@@ -1045,12 +1045,6 @@ Consolidated, so nothing above needs to be hunted for. The
 - Under `AllowOverrides`, a `HybridStrategy` **swallows engine errors** — an
   engine that fails is treated as a non-objection.
 
-**WebAuthn**
-- Only `OnCloneWarning` is invoked. The other nine `WebAuthnHooks` fields are
-  declared and never called, so setting them has no effect. `CredentialSaver`
-  and `UserLoader` are the ones most likely to mislead — both document
-  themselves as replacing default behavior they do not currently replace.
-
 **Storage**
 - `kayantesting.StorageSuite` does not cover `audit.AuditStore` or tenancy.
 - `kayan-gorm` does not currently run the suite; it has equivalent bespoke
