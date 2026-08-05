@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/getkayan/kayan/core/domain"
@@ -21,6 +22,40 @@ type PasswordStrategy struct {
 	generator        domain.IDGenerator
 	factory          func() any
 	policy           *PasswordPolicy
+
+	// dummyHashOnce guards the lazily computed dummy hash used to equalise the
+	// timing of the identifier-not-found path. See compareDummy.
+	dummyHashOnce sync.Once
+	dummyHash     string
+}
+
+// dummyPassword is hashed once per strategy to produce a hash that no real
+// password verifies against. Its value is irrelevant — it is never compared to
+// user input, only used as the target of a deliberately failing compare.
+const dummyPassword = "kayan-dummy-password-for-constant-time-lookup"
+
+// compareDummy performs a hash comparison that always fails, so an
+// authentication attempt for an identifier that does not exist costs roughly
+// the same as one for an identifier that does.
+//
+// Without it, a miss returns before any hashing happens while a hit pays for a
+// full bcrypt compare — around 250ms at the default cost against effectively
+// zero. That gap is measurable over a network, which turns the login endpoint
+// into a user-enumeration oracle regardless of the error message being
+// identical.
+//
+// The dummy hash is produced by the configured hasher, not by bcrypt directly,
+// so the timing still matches after a caller swaps in argon2id or anything
+// else. It is computed once and reused; the first miss pays for the hash.
+func (s *PasswordStrategy) compareDummy(password string) {
+	s.dummyHashOnce.Do(func() {
+		if h, err := s.hasher.Hash(dummyPassword); err == nil {
+			s.dummyHash = h
+		}
+	})
+	if s.dummyHash != "" {
+		s.hasher.Compare(password, s.dummyHash)
+	}
 }
 
 func NewPasswordStrategy(repo IdentityRepository, hasher domain.Hasher, identifierField string, factory func() any) *PasswordStrategy {
@@ -143,10 +178,12 @@ func (s *PasswordStrategy) Register(ctx context.Context, traits identity.JSON, p
 func (s *PasswordStrategy) Authenticate(ctx context.Context, identifier, password string) (any, error) {
 	// Case 1: BYOS (Direct Query)
 	if s.passwordField != "" {
+		found := false
 		for _, field := range s.identifierFields {
 			query := map[string]any{field: identifier}
 			ident, err := s.repo.FindIdentity(ctx, s.factory, query)
 			if err == nil && ident != nil {
+				found = true
 				// Check password
 				hash := s.getField(ident, s.passwordField)
 				if s.hasher.Compare(password, fmt.Sprintf("%v", hash)) {
@@ -154,12 +191,18 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, identifier, passwor
 				}
 			}
 		}
+		// Only when no identity matched at all — a wrong password against a
+		// real identity has already paid for its compare.
+		if !found {
+			s.compareDummy(password)
+		}
 		return nil, errors.New("invalid identifier or password")
 	}
 
 	// Case 2: Classic
 	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "password")
 	if err != nil || cred == nil {
+		s.compareDummy(password)
 		return nil, errors.New("invalid identifier or password")
 	}
 
