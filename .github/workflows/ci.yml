@@ -108,3 +108,44 @@ jobs:
       - name: Build
         working-directory: ${{ matrix.module }}
         run: go build ./...
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Examples are separate modules outside go.work, so nothing built them
+      # and they silently stopped compiling when a core interface changed.
+      # They are the first thing a user copies, so they are the last thing that
+      # should be broken.
+      - name: Build every example
+        run: |
+          set -euo pipefail
+          status=0
+          for dir in examples/*/backend; do
+            [ -f "${dir}/go.mod" ] || continue
+            echo "::group::${dir}"
+            if ! (cd "${dir}" && GOWORK=off go build ./...); then
+              echo "ERROR: ${dir} does not compile"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${status}"
+
+      # A secret committed in a sample application is the one people paste into
+      # production.
+      - name: Reject hardcoded session secrets
+        run: |
+          set -euo pipefail
+          if grep -rn 'change-me-in-production\|secret-change-me' examples/ --include='*.go'; then
+            echo "ERROR: examples must read SESSION_SECRET, not hardcode a secret"
+            exit 1
+          fi
