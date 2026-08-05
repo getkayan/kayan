@@ -1064,11 +1064,11 @@ if !result.Allowed {
 
 The path through `Evaluate`, and what each branch means:
 
-- **No policy configured** → `Allowed: true`. A `StepUpManager` built without
-  `WithStepUpPolicy` permits everything. That is fail-open, and it is the one
-  place in this document where the library's default is permissive rather than
-  refusing. A manager wired without a policy silently authorizes every sensitive
-  action.
+- **No policy configured** → `ErrStepUpNoPolicy`. A `StepUpManager` built
+  without `WithStepUpPolicy` cannot decide anything, so it does not decide
+  "allowed". This used to return `Allowed: true`, which meant a manager wired
+  in front of a sensitive action and missing its policy authorized everything
+  while reporting success.
 - **`RequiredLevel` returns `StepUpNone`** → `Allowed: true`. Correct: the
   action needs no step-up.
 - **No record, or the store errored** → `Allowed: false` with a challenge type.
@@ -1336,15 +1336,20 @@ for `app.example.com` useless to a page served from `app-example.com`. Getting
 `RPID` or `RPOrigins` wrong is the one configuration mistake that gives away
 that property.
 
-**Sign count is where the clone check lives, and here it is weaker than it
-should be.** An authenticator increments a counter on each assertion; a counter
-that goes backwards or repeats indicates two copies of a credential in
-circulation. go-webauthn sets `CloneWarning` when it detects this, and
-`updateSignCount` copies the flag into the stored config — but `FinishLogin`
-**returns the identity regardless**. `Hooks.OnCloneWarning` is declared and is
-not called anywhere in the strategy. A detected clone is recorded and the login
-proceeds. If cloned-authenticator detection matters to you, read the flag off
-the credential after login and act on it yourself.
+**Sign count is where the clone check lives.** An authenticator increments a
+counter on each assertion; a counter that goes backwards or repeats indicates
+two copies of a credential in circulation. go-webauthn sets `CloneWarning` when
+it detects this, `updateSignCount` persists the flag, and `FinishLogin` then
+calls `Hooks.OnCloneWarning` and refuses with `ErrWebAuthnClonedCredential`.
+
+The order matters: the flag is written before the refusal, so the evidence is
+not lost when the attempt is rejected. `Hooks.AllowClonedAuthenticators` lets
+the login proceed anyway, at the cost of clone detection across every
+credential.
+
+This previously recorded the warning and returned the identity regardless, with
+`OnCloneWarning` declared but never called — the protocol’s one clone-detection
+mechanism logged the break-in and opened the door.
 
 `updateSignCount` also discards `UpdateIdentity`'s error, so a failed write means
 the sign count silently stops advancing — which turns off clone detection for

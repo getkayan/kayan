@@ -1403,8 +1403,12 @@ Pwned Passwords set, or a dictionary check against the user's own name.
 
 ```go
 type MagicLinkStrategy struct { /* unexported fields */ }
+type MagicLinkOption func(*MagicLinkStrategy)
 
-func NewMagicLinkStrategy(repo IdentityRepository, store domain.TokenStore) *MagicLinkStrategy
+func NewMagicLinkStrategy(repo IdentityRepository, store domain.TokenStore, opts ...MagicLinkOption) *MagicLinkStrategy
+
+func WithMagicLinkTTL(ttl time.Duration) MagicLinkOption    // default 15 minutes
+func WithMagicLinkFactory(factory func() any) MagicLinkOption
 
 func (s *MagicLinkStrategy) ID() string
 func (s *MagicLinkStrategy) Initiate(ctx context.Context, identifier string) (any, error)
@@ -1419,6 +1423,11 @@ caller's job, either from the returned token or from an event subscriber.
 `Authenticate` takes the token as the secret. It checks the token's `Type` as
 well as its value, so a verification token cannot be redeemed as a login, and
 deletes it on use.
+
+Pass `WithMagicLinkFactory` if you use your own identity type. Without it the
+strategy loads through `*identity.Identity`, and the mismatch surfaces on the
+authentication path after the token has already been consumed. Same for
+`WithOTPFactory` below.
 
 The link you build is a bearer credential in a URL. It belongs in the path or
 fragment of a page that does not forward its URL to third parties, and it should
@@ -1435,6 +1444,7 @@ func NewOTPStrategy(repo IdentityRepository, tokenStore domain.TokenStore, sende
 
 func WithOTPTTL(ttl time.Duration) OTPOption        // default 5 minutes
 func WithOTPCodeLength(length int) OTPOption        // default 6
+func WithOTPFactory(factory func() any) OTPOption
 
 func (s *OTPStrategy) ID() string
 func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, error)
@@ -1642,10 +1652,18 @@ type WebAuthnCredentialData struct {
 Marshalled into `identity.Credential.Config`. `SignCount` is the authenticator's
 monotonic counter: a counter that goes backwards or repeats means two
 authenticators are presenting the same credential, which is the signature of a
-cloned key. That sets `CloneWarning` and fires the `OnCloneWarning` hook. It is
-a signal, not a proof — some legitimate authenticators do not maintain a counter
-at all — so the appropriate response is to log it and consider requiring
-re-enrollment, not to hard-fail the login.
+cloned key. That sets `CloneWarning`, fires the `OnCloneWarning` hook, and
+`FinishLogin` refuses with `ErrWebAuthnClonedCredential`.
+
+The hook is a notification, not a decision point — the login is refused whatever
+it does. Set `AllowClonedAuthenticators` to let it through instead. Some
+authenticators, platform ones in particular, keep no counter and always report
+zero; those never trigger the warning, so the option is not needed for them.
+Enable it only for a specific authenticator that increments incorrectly, and
+understand that it gives up clone detection for every credential.
+
+The sign count is persisted before the refusal, so the evidence survives rather
+than resetting on the next attempt.
 
 `WebAuthnHooks` provides extension points across the ceremony:
 
@@ -1660,6 +1678,7 @@ type WebAuthnHooks struct {
     BeforeFinishLogin        func(ctx context.Context, identifier string, sessionID string) error
     AfterFinishLogin         func(ctx context.Context, ident any) error
     OnCloneWarning           func(ctx context.Context, ident any, credentialID string)
+    AllowClonedAuthenticators bool
     CredentialFilter         func(cred *identity.Credential) bool
     CreateSessionID          func() string
     UserLoader               func(ctx context.Context, identifier string) (any, error)
@@ -2236,6 +2255,10 @@ func (s *LockoutStrategy) Initiate(ctx context.Context, identifier string) (any,
 func (s *LockoutStrategy) SetHooks(hooks LockoutHooks)
 ```
 
+Both entry points consult the store. `Initiate` matters for OTP and magic link,
+where it is the step that sends the code — a lockout that covered only
+`Authenticate` would let a locked account be made to send codes indefinitely.
+
 ```go
 type LockoutConfig struct {
     MaxFailures     int
@@ -2348,6 +2371,10 @@ func WithRecencyWindow(d time.Duration) StepUpManagerOption   // default 15 minu
 func (m *StepUpManager) Evaluate(ctx context.Context, sessionID, action string, resource any) (*StepUpResult, error)
 func (m *StepUpManager) RecordStepUp(ctx context.Context, sessionID string, level StepUpLevel) error
 ```
+
+`WithStepUpPolicy` is not optional in practice. Without it `Evaluate` returns
+`ErrStepUpNoPolicy` rather than a result — a manager with no policy cannot
+decide anything, so it must not decide "allowed".
 
 ```go
 type StepUpResult struct {

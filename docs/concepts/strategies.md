@@ -337,8 +337,9 @@ the challenge, and every other login attempt fails. Use
 instance.
 
 `WebAuthnHooks.OnCloneWarning` fires when the authenticator's signature counter
-goes backwards, which suggests a cloned credential. It is a security signal
-worth logging.
+goes backwards, which means the credential exists in two places. The login is
+then refused with `ErrWebAuthnClonedCredential`; the hook is for alerting or
+revoking, not for deciding. `AllowClonedAuthenticators` overrides the refusal.
 
 ### API key — `"api_key"`
 

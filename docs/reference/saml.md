@@ -109,6 +109,22 @@ func WithSPClock(c domain.Clock) SPOption
 Sets the clock used for validity windows. Tests use a fake clock to drive an
 assertion to the exact boundary of `NotOnOrAfter`.
 
+```go
+func WithAutoProvision() SPOption
+```
+
+Allows a valid assertion for a NameID with no existing identity to create one.
+
+Off by default: whether an unknown user signing in should get an account is a
+policy question, and for most deployments the identity provider decides who may
+authenticate, not who may exist here. Without it such an assertion is refused
+with [`ErrNoSuchIdentity`](#errors), which the caller can handle by directing
+the user through its own onboarding.
+
+When enabled, the `saml:` credential is written for the new identity so the
+next sign-on finds it rather than provisioning again. That holds whether the
+identity came from the built-in path or from `Hooks.UserFactory`.
+
 ### Config
 
 ```go
@@ -632,6 +648,7 @@ var (
     ErrWrongIssuer          = errors.New("saml: assertion issuer does not match the configured identity provider")
     ErrUnsolicited          = errors.New("saml: unsolicited response")
     ErrMissingAssertionID   = errors.New("saml: assertion has no ID")
+    ErrNoSuchIdentity       = errors.New("saml: no identity for this NameID")
 )
 ```
 
@@ -647,6 +664,7 @@ Each corresponds to a check that, if skipped, allows a distinct attack.
 | `ErrWrongIssuer` | An assertion from an unexpected identity provider among several registered. |
 | `ErrUnsolicited` | A response with no `InResponseTo` where one was required, so nothing ties it to a request this service provider made. |
 | `ErrMissingAssertionID` | An assertion with no ID, which cannot be tracked for replay — refused rather than accepted untracked. |
+| `ErrNoSuchIdentity` | Not an attack — a valid assertion for someone with no account here, refused because provisioning is opt-in. See [`WithAutoProvision`](#spoption). |
 
 `ErrMissingAssertionID` deserves emphasis. An assertion without an ID is not
 merely malformed; it is unreplayable-detectable, because there is nothing to

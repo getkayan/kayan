@@ -344,12 +344,19 @@ certificate it finds. Treat metadata ingestion as an operation you review, not
 one you automate from an untrusted URL. `RegisterIdPFromMetadata` fetches over
 plain `http.Get` with no timeout and no signature check on the document.
 
-**Reconciliation defaults are permissive.** The built-in `reconcileIdentity`
-creates an identity when no credential matches, and builds traits by string
-formatting attribute values into a JSON literal without escaping. Supply
-`Hooks.UserFactory` or `Hooks.UserLoader` for anything beyond a demo, and
-decide deliberately whether an unrecognized NameID should provision an account
-at all.
+**Provisioning is opt-in.** The built-in `reconcileIdentity` refuses a NameID
+with no existing identity, returning `ErrNoSuchIdentity`, unless the service
+provider was built with `WithAutoProvision()`. Whether a valid assertion should
+create an account is a policy question — the identity provider decides who may
+authenticate, not who may exist here.
+
+Traits are marshalled through `encoding/json`. They were previously built by
+formatting attribute values into a JSON literal, so a display name containing
+a double quote could add top-level keys to the trait object; a signed assertion
+says nothing about what its attribute values contain. Supply
+`Hooks.UserFactory` for any non-trivial identity model — it receives the whole
+`SAMLUser` including the raw attribute map, and the `saml:` credential is
+linked for you either way.
 
 ---
 
@@ -735,6 +742,54 @@ Per the [README](../../README.md), the cross-application SSO store in
 
 ---
 
+## Password authentication
+
+### Response timing does not reveal whether an account exists
+
+`PasswordStrategy.Authenticate` performs a hash comparison on both outcomes. An
+identifier with no account is compared against a dummy hash, so it costs
+roughly what a real one does.
+
+Identical error strings are not sufficient on their own. Skipping the hash on
+the not-found path made a miss return in microseconds while a hit paid for a
+full bcrypt comparison — around 250ms at the default cost. That gap is
+measurable over a network and enumerates accounts without any special tooling.
+
+The dummy hash is produced by the configured `domain.Hasher` rather than by
+bcrypt directly, so the property survives a caller swapping in argon2id, and it
+is computed once per strategy. Both the classic credential lookup and the BYOS
+field-mapped query are covered — they return from different branches.
+
+Only a genuine miss pays for it. A wrong password against a real identity has
+already done its comparison, and adding a second would create the inverse leak.
+
+### Registration does not hand back an existing identity
+
+With a `Linker` configured, password registration against an address that
+already has an identity returns `ErrIdentityAlreadyExists`. The submitted
+password is never compared against the stored credential, so returning the
+existing identity would make the registration endpoint hand out other people's
+accounts to whoever types their address — and a handler that issues a session
+on "registration succeeded" would log the attacker in as the victim.
+
+Unification still applies to federated methods, where an identity provider
+vouched for the address. `WithAllowPasswordCapture()` restores the previous
+behaviour for callers migrating off it, and should be paired with separate
+proof of control over the address.
+
+### Lockout covers both entry points
+
+`LockoutStrategy` checks the lockout store in `Authenticate` **and** in
+`Initiate`. For a single-step strategy only the former runs, but `Initiate` is
+where authentication begins for OTP and magic link — a lockout that skipped it
+would let a locked account be made to send codes indefinitely, and would not
+apply at all to a strategy whose real check happens there.
+
+Both go through one `checkLocked` helper rather than two copies, so a third
+entry point cannot silently omit it.
+
+---
+
 ## Multi-tenancy
 
 Isolation fails closed. This is the shortest section and one of the most
@@ -989,6 +1044,12 @@ Consolidated, so nothing above needs to be hunted for. The
 - One rule per action; `AddRule` overwrites silently.
 - Under `AllowOverrides`, a `HybridStrategy` **swallows engine errors** — an
   engine that fails is treated as a non-objection.
+
+**WebAuthn**
+- Only `OnCloneWarning` is invoked. The other nine `WebAuthnHooks` fields are
+  declared and never called, so setting them has no effect. `CredentialSaver`
+  and `UserLoader` are the ones most likely to mislead — both document
+  themselves as replacing default behavior they do not currently replace.
 
 **Storage**
 - `kayantesting.StorageSuite` does not cover `audit.AuditStore` or tenancy.
