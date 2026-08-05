@@ -14,14 +14,49 @@ type MagicLinkStrategy struct {
 	repo       IdentityRepository
 	tokenStore domain.TokenStore
 	ttl        time.Duration
+	factory    func() any
 }
 
-func NewMagicLinkStrategy(repo IdentityRepository, store domain.TokenStore) *MagicLinkStrategy {
-	return &MagicLinkStrategy{
+// MagicLinkOption configures a MagicLinkStrategy.
+type MagicLinkOption func(*MagicLinkStrategy)
+
+// WithMagicLinkTTL sets how long a magic link stays valid. Default is 15 minutes.
+func WithMagicLinkTTL(ttl time.Duration) MagicLinkOption {
+	return func(s *MagicLinkStrategy) { s.ttl = ttl }
+}
+
+// WithMagicLinkFactory sets the identity factory used to load the identity a
+// token belongs to.
+//
+// Without it the strategy falls back to *identity.Identity, which is wrong for
+// any caller using their own identity type — the load either fails or returns
+// a type the caller cannot use. Pass the same factory given to the rest of the
+// flow.
+func WithMagicLinkFactory(factory func() any) MagicLinkOption {
+	return func(s *MagicLinkStrategy) { s.factory = factory }
+}
+
+func NewMagicLinkStrategy(repo IdentityRepository, store domain.TokenStore, opts ...MagicLinkOption) *MagicLinkStrategy {
+	s := &MagicLinkStrategy{
 		repo:       repo,
 		tokenStore: store,
 		ttl:        15 * time.Minute,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// identityFactory returns the configured factory, falling back to the built-in
+// identity type. The fallback keeps the zero-configuration path working; it is
+// not correct for a caller with their own identity type, which is what
+// WithMagicLinkFactory is for.
+func (s *MagicLinkStrategy) identityFactory() func() any {
+	if s.factory != nil {
+		return s.factory
+	}
+	return func() any { return &identity.Identity{} }
 }
 
 func (s *MagicLinkStrategy) ID() string { return "magic_link" }
@@ -49,7 +84,7 @@ func (s *MagicLinkStrategy) Authenticate(ctx context.Context, identifier, secret
 
 	// 4. Find Identity
 	// We use the IdentityID from the token
-	ident, err := s.repo.GetIdentity(ctx, func() any { return &identity.Identity{} }, token.IdentityID)
+	ident, err := s.repo.GetIdentity(ctx, s.identityFactory(), token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("magic_link: identity not found")
 	}

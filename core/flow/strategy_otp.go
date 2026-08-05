@@ -49,10 +49,33 @@ type OTPStrategy struct {
 	sender     OTPSender
 	ttl        time.Duration
 	codeLength int
+	factory    func() any
+}
+
+// identityFactory returns the configured factory, falling back to the built-in
+// identity type. The fallback keeps the zero-configuration path working; it is
+// not correct for a caller with their own identity type, which is what
+// WithOTPFactory is for.
+func (s *OTPStrategy) identityFactory() func() any {
+	if s.factory != nil {
+		return s.factory
+	}
+	return func() any { return &identity.Identity{} }
 }
 
 // OTPOption configures an OTPStrategy.
 type OTPOption func(*OTPStrategy)
+
+// WithOTPFactory sets the identity factory used to load the identity a code
+// belongs to.
+//
+// Without it the strategy falls back to *identity.Identity, which is wrong for
+// any caller using their own identity type — the load either fails or returns
+// a type the caller cannot use. Pass the same factory given to the rest of the
+// flow.
+func WithOTPFactory(factory func() any) OTPOption {
+	return func(s *OTPStrategy) { s.factory = factory }
+}
 
 // WithOTPTTL sets the expiration duration for OTP codes. Default is 5 minutes.
 func WithOTPTTL(ttl time.Duration) OTPOption {
@@ -149,7 +172,7 @@ func (s *OTPStrategy) Authenticate(ctx context.Context, identifier, secret strin
 	}
 
 	// 4. Find the identity
-	ident, err := s.repo.GetIdentity(ctx, func() any { return &identity.Identity{} }, token.IdentityID)
+	ident, err := s.repo.GetIdentity(ctx, s.identityFactory(), token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("otp: identity not found")
 	}
