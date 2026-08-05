@@ -1593,6 +1593,7 @@ type WebAuthnConfig struct {
     RPID          string   // Relying Party ID (e.g., "example.com")
     RPOrigins     []string // Allowed origins (e.g., ["https://example.com"])
     SessionTTL    time.Duration
+    Clock         domain.Clock // defaults to domain.SystemClock
     Hooks         WebAuthnHooks
 }
 ```

@@ -1351,9 +1351,11 @@ This previously recorded the warning and returned the identity regardless, with
 `OnCloneWarning` declared but never called — the protocol’s one clone-detection
 mechanism logged the break-in and opened the door.
 
-`updateSignCount` also discards `UpdateIdentity`'s error, so a failed write means
-the sign count silently stops advancing — which turns off clone detection for
-that credential entirely.
+`updateSignCount` returns `UpdateIdentity`'s error rather than dropping it, and
+`FinishLogin` refuses on it. A failed write means the stored counter stops
+advancing, and a counter that never advances can never go backwards — so
+swallowing that error would turn off clone detection for the credential
+permanently, which is exactly the case the caller needs to hear about.
 
 ---
 
