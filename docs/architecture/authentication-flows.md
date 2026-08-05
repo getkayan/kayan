@@ -89,10 +89,10 @@ This is the step most likely to surprise, and it runs **before** the strategy:
 if linker != nil {
     existing, err := linker.FindExisting(ctx, traits)
     if err == nil && existing != nil {
-        if method == "password" && preventPasswordCapture {
-            return nil, ErrIdentityAlreadyExists
-        }
         if method == "password" {
+            if !allowPasswordCapture {
+                return nil, ErrIdentityAlreadyExists
+            }
             return existing, nil
         }
         err := linker.Link(ctx, existing, method, "", secret)
@@ -105,26 +105,32 @@ if linker != nil {
 
 Three distinct outcomes when the traits match an existing identity:
 
-- **`method == "password"` with `WithPreventPasswordCapture()`** —
-  `ErrIdentityAlreadyExists`. Nothing is written.
-- **`method == "password"` without that option** — the existing identity is
-  returned **and the submitted password is discarded**. No credential is
-  created, no hash is computed, and no error is raised. The caller receives a
-  valid-looking identity from a registration that did not register anything.
+- **`method == "password"`** — `ErrIdentityAlreadyExists`. Nothing is written.
+- **`method == "password"` with `WithAllowPasswordCapture()`** — the existing
+  identity is returned **and the submitted password is discarded**. No
+  credential is created, no hash is computed, and no error is raised. The
+  caller receives a valid-looking identity from a registration that did not
+  register anything.
 - **Any other method** — `Link` attaches the method to the existing identity.
   If `Link` fails, control falls through to the strategy, which will attempt to
   create a second identity.
 
-The password case is the one to understand. Consider an attacker who submits a
-registration for `victim@example.com` with a password of their choosing. Without
-`WithPreventPasswordCapture`, the flow returns the victim's identity. If the
-handler then issues a session on the strength of "registration succeeded", the
-attacker is logged in as the victim without ever proving control of the address.
-The password was never stored, so this is not credential capture — it is a
-registration endpoint that returns other people's accounts. **Set
-`WithPreventPasswordCapture()` whenever a linker is configured**, and treat a
-successful registration as an identity to verify rather than an identity to
-authenticate.
+The password case is the one to understand, and it is why the refusal is the
+default. Consider an attacker who submits a registration for
+`victim@example.com` with a password of their choosing. If the flow returned the
+victim's identity and the handler issued a session on the strength of
+"registration succeeded", the attacker would be logged in as the victim without
+ever proving control of the address. The password is never checked against the
+stored credential, so this is not credential capture — it is a registration
+endpoint that returns other people's accounts.
+
+`WithAllowPasswordCapture()` restores that behaviour for callers migrating off
+the previous default. It should not be enabled unless the caller separately
+proves control of the address before acting on the result. Treat a successful
+registration as an identity to verify rather than an identity to authenticate.
+
+`WithPreventPasswordCapture()` is a deprecated no-op — it enabled what is now
+unconditional. Remove the call.
 
 Note also that `FindExisting` matching on an *unverified* email is the same
 problem in a different place: unification decides two records are one person, and

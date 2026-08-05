@@ -152,7 +152,7 @@ func NewRegistrationManager(repo IdentityRepository, factory func() any, opts ..
 ```
 
 Options: `WithRegDispatcher`, `WithSchema`, `WithLinker`, `WithRegPreHook`,
-`WithRegPostHook`, `WithPreventPasswordCapture`. The constructor type-asserts
+`WithRegPostHook`, `WithAllowPasswordCapture`. The constructor type-asserts
 `repo.(audit.AuditStore)` — if your storage implements audit, it is used
 automatically.
 
@@ -194,19 +194,22 @@ type Linker interface {
 
 On a match, behavior depends on the method and the flag:
 
-- **`method == "password"` with `WithPreventPasswordCapture`** →
-  `ErrIdentityAlreadyExists`.
-- **`method == "password"` without it** → the existing identity is returned,
-  and **no password is written**. No audit event, no dispatch, no post-hooks.
+- **`method == "password"`** → `ErrIdentityAlreadyExists`. Nothing is written.
+- **`method == "password"` with `WithAllowPasswordCapture`** → the existing
+  identity is returned, and **no password is written**. No audit event, no
+  dispatch, no post-hooks.
 - **Any other method** → `linker.Link(...)`, and on success the existing
   identity is returned. If `Link` fails, execution falls through to step 6 and
   a new identity is created.
 
-The default behavior is the account-capture defense: someone registering with
+The default is the account-capture defense: someone registering with
 `ada@example.com` when that address already has an account does not get to set
-its password. Returning the existing identity rather than erroring is the
-friendlier default; `WithPreventPasswordCapture` makes it an explicit error
-when you would rather the caller handle it.
+its password — and, just as importantly, does not get handed the account. The
+submitted password is never compared against the stored credential, so
+returning the existing identity would mean a registration endpoint that hands
+out other people's accounts to whoever types their address.
+`WithAllowPasswordCapture` restores that for callers migrating off the previous
+default, and should be paired with proof of control over the address.
 
 Note the two quiet edges. The silent-return path emits **no audit event**, so
 "registration succeeded" in your handler does not always correspond to an
