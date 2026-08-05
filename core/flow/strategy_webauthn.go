@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/getkayan/kayan/core/domain"
@@ -92,9 +93,26 @@ type WebAuthnHooks struct {
 	// Receives the authenticated identity.
 	AfterFinishLogin func(ctx context.Context, ident any) error
 
-	// OnCloneWarning is called when a potential credential cloning is detected.
-	// This is a security event - log it and consider action.
+	// OnCloneWarning is called when the authenticator's signature counter went
+	// backwards, which means the credential exists in two places: the real
+	// authenticator and a copy of it.
+	//
+	// The login is refused regardless of what this hook does — it is a
+	// notification, not a decision point. Use it to alert the user, revoke the
+	// credential, or open an incident. To allow the login anyway, set
+	// AllowClonedAuthenticators.
 	OnCloneWarning func(ctx context.Context, ident any, credentialID string)
+
+	// AllowClonedAuthenticators lets a login proceed after a clone warning.
+	//
+	// The signature counter exists solely to detect a duplicated authenticator,
+	// so ignoring it gives up that detection. Some authenticators — several
+	// platform ones, and the Touch ID/Windows Hello style in particular — do
+	// not implement a counter at all and always report zero; those never
+	// produce a warning, so this option is not needed for them. Set it only if
+	// you have a specific authenticator that increments incorrectly and you
+	// accept losing clone detection for every credential.
+	AllowClonedAuthenticators bool
 
 	// CredentialFilter allows filtering which credentials to use.
 	// Return true to include the credential, false to exclude.
@@ -120,11 +138,22 @@ type WebAuthnStrategy struct {
 	factory    func() any
 	generator  domain.IDGenerator
 	sessionTTL time.Duration
-	hooks      WebAuthnHooks
+
+	// mu guards hooks, which SetHooks may replace after the strategy is
+	// already serving ceremonies.
+	mu    sync.RWMutex
+	hooks WebAuthnHooks
 
 	// sessionStore stores pending registration/login sessions
 	// In production, use Redis or database
 	sessionStore WebAuthnSessionStore
+}
+
+// getHooks returns a snapshot of the configured hooks.
+func (s *WebAuthnStrategy) getHooks() WebAuthnHooks {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hooks
 }
 
 // WebAuthnSessionStore interface for storing WebAuthn ceremony sessions.
@@ -176,6 +205,8 @@ func (s *WebAuthnStrategy) SetIDGenerator(g domain.IDGenerator) {
 
 // SetHooks allows updating hooks after creation.
 func (s *WebAuthnStrategy) SetHooks(hooks WebAuthnHooks) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.hooks = hooks
 }
 
@@ -451,8 +482,25 @@ func (s *WebAuthnStrategy) FinishLogin(
 		return nil, fmt.Errorf("webauthn: login validation failed: %w", err)
 	}
 
-	// Update sign count to prevent replay attacks
+	// Update sign count to prevent replay attacks. This runs before the clone
+	// check below so the warning is persisted even though the login is about
+	// to be refused — otherwise the evidence is lost and the next attempt
+	// starts from a clean counter.
 	s.updateSignCount(ctx, ident, credential)
+
+	// A backwards signature counter means the credential exists in two places.
+	// Recording that and letting the login through would be recording a
+	// break-in and opening the door.
+	if credential.Authenticator.CloneWarning {
+		hooks := s.getHooks()
+		credID := base64.RawURLEncoding.EncodeToString(credential.ID)
+		if hooks.OnCloneWarning != nil {
+			hooks.OnCloneWarning(ctx, ident, credID)
+		}
+		if !hooks.AllowClonedAuthenticators {
+			return nil, fmt.Errorf("%w: credential %s", ErrWebAuthnClonedCredential, credID)
+		}
+	}
 
 	return ident, nil
 }
@@ -540,6 +588,7 @@ func (s *WebAuthnStrategy) generateSessionID() string {
 // MemoryWebAuthnSessionStore is an in-memory implementation of WebAuthnSessionStore.
 // Use Redis in production.
 type MemoryWebAuthnSessionStore struct {
+	mu       sync.RWMutex
 	sessions map[string]*WebAuthnSessionData
 }
 
@@ -550,11 +599,15 @@ func NewMemoryWebAuthnSessionStore() *MemoryWebAuthnSessionStore {
 }
 
 func (s *MemoryWebAuthnSessionStore) SaveSession(ctx context.Context, sessionID string, data *WebAuthnSessionData) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sessions[sessionID] = data
 	return nil
 }
 
 func (s *MemoryWebAuthnSessionStore) GetSession(ctx context.Context, sessionID string) (*WebAuthnSessionData, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	data, ok := s.sessions[sessionID]
 	if !ok {
 		return nil, errors.New("session not found")
@@ -563,6 +616,8 @@ func (s *MemoryWebAuthnSessionStore) GetSession(ctx context.Context, sessionID s
 }
 
 func (s *MemoryWebAuthnSessionStore) DeleteSession(ctx context.Context, sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
 	return nil
 }

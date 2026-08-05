@@ -34,6 +34,9 @@ var (
 	ErrLDAPUserNotFound       = errors.New("ldap: user not found")
 	ErrLDAPConnectionFailed   = errors.New("ldap: connection failed")
 
+	// WebAuthn errors.
+	ErrWebAuthnClonedCredential = errors.New("webauthn: authenticator signature counter went backwards; credential may be cloned")
+
 	// Step-up errors.
 	ErrStepUpNoPolicy = errors.New("stepup: no policy configured")
 

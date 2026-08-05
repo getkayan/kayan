@@ -2,7 +2,10 @@ package flow
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewWebAuthnStrategy(t *testing.T) {
@@ -86,5 +89,78 @@ func TestWebAuthnCredentialData(t *testing.T) {
 
 	if !data.BackupEligible {
 		t.Error("BackupEligible should be true")
+	}
+}
+
+// TestMemoryWebAuthnSessionStoreIsConcurrencySafe covers a data race: the store
+// guarded its map with nothing at all, so two users in overlapping ceremonies —
+// the normal case for any deployment with more than one user — could crash the
+// process with a concurrent map write. Run with -race.
+func TestMemoryWebAuthnSessionStoreIsConcurrencySafe(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryWebAuthnSessionStore()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := fmt.Sprintf("session-%d", i)
+			data := &WebAuthnSessionData{
+				Challenge: id,
+				ExpiresAt: time.Now().Add(time.Minute),
+			}
+			if err := store.SaveSession(ctx, id, data); err != nil {
+				t.Errorf("SaveSession: %v", err)
+			}
+			if _, err := store.GetSession(ctx, id); err != nil {
+				t.Errorf("GetSession: %v", err)
+			}
+			if err := store.DeleteSession(ctx, id); err != nil {
+				t.Errorf("DeleteSession: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestWebAuthnSetHooksIsConcurrencySafe covers the same class on the strategy:
+// SetHooks wrote s.hooks with no lock while ceremonies read it.
+func TestWebAuthnSetHooksIsConcurrencySafe(t *testing.T) {
+	s := &WebAuthnStrategy{}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.SetHooks(WebAuthnHooks{AllowClonedAuthenticators: true})
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = s.getHooks()
+		}()
+	}
+	wg.Wait()
+}
+
+// TestWebAuthnCloneWarningRefusesByDefault documents the decision the clone
+// branch encodes. A backwards signature counter is the only signal WebAuthn
+// gives that a credential has been copied out of its authenticator; the code
+// persisted that flag and then returned the identity anyway, so the one
+// detection mechanism in the protocol recorded the break-in and let it through.
+//
+// The counter behaviour itself belongs to go-webauthn and is not re-tested
+// here — what is pinned is that the refusal is the default and the escape
+// hatch must be set explicitly.
+func TestWebAuthnCloneWarningRefusesByDefault(t *testing.T) {
+	if (WebAuthnHooks{}).AllowClonedAuthenticators {
+		t.Fatal("clone warnings are ignored by default")
+	}
+
+	s := &WebAuthnStrategy{}
+	if s.getHooks().AllowClonedAuthenticators {
+		t.Error("a strategy built with no hooks allows cloned authenticators")
 	}
 }
