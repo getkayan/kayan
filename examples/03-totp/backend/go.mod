@@ -37,3 +37,7 @@ require (
 replace github.com/getkayan/kayan/core => ../../../core
 
 // Run: go mod tidy
+
+require github.com/getkayan/kayan/kayan-testing v0.0.0
+
+replace github.com/getkayan/kayan/kayan-testing => ../../../kayan-testing

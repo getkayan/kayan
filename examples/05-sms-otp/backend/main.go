@@ -18,18 +18,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"net/http"
-	"reflect"
-	"strings"
-	"sync"
-	"time"
-
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/flow"
 	"github.com/getkayan/kayan/core/identity"
 	"github.com/getkayan/kayan/core/session"
+	kayantesting "github.com/getkayan/kayan/kayan-testing"
 	"github.com/google/uuid"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
 )
 
 // ---------- stdoutSMSSender – demo OTPSender that prints the code ----------
@@ -91,6 +91,11 @@ func (s *memTokenStore) DeleteExpiredTokens(_ context.Context) error {
 // ---------- In-memory IdentityStorage ----------
 
 type memRepo struct {
+	// The storage contract comes from the shared in-memory store, which is
+	// verified by kayantesting.StorageSuite. Only the strategy-specific
+	// methods below are written here.
+	*kayantesting.MemoryStore
+
 	mu         sync.RWMutex
 	identities map[string]any
 	creds      map[string]*identity.Credential
@@ -98,123 +103,18 @@ type memRepo struct {
 
 func newMemRepo() *memRepo {
 	return &memRepo{
-		identities: make(map[string]any),
-		creds:      make(map[string]*identity.Credential),
+		MemoryStore: kayantesting.NewMemoryStore(),
+		identities:  make(map[string]any),
+		creds:       make(map[string]*identity.Credential),
 	}
-}
-
-func (r *memRepo) CreateIdentity(ident any) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if fi, ok := ident.(flow.FlowIdentity); ok {
-		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
-	}
-	return nil
-}
-
-func (r *memRepo) GetIdentity(factory func() any, id any) (any, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	v, ok := r.identities[fmt.Sprintf("%v", id)]
-	if !ok {
-		return nil, errors.New("identity not found")
-	}
-	return v, nil
-}
-
-func (r *memRepo) FindIdentity(factory func() any, query map[string]any) (any, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for _, ident := range r.identities {
-		v := reflect.ValueOf(ident)
-		if v.Kind() == reflect.Ptr {
-			v = v.Elem()
-		}
-		match := true
-		for field, value := range query {
-			f := v.FieldByName(field)
-			if !f.IsValid() || fmt.Sprintf("%v", f.Interface()) != fmt.Sprintf("%v", value) {
-				match = false
-				break
-			}
-		}
-		if match {
-			return ident, nil
-		}
-	}
-	return nil, errors.New("identity not found")
-}
-
-func (r *memRepo) ListIdentities(factory func() any, page, limit int) ([]any, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]any, 0, len(r.identities))
-	for _, v := range r.identities {
-		out = append(out, v)
-	}
-	return out, nil
-}
-
-func (r *memRepo) UpdateIdentity(ident any) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if fi, ok := ident.(flow.FlowIdentity); ok {
-		r.identities[fmt.Sprintf("%v", fi.GetID())] = ident
-	}
-	return nil
-}
-
-func (r *memRepo) DeleteIdentity(factory func() any, id any) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.identities, fmt.Sprintf("%v", id))
-	return nil
-}
-
-func (r *memRepo) CreateCredential(cred any) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if c, ok := cred.(*identity.Credential); ok {
-		r.creds[c.Identifier+":"+c.Type] = c
-	}
-	return nil
-}
-
-func (r *memRepo) GetCredentialByIdentifier(identifier, method string) (*identity.Credential, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if method == "" {
-		for key, c := range r.creds {
-			if strings.HasPrefix(key, identifier+":") {
-				return c, nil
-			}
-		}
-		return nil, errors.New("credential not found")
-	}
-	c, ok := r.creds[identifier+":"+method]
-	if !ok {
-		return nil, errors.New("credential not found")
-	}
-	return c, nil
-}
-
-func (r *memRepo) UpdateCredentialSecret(_ context.Context, identityID, method, secret string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, c := range r.creds {
-		if c.IdentityID == identityID && c.Type == method {
-			c.Secret = secret
-			return nil
-		}
-	}
-	return errors.New("credential not found")
 }
 
 // ensureIdentity auto-creates an identity + "otp" credential for the phone number
 // if one does not already exist. The OTPStrategy requires a credential to exist
 // before it can deliver a code.
 func (r *memRepo) ensureIdentity(phone string) {
-	if _, err := r.GetCredentialByIdentifier(phone, "otp"); err == nil {
+	ctx := context.Background()
+	if _, err := r.GetCredentialByIdentifier(ctx, phone, "otp"); err == nil {
 		return // already registered
 	}
 	id := uuid.New().String()
@@ -222,13 +122,13 @@ func (r *memRepo) ensureIdentity(phone string) {
 		ID:     id,
 		Traits: identity.JSON(fmt.Sprintf(`{"phone":%q}`, phone)),
 	}
-	_ = r.CreateIdentity(ident)
+	_ = r.CreateIdentity(ctx, ident)
 	cred := &identity.Credential{
 		IdentityID: id,
 		Type:       "otp",
 		Identifier: phone,
 	}
-	_ = r.CreateCredential(cred)
+	_ = r.CreateCredential(ctx, cred)
 }
 
 // ---------- Server ----------
@@ -294,6 +194,7 @@ func (s *server) handleInitiate(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/sms/verify – { phone, code } → { session_token }
 func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	var body struct {
 		Phone string `json:"phone"`
 		Code  string `json:"code"`
@@ -310,7 +211,7 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ident := identRaw.(*identity.Identity)
-	sess, err := s.sessions.Create(uuid.New().String(), ident.ID)
+	sess, err := s.sessions.Create(ctx, uuid.New().String(), ident.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "session error")
 		return
@@ -320,13 +221,14 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/me – Authorization: Bearer <session_token>
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	token := bearerToken(r)
-	sess, err := s.sessions.Validate(token)
+	sess, err := s.sessions.Validate(ctx, token)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid or expired session")
 		return
 	}
-	identRaw, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, sess.IdentityID)
+	identRaw, err := s.repo.GetIdentity(ctx, func() any { return &identity.Identity{} }, sess.IdentityID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "identity not found")
 		return
@@ -353,7 +255,7 @@ func main() {
 	login := flow.NewLoginManager(repo, factory)
 	login.RegisterStrategy(otpStrategy)
 
-	jwtStrategy := session.NewHS256Strategy("change-me-in-production", 24*time.Hour)
+	jwtStrategy := session.NewHS256Strategy(sessionSecret(), 24*time.Hour)
 
 	srv := &server{repo: repo, login: login, sessions: jwtStrategy}
 
@@ -366,4 +268,16 @@ func main() {
 	if err := http.ListenAndServe(":8080", corsMiddleware(mux)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// sessionSecret reads the session signing secret from the environment.
+//
+// Examples used to hardcode one. That string is the most-copied line in a
+// sample application, and a copied secret ends up signing real sessions.
+func sessionSecret() string {
+	secret := os.Getenv("SESSION_SECRET")
+	if secret == "" {
+		log.Fatal("SESSION_SECRET is not set. Generate one with: openssl rand -base64 32")
+	}
+	return secret
 }

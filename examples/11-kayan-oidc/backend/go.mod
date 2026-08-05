@@ -38,3 +38,7 @@ replace github.com/getkayan/kayan/core => ../../../core
 
 // Run: go mod tidy
 // In production set: KAYAN_ISSUER, CLIENT_ID, CLIENT_SECRET env vars
+
+require github.com/getkayan/kayan/kayan-testing v0.0.0
+
+replace github.com/getkayan/kayan/kayan-testing => ../../../kayan-testing
