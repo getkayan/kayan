@@ -32,6 +32,10 @@ var (
 	// ErrMissingAssertionID reports an assertion with no ID, which cannot be
 	// tracked for replay.
 	ErrMissingAssertionID = errors.New("saml: assertion has no ID")
+	// ErrNoSuchIdentity reports a valid assertion for a NameID that has no
+	// identity here, when automatic provisioning is not enabled. See
+	// [WithAutoProvision].
+	ErrNoSuchIdentity = errors.New("saml: no identity for this NameID")
 )
 
 // DefaultClockSkew is the tolerance applied to assertion validity windows.

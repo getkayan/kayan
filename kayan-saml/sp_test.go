@@ -188,7 +188,7 @@ func TestProcessResponse(t *testing.T) {
 	repo := newMockIdentityRepo()
 	store := newMockSessionStore()
 	factory := func() any { return &mockUser{} }
-	sp := NewServiceProvider(config, store, repo, factory)
+	sp := NewServiceProvider(config, store, repo, factory, WithAutoProvision())
 
 	sp.RegisterIdP(&IdPConfig{
 		ID:          "idp1",

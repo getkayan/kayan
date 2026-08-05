@@ -45,6 +45,7 @@ func newAttackHarness(t testing.TB) *attackHarness {
 		store,
 		newMockIdentityRepo(),
 		func() any { return &mockUser{} },
+		WithAutoProvision(),
 	)
 	sp.RegisterIdP(&IdPConfig{
 		ID:          "idp1",

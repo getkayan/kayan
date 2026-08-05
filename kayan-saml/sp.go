@@ -49,6 +49,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -396,6 +397,10 @@ type ServiceProvider struct {
 	signer      Signer
 	replayCache ReplayCache
 	clock       domain.Clock
+
+	// autoProvision allows a successful assertion for an unknown NameID to
+	// create an identity. Off by default.
+	autoProvision bool
 }
 
 // SPOption configures a [ServiceProvider].
@@ -421,6 +426,18 @@ func WithSPSigner(s Signer) SPOption {
 // replica — use a shared cache in that case.
 func WithReplayCache(c ReplayCache) SPOption {
 	return func(sp *ServiceProvider) { sp.replayCache = c }
+}
+
+// WithAutoProvision allows a successful assertion from a NameID with no
+// existing identity to create one.
+//
+// It is off by default. Whether an unknown user signing in should get an
+// account is a policy question, and for most deployments the answer is no —
+// the identity provider decides who may authenticate, not who may exist here.
+// Without it, an unknown NameID is refused with [ErrNoSuchIdentity], which the
+// caller can handle by directing the user through their own onboarding.
+func WithAutoProvision() SPOption {
+	return func(sp *ServiceProvider) { sp.autoProvision = true }
 }
 
 // WithSPClock sets the clock used for validity windows.
@@ -890,6 +907,10 @@ func (sp *ServiceProvider) extractUser(assertion *Assertion, idp *IdPConfig) *SA
 }
 
 // reconcileIdentity finds or creates an identity for the SAML user.
+//
+// The built-in provisioning path is a convenience for the simple case. Anything
+// with its own identity model should supply Hooks.UserFactory, which receives
+// the whole SAMLUser including the raw attribute map.
 func (sp *ServiceProvider) reconcileIdentity(ctx context.Context, user *SAMLUser, idp *IdPConfig) (any, error) {
 	identifier := fmt.Sprintf("saml:%s:%s", user.IdPID, user.NameID)
 
@@ -907,21 +928,68 @@ func (sp *ServiceProvider) reconcileIdentity(ctx context.Context, user *SAMLUser
 		return sp.identityRepo.GetIdentity(ctx, sp.factory, cred.IdentityID)
 	}
 
+	// No existing identity. Creating one on the strength of an assertion is
+	// a policy decision — for many deployments a successful sign-on from
+	// someone with no account is an error, not an invitation to open one.
+	if !sp.autoProvision {
+		return nil, fmt.Errorf("%w: %s", ErrNoSuchIdentity, user.NameID)
+	}
+
 	// Try custom factory
 	if sp.hooks.UserFactory != nil {
-		return sp.hooks.UserFactory(ctx, user)
+		ident, err := sp.hooks.UserFactory(ctx, user)
+		if err != nil {
+			return nil, err
+		}
+		return ident, sp.linkCredential(ctx, ident, identifier)
 	}
 
-	// Create new identity
+	// Create new identity. Traits are marshalled rather than formatted into a
+	// JSON literal: these values come from the identity provider, and a name
+	// containing a quote would otherwise break out of the string and rewrite
+	// the surrounding object.
 	ident := sp.factory()
-	traits := identity.JSON(fmt.Sprintf(`{"email":"%s","first_name":"%s","last_name":"%s"}`,
-		user.Email, user.FirstName, user.LastName))
+	traits, err := json.Marshal(map[string]string{
+		"email":      user.Email,
+		"first_name": user.FirstName,
+		"last_name":  user.LastName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("saml: encoding traits: %w", err)
+	}
 
 	if ts, ok := ident.(interface{ SetTraits(identity.JSON) }); ok {
-		ts.SetTraits(traits)
+		ts.SetTraits(identity.JSON(traits))
 	}
 
-	return ident, sp.identityRepo.CreateIdentity(ctx, ident)
+	if err := sp.identityRepo.CreateIdentity(ctx, ident); err != nil {
+		return nil, err
+	}
+
+	return ident, sp.linkCredential(ctx, ident, identifier)
+}
+
+// linkCredential writes the saml: credential that the next sign-on looks up.
+//
+// Without it reconcileIdentity never finds what it provisioned, so every
+// sign-on by the same user created another identity — the account they signed
+// in as yesterday is not the one they get today, and the identity table grows
+// without bound.
+func (sp *ServiceProvider) linkCredential(ctx context.Context, ident any, identifier string) error {
+	fi, ok := ident.(interface{ GetID() any })
+	if !ok {
+		// The caller's type does not expose an ID, so there is nothing to key
+		// the credential on. Their UserLoader hook has to handle lookup.
+		return nil
+	}
+
+	return sp.identityRepo.CreateCredential(ctx, &identity.Credential{
+		IdentityID: fmt.Sprintf("%v", fi.GetID()),
+		Type:       "saml",
+		Identifier: identifier,
+		CreatedAt:  sp.clock.Now(),
+		UpdatedAt:  sp.clock.Now(),
+	})
 }
 
 // GetMetadata returns this SP's metadata XML.
