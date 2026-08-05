@@ -21,7 +21,7 @@ type RegistrationManager struct {
 	factory                func() any
 	schema                 identity.Schema
 	linker                 Linker
-	preventPasswordCapture bool
+	allowPasswordCapture   bool
 }
 
 // RegistrationOption configures a RegistrationManager.
@@ -52,9 +52,25 @@ func WithRegPostHook(h Hook) RegistrationOption {
 	return func(m *RegistrationManager) { m.postHooks = append(m.postHooks, h) }
 }
 
-// WithPreventPasswordCapture prevents password registration when an identity already exists.
+// WithPreventPasswordCapture is a no-op. Refusing password registration over an
+// existing identity is now the default.
+//
+// Deprecated: the behaviour this enabled is unconditional. Remove the call.
 func WithPreventPasswordCapture() RegistrationOption {
-	return func(m *RegistrationManager) { m.preventPasswordCapture = true }
+	return func(*RegistrationManager) {}
+}
+
+// WithAllowPasswordCapture makes password registration against an address that
+// already has an identity return that existing identity instead of an error.
+//
+// This is an account-takeover vector and exists only for callers migrating off
+// the previous default. Submitting a victim's address returns the victim's
+// identity, and the submitted password is discarded — so a handler that issues
+// a session on "registration succeeded" hands the attacker the victim's
+// account. Do not enable this unless the caller separately proves control of
+// the address before it acts on the result.
+func WithAllowPasswordCapture() RegistrationOption {
+	return func(m *RegistrationManager) { m.allowPasswordCapture = true }
 }
 
 func NewRegistrationManager(repo IdentityRepository, factory func() any, opts ...RegistrationOption) *RegistrationManager {
@@ -124,7 +140,7 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 	dispatcher := m.dispatcher
 	schema := m.schema
 	linker := m.linker
-	preventPasswordCapture := m.preventPasswordCapture
+	allowPasswordCapture := m.allowPasswordCapture
 	m.mu.RUnlock()
 
 	if !ok {
@@ -149,11 +165,14 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 	if linker != nil {
 		existing, err := linker.FindExisting(ctx, traits)
 		if err == nil && existing != nil {
-			if method == "password" && preventPasswordCapture {
-				return nil, ErrIdentityAlreadyExists
-			}
-
+			// Password registration over an existing identity is refused.
+			// Returning the existing identity would hand it to whoever
+			// submitted the address, since the submitted password is never
+			// checked against anything.
 			if method == "password" {
+				if !allowPasswordCapture {
+					return nil, ErrIdentityAlreadyExists
+				}
 				return existing, nil
 			}
 

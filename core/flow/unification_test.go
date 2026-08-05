@@ -2,7 +2,10 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/getkayan/kayan/core/identity"
 )
@@ -14,12 +17,16 @@ func TestUnification_ImplicitLinking(t *testing.T) {
 	}
 	factory := func() any { return &identity.Identity{} }
 
-	linker := NewDefaultLinker(repo, factory)
+	oidcStrategy := &stubFederatedStrategy{method: "oidc"}
+	linker := NewDefaultLinker(repo, factory, map[string]LoginStrategy{
+		"oidc": oidcStrategy,
+	})
 	regMgr := NewRegistrationManager(repo, factory)
 	regMgr.SetLinker(linker)
 
 	pwStrategy := NewPasswordStrategy(repo, NewBcryptHasher(4), "email", factory)
 	regMgr.RegisterStrategy(pwStrategy)
+	regMgr.RegisterStrategy(oidcStrategy)
 
 	// 1. Initial Registration via Password
 	traits := identity.JSON(`{"email": "unify@example.com", "email_verified": true}`)
@@ -29,11 +36,20 @@ func TestUnification_ImplicitLinking(t *testing.T) {
 		t.Fatalf("first registration failed: %v", err)
 	}
 
-	// 2. Mock a second registration attempt (e.g. via OIDC) with same VERIFIED email
-	// For this test, we'll re-use the "password" method.
-	ident2, err := regMgr.Submit(context.Background(), "password", traits, "newpass12")
+	// 2. A second registration arrives over a federated method carrying the
+	//    same verified email. This is what unification is for: the identity
+	//    provider vouched for the address, so attaching the new method to the
+	//    existing account is safe.
+	//
+	//    It must not be exercised through "password" — a password submission
+	//    proves nothing about who sent it, so that path is refused. See
+	//    TestUnification_PasswordDoesNotUnify below.
+	ident2, err := regMgr.Submit(context.Background(), "oidc", traits, "id-token")
 	if err != nil {
-		t.Fatalf("second registration (unification) failed: %v", err)
+		t.Fatalf("federated unification failed: %v", err)
+	}
+	if oidcStrategy.attached != 1 {
+		t.Errorf("Attach called %d times, want 1 — the method was not linked", oidcStrategy.attached)
 	}
 
 	// 3. Verify they are the SAME identity
@@ -43,14 +59,71 @@ func TestUnification_ImplicitLinking(t *testing.T) {
 		t.Errorf("Expected same identity ID, got %v and %v", id1, id2)
 	}
 
-	// 4. Verify linking failed if email is NOT verified
+	// 4. Verify linking failed if email is NOT verified. An unverified address
+	//    is an unproven claim, so a second registration must create its own
+	//    identity rather than attaching to the first.
 	unverifiedTraits := identity.JSON(`{"email": "unverified@example.com", "email_verified": false}`)
-	regMgr.Submit(context.Background(), "password", unverifiedTraits, "pass1234")
-	ident4, _ := regMgr.Submit(context.Background(), "password", unverifiedTraits, "pass5678")
+	ident3, err := regMgr.Submit(context.Background(), "oidc", unverifiedTraits, "id-token")
+	if err != nil {
+		t.Fatalf("first unverified registration failed: %v", err)
+	}
+	ident4, err := regMgr.Submit(context.Background(), "oidc", unverifiedTraits, "id-token")
+	if err != nil {
+		t.Fatalf("second unverified registration failed: %v", err)
+	}
 
-	if ident1.(*identity.Identity).ID == ident4.(*identity.Identity).ID {
+	if ident3.(*identity.Identity).ID == ident4.(*identity.Identity).ID {
 		t.Error("Expected different identities for unverified emails")
 	}
+}
+
+// TestUnification_PasswordDoesNotUnify pins the boundary the previous version
+// of TestUnification_ImplicitLinking got wrong: it used "password" as a stand-in
+// for a federated method and so asserted the account-takeover behaviour as
+// correct. Unification requires a method that proves control of the address.
+// Submitting a password proves only that the submitter typed one.
+func TestUnification_PasswordDoesNotUnify(t *testing.T) {
+	repo := &mockRepo{
+		identities: make(map[string]any),
+		creds:      make(map[string]*identity.Credential),
+	}
+	factory := func() any { return &identity.Identity{} }
+
+	regMgr := NewRegistrationManager(repo, factory)
+	regMgr.SetLinker(NewDefaultLinker(repo, factory))
+	regMgr.RegisterStrategy(NewPasswordStrategy(repo, NewBcryptHasher(4), "email", factory))
+
+	traits := identity.JSON(`{"email": "unify@example.com", "email_verified": true}`)
+	if _, err := regMgr.Submit(context.Background(), "password", traits, "pass1234"); err != nil {
+		t.Fatalf("first registration failed: %v", err)
+	}
+
+	if _, err := regMgr.Submit(context.Background(), "password", traits, "attacker"); !errors.Is(err, ErrIdentityAlreadyExists) {
+		t.Errorf("error = %v, want ErrIdentityAlreadyExists", err)
+	}
+}
+
+// stubFederatedStrategy stands in for an OIDC or SAML strategy. It must satisfy
+// both RegistrationStrategy (so Submit can look it up) and Attacher (so the
+// linker can attach the method to the matched identity).
+type stubFederatedStrategy struct {
+	method   string
+	attached int
+}
+
+func (s *stubFederatedStrategy) ID() string { return s.method }
+
+func (s *stubFederatedStrategy) Register(ctx context.Context, traits identity.JSON, secret string) (any, error) {
+	return &identity.Identity{ID: uuid.New().String(), Traits: traits}, nil
+}
+
+func (s *stubFederatedStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
+	return nil, errors.New("stub: Authenticate is not exercised by these tests")
+}
+
+func (s *stubFederatedStrategy) Attach(ctx context.Context, ident any, identifier, secret string) error {
+	s.attached++
+	return nil
 }
 
 func TestUnification_ExplicitLinking(t *testing.T) {

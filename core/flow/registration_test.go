@@ -294,32 +294,73 @@ func TestRegistrationManager_ConcurrentSetters(t *testing.T) {
 	wg.Wait()
 }
 
-func TestRegistration_PreventPasswordCapture(t *testing.T) {
+// newCaptureManager builds a manager with a linker configured, which is the
+// only condition under which the unification branch runs at all.
+func newCaptureManager(t *testing.T, opts ...RegistrationOption) (*RegistrationManager, identity.JSON) {
+	t.Helper()
+
 	repo := &mockRepo{
 		identities: make(map[string]any),
 		creds:      make(map[string]*identity.Credential),
 	}
 	factory := func() any { return &identity.Identity{} }
 
-	linker := NewDefaultLinker(repo, factory)
-	mgr := NewRegistrationManager(repo, factory,
-		WithLinker(linker),
-		WithPreventPasswordCapture(),
-	)
+	opts = append([]RegistrationOption{WithLinker(NewDefaultLinker(repo, factory))}, opts...)
+	mgr := NewRegistrationManager(repo, factory, opts...)
+
 	pwStrategy := NewPasswordStrategy(repo, NewBcryptHasher(4), "email", factory)
 	pwStrategy.SetIDGenerator(func() any { return uuid.New() })
 	mgr.RegisterStrategy(pwStrategy)
 
-	// Register first identity with verified email
 	traits := identity.JSON(`{"email": "capture@example.com", "email_verified": true}`)
-	_, err := mgr.Submit(context.Background(), "password", traits, "password123")
-	if err != nil {
+	if _, err := mgr.Submit(context.Background(), "password", traits, "password123"); err != nil {
 		t.Fatalf("first registration failed: %v", err)
 	}
+	return mgr, traits
+}
 
-	// Second attempt with same verified email should be blocked
-	_, err = mgr.Submit(context.Background(), "password", traits, "newpassword1")
+// TestRegistration_PasswordCaptureRefusedByDefault covers the account-takeover
+// vector that used to be the default: with a linker configured, registering
+// against an address that already had an identity returned that identity, and
+// the submitted password was discarded without being checked against anything.
+// A handler that issues a session on "registration succeeded" therefore handed
+// the attacker the victim's account.
+//
+// The refusal must hold with no options passed. An attack that is only blocked
+// when the caller remembers to opt in is not blocked.
+func TestRegistration_PasswordCaptureRefusedByDefault(t *testing.T) {
+	mgr, traits := newCaptureManager(t)
+
+	got, err := mgr.Submit(context.Background(), "password", traits, "attacker-chosen")
 	if !errors.Is(err, ErrIdentityAlreadyExists) {
-		t.Errorf("expected ErrIdentityAlreadyExists, got %v", err)
+		t.Errorf("error = %v, want ErrIdentityAlreadyExists", err)
+	}
+	if got != nil {
+		t.Errorf("an identity was returned alongside the refusal: %+v", got)
+	}
+}
+
+// TestRegistration_DeprecatedPreventOptionStillRefuses proves the deprecated
+// option is a no-op rather than an inversion, so callers that still pass it
+// keep the behaviour they asked for.
+func TestRegistration_DeprecatedPreventOptionStillRefuses(t *testing.T) {
+	mgr, traits := newCaptureManager(t, WithPreventPasswordCapture())
+
+	if _, err := mgr.Submit(context.Background(), "password", traits, "newpassword1"); !errors.Is(err, ErrIdentityAlreadyExists) {
+		t.Errorf("error = %v, want ErrIdentityAlreadyExists", err)
+	}
+}
+
+// TestRegistration_AllowPasswordCaptureIsOptIn proves the escape hatch still
+// works for callers migrating off the old default.
+func TestRegistration_AllowPasswordCaptureIsOptIn(t *testing.T) {
+	mgr, traits := newCaptureManager(t, WithAllowPasswordCapture())
+
+	got, err := mgr.Submit(context.Background(), "password", traits, "newpassword1")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got == nil {
+		t.Fatal("opted in to capture but got no identity back")
 	}
 }
