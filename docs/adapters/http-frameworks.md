@@ -193,7 +193,8 @@ func (s *Server) handleMe(c *fiber.Ctx) error {
         return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "not authenticated"})
     }
     
-    identRaw, err := s.repo.GetIdentity(func() any { return &identity.Identity{} }, sess.IdentityID)
+    // Fiber's context is not a context.Context; UserContext() is.
+    identRaw, err := s.repo.GetIdentity(c.UserContext(), func() any { return &identity.Identity{} }, sess.IdentityID)
     if err != nil {
         return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "identity not found"})
     }
@@ -496,4 +497,6 @@ The integration code is ~100 lines total for all endpoints. An adapter would sav
 **Recommended approach:**  
 Copy the patterns above into your project and adapt them to your needs. Treat them as **templates**, not dependencies.
 
-**For storage adapters**, see [`kgorm/`](../../kgorm) and [`kredis/`](../../kredis) — those solve real complexity and justify being maintained packages.
+**For storage adapters**, see [`kayan-gorm`](../../kayan-gorm) and
+[`kayan-redis`](../../kayan-redis). Those solve real complexity and justify
+being maintained modules; a router shim does not.

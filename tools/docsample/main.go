@@ -112,18 +112,25 @@ func inspect(block string) []string {
 
 	// Storage and session methods all take a context now. A sample calling one
 	// without it predates that change.
+	//
+	// The first argument is matched loosely rather than against a fixed name:
+	// handlers pass r.Context(), Fiber passes c.UserContext(), and a caller
+	// may have named the variable anything. Anything ending in Context() or
+	// containing ctx counts.
 	ctxMethods := []string{
 		"CreateIdentity", "GetIdentity", "FindIdentity", "ListIdentities",
 		"UpdateIdentity", "DeleteIdentity", "CreateCredential",
 		"GetCredentialByIdentifier", "CreateSession", "GetSession", "DeleteSession",
 	}
 	for _, method := range ctxMethods {
-		pattern := regexp.MustCompile(`\.` + method + `\(\s*(?:ctx|c|r\.Context\(\))?`)
-		for _, call := range pattern.FindAllString(block, -1) {
-			if !strings.Contains(call, "ctx") && !strings.Contains(call, "Context()") {
-				problems = append(problems,
-					method+" is called without a context")
+		pattern := regexp.MustCompile(`\.` + method + `\(([^,)]*)`)
+		for _, match := range pattern.FindAllStringSubmatch(block, -1) {
+			first := strings.TrimSpace(match[1])
+			if strings.Contains(strings.ToLower(first), "ctx") ||
+				strings.HasSuffix(first, "Context()") {
+				continue
 			}
+			problems = append(problems, method+" is called without a context")
 		}
 	}
 
