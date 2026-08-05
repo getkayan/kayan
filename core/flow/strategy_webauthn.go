@@ -149,6 +149,45 @@ type WebAuthnStrategy struct {
 	sessionStore WebAuthnSessionStore
 }
 
+// loadUser resolves the identity for an identifier, deferring to the
+// UserLoader hook when one is set.
+//
+// The default path looks up the credential and then the identity it belongs
+// to, which assumes the caller stores WebAuthn credentials the way Kayan does.
+// UserLoader is the seam for anyone who does not.
+func (s *WebAuthnStrategy) loadUser(ctx context.Context, identifier string, hooks WebAuthnHooks) (any, error) {
+	if hooks.UserLoader != nil {
+		ident, err := hooks.UserLoader(ctx, identifier)
+		if err != nil {
+			return nil, err
+		}
+		if ident == nil {
+			return nil, errors.New("webauthn: user not found")
+		}
+		return ident, nil
+	}
+
+	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
+	if err != nil {
+		return nil, errors.New("webauthn: user not found")
+	}
+
+	ident, err := s.repo.GetIdentity(ctx, s.factory, cred.IdentityID)
+	if err != nil {
+		return nil, errors.New("webauthn: user not found")
+	}
+	return ident, nil
+}
+
+// newSessionID returns a ceremony session ID, deferring to the CreateSessionID
+// hook when one is set.
+func (s *WebAuthnStrategy) newSessionID(hooks WebAuthnHooks) string {
+	if hooks.CreateSessionID != nil {
+		return hooks.CreateSessionID()
+	}
+	return s.generateSessionID()
+}
+
 // getHooks returns a snapshot of the configured hooks.
 func (s *WebAuthnStrategy) getHooks() WebAuthnHooks {
 	s.mu.RLock()
@@ -227,6 +266,13 @@ func (s *WebAuthnStrategy) BeginRegistration(
 		return nil, "", errors.New("webauthn: identity must implement FlowIdentity")
 	}
 
+	hooks := s.getHooks()
+	if hooks.BeforeBeginRegistration != nil {
+		if err := hooks.BeforeBeginRegistration(ctx, ident, userName); err != nil {
+			return nil, "", err
+		}
+	}
+
 	userID := []byte(fmt.Sprintf("%v", fi.GetID()))
 
 	// Get existing credentials for this user
@@ -245,7 +291,7 @@ func (s *WebAuthnStrategy) BeginRegistration(
 	}
 
 	// Store session
-	sessionID := s.generateSessionID()
+	sessionID := s.newSessionID(hooks)
 	sessionData := &WebAuthnSessionData{
 		Challenge:        session.Challenge,
 		UserID:           session.UserID,
@@ -255,6 +301,12 @@ func (s *WebAuthnStrategy) BeginRegistration(
 
 	if err := s.sessionStore.SaveSession(ctx, sessionID, sessionData); err != nil {
 		return nil, "", fmt.Errorf("webauthn: failed to save session: %w", err)
+	}
+
+	if hooks.AfterBeginRegistration != nil {
+		if err := hooks.AfterBeginRegistration(ctx, ident, sessionID); err != nil {
+			return nil, "", err
+		}
 	}
 
 	return options, sessionID, nil
@@ -272,6 +324,13 @@ func (s *WebAuthnStrategy) FinishRegistration(
 	fi, ok := ident.(FlowIdentity)
 	if !ok {
 		return nil, errors.New("webauthn: identity must implement FlowIdentity")
+	}
+
+	hooks := s.getHooks()
+	if hooks.BeforeFinishRegistration != nil {
+		if err := hooks.BeforeFinishRegistration(ctx, ident, sessionID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Retrieve session
@@ -336,11 +395,22 @@ func (s *WebAuthnStrategy) FinishRegistration(
 		cred.ID = fmt.Sprintf("%v", s.generator())
 	}
 
-	// If identity supports CredentialSource, add to it
-	if cs, ok := ident.(CredentialSource); ok {
+	// CredentialSaver takes over persistence entirely when supplied.
+	if hooks.CredentialSaver != nil {
+		if err := hooks.CredentialSaver(ctx, ident, cred); err != nil {
+			return nil, fmt.Errorf("webauthn: failed to save credential: %w", err)
+		}
+	} else if cs, ok := ident.(CredentialSource); ok {
+		// If identity supports CredentialSource, add to it
 		cs.SetCredentials(append(cs.GetCredentials(), *cred))
 		if err := s.repo.CreateIdentity(ctx, ident); err != nil {
 			return nil, fmt.Errorf("webauthn: failed to save credential: %w", err)
+		}
+	}
+
+	if hooks.AfterFinishRegistration != nil {
+		if err := hooks.AfterFinishRegistration(ctx, ident, cred); err != nil {
+			return nil, err
 		}
 	}
 
@@ -353,15 +423,16 @@ func (s *WebAuthnStrategy) BeginLogin(
 	ctx context.Context,
 	identifier string,
 ) (*protocol.CredentialAssertion, string, error) {
-	// Find identity by identifier
-	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
-	if err != nil {
-		return nil, "", errors.New("webauthn: user not found")
+	hooks := s.getHooks()
+	if hooks.BeforeBeginLogin != nil {
+		if err := hooks.BeforeBeginLogin(ctx, identifier); err != nil {
+			return nil, "", err
+		}
 	}
 
-	ident, err := s.repo.GetIdentity(ctx, s.factory, cred.IdentityID)
+	ident, err := s.loadUser(ctx, identifier, hooks)
 	if err != nil {
-		return nil, "", errors.New("webauthn: user not found")
+		return nil, "", err
 	}
 
 	fi, ok := ident.(FlowIdentity)
@@ -389,7 +460,7 @@ func (s *WebAuthnStrategy) BeginLogin(
 	}
 
 	// Store session
-	sessionID := s.generateSessionID()
+	sessionID := s.newSessionID(hooks)
 	sessionData := &WebAuthnSessionData{
 		Challenge:        session.Challenge,
 		UserID:           session.UserID,
@@ -404,6 +475,12 @@ func (s *WebAuthnStrategy) BeginLogin(
 
 	if err := s.sessionStore.SaveSession(ctx, sessionID, sessionData); err != nil {
 		return nil, "", fmt.Errorf("webauthn: failed to save session: %w", err)
+	}
+
+	if hooks.AfterBeginLogin != nil {
+		if err := hooks.AfterBeginLogin(ctx, identifier, sessionID); err != nil {
+			return nil, "", err
+		}
 	}
 
 	return options, sessionID, nil
@@ -433,6 +510,13 @@ func (s *WebAuthnStrategy) FinishLogin(
 	sessionID string,
 	response *protocol.ParsedCredentialAssertionData,
 ) (any, error) {
+	hooks := s.getHooks()
+	if hooks.BeforeFinishLogin != nil {
+		if err := hooks.BeforeFinishLogin(ctx, identifier, sessionID); err != nil {
+			return nil, err
+		}
+	}
+
 	// Retrieve session
 	sessionData, err := s.sessionStore.GetSession(ctx, sessionID)
 	if err != nil {
@@ -444,15 +528,9 @@ func (s *WebAuthnStrategy) FinishLogin(
 		return nil, errors.New("webauthn: session expired")
 	}
 
-	// Find identity
-	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
+	ident, err := s.loadUser(ctx, identifier, hooks)
 	if err != nil {
-		return nil, errors.New("webauthn: user not found")
-	}
-
-	ident, err := s.repo.GetIdentity(ctx, s.factory, cred.IdentityID)
-	if err != nil {
-		return nil, errors.New("webauthn: user not found")
+		return nil, err
 	}
 
 	fi, ok := ident.(FlowIdentity)
@@ -492,13 +570,18 @@ func (s *WebAuthnStrategy) FinishLogin(
 	// Recording that and letting the login through would be recording a
 	// break-in and opening the door.
 	if credential.Authenticator.CloneWarning {
-		hooks := s.getHooks()
 		credID := base64.RawURLEncoding.EncodeToString(credential.ID)
 		if hooks.OnCloneWarning != nil {
 			hooks.OnCloneWarning(ctx, ident, credID)
 		}
 		if !hooks.AllowClonedAuthenticators {
 			return nil, fmt.Errorf("%w: credential %s", ErrWebAuthnClonedCredential, credID)
+		}
+	}
+
+	if hooks.AfterFinishLogin != nil {
+		if err := hooks.AfterFinishLogin(ctx, ident); err != nil {
+			return nil, err
 		}
 	}
 
@@ -512,9 +595,15 @@ func (s *WebAuthnStrategy) getExistingCredentials(ident any) []webauthn.Credenti
 		return nil
 	}
 
+	filter := s.getHooks().CredentialFilter
+
 	var creds []webauthn.Credential
 	for _, c := range cs.GetCredentials() {
 		if c.Type != "webauthn" {
+			continue
+		}
+
+		if filter != nil && !filter(&c) {
 			continue
 		}
 
