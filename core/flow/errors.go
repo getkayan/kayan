@@ -34,6 +34,9 @@ var (
 	ErrLDAPUserNotFound       = errors.New("ldap: user not found")
 	ErrLDAPConnectionFailed   = errors.New("ldap: connection failed")
 
+	// Step-up errors.
+	ErrStepUpNoPolicy = errors.New("stepup: no policy configured")
+
 	// Kayan OIDC errors.
 	ErrKayanOIDCStateInvalid   = errors.New("kayan_oidc: state invalid or expired")
 	ErrKayanOIDCStateExpired   = errors.New("kayan_oidc: state expired")

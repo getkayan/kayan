@@ -118,12 +118,12 @@ func NewStepUpManager(store StepUpStore, opts ...StepUpManagerOption) *StepUpMan
 // Evaluate checks whether the current session meets the required assurance level
 // for a given action.
 func (m *StepUpManager) Evaluate(ctx context.Context, sessionID, action string, resource any) (*StepUpResult, error) {
+	// A manager with no policy cannot decide anything, so it must not decide
+	// "allowed". Returning Allowed: true here would mean a caller who wired up
+	// step-up and forgot WithStepUpPolicy gets a guard that permits every
+	// action while looking like it is enforcing something.
 	if m.policy == nil {
-		return &StepUpResult{
-			Allowed:       true,
-			RequiredLevel: StepUpNone,
-			CurrentLevel:  StepUpNone,
-		}, nil
+		return nil, ErrStepUpNoPolicy
 	}
 
 	required := m.policy.RequiredLevel(ctx, action, resource)

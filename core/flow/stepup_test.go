@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -144,16 +145,24 @@ func TestStepUpManager_RecordAndEvaluate(t *testing.T) {
 	}
 }
 
-func TestStepUpManager_NoPolicy(t *testing.T) {
+// TestStepUpManager_NoPolicyIsAnError covers the one fail-open default that
+// used to exist here: a manager constructed without WithStepUpPolicy returned
+// Allowed: true for every action. A caller who wired step-up in and forgot the
+// policy got a guard that enforced nothing while reporting success on every
+// sensitive action it was placed in front of.
+//
+// A manager with no policy cannot decide anything, so it must not decide
+// "allowed".
+func TestStepUpManager_NoPolicyIsAnError(t *testing.T) {
 	store := NewMemoryStepUpStore()
 	mgr := NewStepUpManager(store) // No policy
 
 	result, err := mgr.Evaluate(context.Background(), "sess-1", "any_action", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, ErrStepUpNoPolicy) {
+		t.Errorf("error = %v, want ErrStepUpNoPolicy", err)
 	}
-	if !result.Allowed {
-		t.Error("no policy should allow everything")
+	if result != nil && result.Allowed {
+		t.Error("an unconfigured manager allowed the action")
 	}
 }
 
