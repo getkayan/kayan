@@ -369,6 +369,7 @@ func TestSQLite_AuditEventLifecycle(t *testing.T) {
 // --- RBAC Repository ---
 
 func TestSQLite_RBAC(t *testing.T) {
+	ctx := context.Background()
 	db := setupSQLiteDB(t)
 	if err := db.AutoMigrate(&RoleAssignment{}); err != nil {
 		t.Fatalf("migrate RBAC: %v", err)
@@ -376,7 +377,7 @@ func TestSQLite_RBAC(t *testing.T) {
 	rbacRepo := NewRBACRepository(db)
 
 	// Initially no roles
-	roles, err := rbacRepo.GetIdentityRoles("id-1")
+	roles, err := rbacRepo.GetIdentityRoles(ctx, "id-1")
 	if err != nil {
 		t.Fatalf("GetIdentityRoles: %v", err)
 	}
@@ -385,19 +386,19 @@ func TestSQLite_RBAC(t *testing.T) {
 	}
 
 	// Set roles
-	if err := rbacRepo.SetIdentityRoles("id-1", []string{"admin", "editor"}); err != nil {
+	if err := rbacRepo.SetIdentityRoles(ctx, "id-1", []string{"admin", "editor"}); err != nil {
 		t.Fatalf("SetIdentityRoles: %v", err)
 	}
-	roles, _ = rbacRepo.GetIdentityRoles("id-1")
+	roles, _ = rbacRepo.GetIdentityRoles(ctx, "id-1")
 	if len(roles) != 2 {
 		t.Fatalf("expected 2 roles, got %d", len(roles))
 	}
 
 	// Replace roles
-	if err := rbacRepo.SetIdentityRoles("id-1", []string{"viewer"}); err != nil {
+	if err := rbacRepo.SetIdentityRoles(ctx, "id-1", []string{"viewer"}); err != nil {
 		t.Fatalf("SetIdentityRoles replace: %v", err)
 	}
-	roles, _ = rbacRepo.GetIdentityRoles("id-1")
+	roles, _ = rbacRepo.GetIdentityRoles(ctx, "id-1")
 	if len(roles) != 1 {
 		t.Fatalf("expected 1 role after replace, got %d", len(roles))
 	}
@@ -406,10 +407,10 @@ func TestSQLite_RBAC(t *testing.T) {
 	}
 
 	// Clear all roles
-	if err := rbacRepo.SetIdentityRoles("id-1", nil); err != nil {
+	if err := rbacRepo.SetIdentityRoles(ctx, "id-1", nil); err != nil {
 		t.Fatalf("SetIdentityRoles clear: %v", err)
 	}
-	roles, _ = rbacRepo.GetIdentityRoles("id-1")
+	roles, _ = rbacRepo.GetIdentityRoles(ctx, "id-1")
 	if len(roles) != 0 {
 		t.Fatalf("expected 0 roles after clear, got %d", len(roles))
 	}

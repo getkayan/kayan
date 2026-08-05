@@ -198,3 +198,17 @@ CREATE UNIQUE INDEX idx_role_assignments_unique
     ON role_assignments (tenant_id, identity_id, role);
 CREATE INDEX idx_role_assignments_identity
     ON role_assignments (tenant_id, identity_id);
+
+-- Role definitions are persisted rather than held per process. A role created
+-- on one replica must be visible to the next request whichever replica serves
+-- it; holding them in memory meant a permission check elsewhere returned false
+-- with no error, which is indistinguishable from a legitimate denial.
+
+CREATE TABLE role_definitions (
+    name        TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT '',
+    permissions JSONB,
+    inherits    JSONB,
+    description TEXT,
+    PRIMARY KEY (name, tenant_id)
+);

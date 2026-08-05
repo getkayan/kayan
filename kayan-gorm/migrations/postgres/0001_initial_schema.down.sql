@@ -4,6 +4,7 @@
 -- migration can be rolled back during development; running it against a
 -- production database destroys every account.
 
+DROP TABLE IF EXISTS role_definitions;
 DROP TABLE IF EXISTS role_assignments;
 DROP TABLE IF EXISTS devices;
 DROP TABLE IF EXISTS mfa_recovery_codes;
