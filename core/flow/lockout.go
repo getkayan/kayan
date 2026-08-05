@@ -137,19 +137,11 @@ func (s *LockoutStrategy) getKey(ctx context.Context, identifier string) string 
 	return identifier
 }
 
-func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
-	key := s.getKey(ctx, identifier)
-
-	// Snapshot hooks and config under read lock
-	s.mu.RLock()
-	hooks := s.config.Hooks
-	failOpen := s.config.FailOpen
-	maxFailures := s.config.MaxFailures
-	lockoutDuration := s.config.LockoutDuration
-	failureWindow := s.config.FailureWindow
-	s.mu.RUnlock()
-
-	// 1. Check if locked
+// checkLocked reports whether the account is locked, returning the configured
+// lock error if so. Both Authenticate and Initiate go through here: a lockout
+// that only covers one of them is not a lockout, since for OTP and magic-link
+// strategies Initiate is where authentication actually begins.
+func (s *LockoutStrategy) checkLocked(ctx context.Context, key, identifier string, hooks LockoutHooks, failOpen bool) error {
 	var locked bool
 	var until time.Time
 	var err error
@@ -164,12 +156,8 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 		locked, until, err = s.store.IsLocked(ctx, key)
 	}
 
-	if err != nil {
-		if failOpen {
-			// Continue despite error
-		} else {
-			return nil, fmt.Errorf("lockout check failed: %v", err)
-		}
+	if err != nil && !failOpen {
+		return fmt.Errorf("lockout check failed: %v", err)
 	}
 
 	if locked {
@@ -178,9 +166,28 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 			LockedUntil: until,
 		}
 		if hooks.CreateLockError != nil {
-			return nil, hooks.CreateLockError(info)
+			return hooks.CreateLockError(info)
 		}
-		return nil, fmt.Errorf("account is locked until %v", until.Format(time.RFC822))
+		return fmt.Errorf("account is locked until %v", until.Format(time.RFC822))
+	}
+	return nil
+}
+
+func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
+	key := s.getKey(ctx, identifier)
+
+	// Snapshot hooks and config under read lock
+	s.mu.RLock()
+	hooks := s.config.Hooks
+	failOpen := s.config.FailOpen
+	maxFailures := s.config.MaxFailures
+	lockoutDuration := s.config.LockoutDuration
+	failureWindow := s.config.FailureWindow
+	s.mu.RUnlock()
+
+	// 1. Check if locked
+	if err := s.checkLocked(ctx, key, identifier, hooks, failOpen); err != nil {
+		return nil, err
 	}
 
 	// 2. Delegate to next strategy
@@ -243,10 +250,23 @@ func (s *LockoutStrategy) Authenticate(ctx context.Context, identifier, secret s
 
 // Initiate supports Initiator interface for multi-step strategies.
 func (s *LockoutStrategy) Initiate(ctx context.Context, identifier string) (any, error) {
-	if initiator, ok := s.next.(Initiator); ok {
-		return initiator.Initiate(ctx, identifier)
+	initiator, ok := s.next.(Initiator)
+	if !ok {
+		return nil, fmt.Errorf("underlying strategy does not support initiation")
 	}
-	return nil, fmt.Errorf("underlying strategy does not support initiation")
+
+	key := s.getKey(ctx, identifier)
+
+	s.mu.RLock()
+	hooks := s.config.Hooks
+	failOpen := s.config.FailOpen
+	s.mu.RUnlock()
+
+	if err := s.checkLocked(ctx, key, identifier, hooks, failOpen); err != nil {
+		return nil, err
+	}
+
+	return initiator.Initiate(ctx, identifier)
 }
 
 // -- Memory Implementation --

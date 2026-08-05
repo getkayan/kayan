@@ -269,3 +269,59 @@ func TestLockout_ConcurrentSetHooks(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// mockInitiatorStrategy is a two-step strategy — the shape of OTP and magic
+// link, where Initiate is the step that sends a code and Authenticate verifies
+// it.
+type mockInitiatorStrategy struct {
+	mockAuthStrategy
+	initiated int
+}
+
+func (m *mockInitiatorStrategy) Initiate(ctx context.Context, identifier string) (any, error) {
+	m.initiated++
+	return "code-sent", nil
+}
+
+// TestLockoutCoversInitiate covers a bypass: LockoutStrategy.Initiate delegated
+// straight to the wrapped strategy without consulting the lockout store, while
+// Authenticate checked it. For a single-step strategy that is invisible, but
+// for OTP and magic link Initiate is where authentication begins — so a locked
+// account could still be made to send codes indefinitely, and any strategy
+// whose real check happens at Initiate was not locked out at all.
+//
+// RateLimitStrategy.Initiate already checked its limiter. This brings the two
+// decorators back into agreement.
+func TestLockoutCoversInitiate(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryLockoutStore()
+	mock := &mockInitiatorStrategy{mockAuthStrategy: mockAuthStrategy{shouldFail: true}}
+	strategy := NewLockoutStrategy(mock, store, 3, time.Minute, 10*time.Minute)
+
+	user := "locked@example.com"
+
+	// Initiate works before the account is locked.
+	if _, err := strategy.Initiate(ctx, user); err != nil {
+		t.Fatalf("Initiate before lockout: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if _, err := strategy.Authenticate(ctx, user, "badpass"); err == nil {
+			t.Fatalf("attempt %d should have failed", i)
+		}
+	}
+
+	// Confirm the account really is locked, so a passing test below cannot be
+	// explained by the lockout never engaging.
+	if _, err := strategy.Authenticate(ctx, user, "badpass"); err == nil {
+		t.Fatal("Authenticate succeeded against a locked account")
+	}
+
+	before := mock.initiated
+	if _, err := strategy.Initiate(ctx, user); err == nil {
+		t.Error("Initiate succeeded against a locked account")
+	}
+	if mock.initiated != before {
+		t.Errorf("the wrapped strategy was invoked %d extra times while locked", mock.initiated-before)
+	}
+}
