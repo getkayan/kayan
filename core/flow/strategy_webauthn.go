@@ -59,6 +59,11 @@ type WebAuthnConfig struct {
 	// SessionTTL is how long WebAuthn sessions are valid (default: 5 minutes)
 	SessionTTL time.Duration
 
+	// Clock supplies the current time for ceremony expiry. Defaults to
+	// domain.SystemClock. Tests drive a ceremony to the exact expiry boundary
+	// by supplying a fake.
+	Clock domain.Clock
+
 	// Hooks for customizing behavior
 	Hooks WebAuthnHooks
 }
@@ -138,6 +143,7 @@ type WebAuthnStrategy struct {
 	factory    func() any
 	generator  domain.IDGenerator
 	sessionTTL time.Duration
+	clock      domain.Clock
 
 	// mu guards hooks, which SetHooks may replace after the strategy is
 	// already serving ceremonies.
@@ -147,6 +153,35 @@ type WebAuthnStrategy struct {
 	// sessionStore stores pending registration/login sessions
 	// In production, use Redis or database
 	sessionStore WebAuthnSessionStore
+}
+
+// saveCredential persists a newly registered credential.
+//
+// This is an update, not an insert: registration attaches a credential to an
+// identity that already exists, since BeginRegistration was handed one. It
+// previously called CreateIdentity, which fails on any storage that treats a
+// create as an insert — enrolling a second passkey returned a duplicate-key
+// error after the ceremony had already succeeded, so the credential was lost.
+//
+// CredentialSaver takes over persistence entirely when supplied.
+func (s *WebAuthnStrategy) saveCredential(ctx context.Context, ident any, cred *identity.Credential, hooks WebAuthnHooks) error {
+	if hooks.CredentialSaver != nil {
+		if err := hooks.CredentialSaver(ctx, ident, cred); err != nil {
+			return fmt.Errorf("webauthn: failed to save credential: %w", err)
+		}
+		return nil
+	}
+
+	cs, ok := ident.(CredentialSource)
+	if !ok {
+		return nil
+	}
+
+	cs.SetCredentials(append(cs.GetCredentials(), *cred))
+	if err := s.repo.UpdateIdentity(ctx, ident); err != nil {
+		return fmt.Errorf("webauthn: failed to save credential: %w", err)
+	}
+	return nil
 }
 
 // loadUser resolves the identity for an identifier, deferring to the
@@ -231,6 +266,7 @@ func NewWebAuthnStrategy(
 		factory:      factory,
 		sessionStore: sessionStore,
 		sessionTTL:   sessionTTL,
+		clock:        domain.ClockOrDefault(config.Clock),
 		hooks:        config.Hooks,
 	}, nil
 }
@@ -296,7 +332,7 @@ func (s *WebAuthnStrategy) BeginRegistration(
 		Challenge:        session.Challenge,
 		UserID:           session.UserID,
 		UserVerification: string(session.UserVerification),
-		ExpiresAt:        time.Now().Add(s.sessionTTL),
+		ExpiresAt:        s.clock.Now().Add(s.sessionTTL),
 	}
 
 	if err := s.sessionStore.SaveSession(ctx, sessionID, sessionData); err != nil {
@@ -340,7 +376,7 @@ func (s *WebAuthnStrategy) FinishRegistration(
 	}
 	defer s.sessionStore.DeleteSession(ctx, sessionID)
 
-	if time.Now().After(sessionData.ExpiresAt) {
+	if s.clock.Now().After(sessionData.ExpiresAt) {
 		return nil, errors.New("webauthn: session expired")
 	}
 
@@ -387,25 +423,16 @@ func (s *WebAuthnStrategy) FinishRegistration(
 		Type:       "webauthn",
 		Identifier: base64.RawURLEncoding.EncodeToString(credential.ID),
 		Config:     identity.JSON(configBytes),
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		CreatedAt:  s.clock.Now(),
+		UpdatedAt:  s.clock.Now(),
 	}
 
 	if s.generator != nil {
 		cred.ID = fmt.Sprintf("%v", s.generator())
 	}
 
-	// CredentialSaver takes over persistence entirely when supplied.
-	if hooks.CredentialSaver != nil {
-		if err := hooks.CredentialSaver(ctx, ident, cred); err != nil {
-			return nil, fmt.Errorf("webauthn: failed to save credential: %w", err)
-		}
-	} else if cs, ok := ident.(CredentialSource); ok {
-		// If identity supports CredentialSource, add to it
-		cs.SetCredentials(append(cs.GetCredentials(), *cred))
-		if err := s.repo.CreateIdentity(ctx, ident); err != nil {
-			return nil, fmt.Errorf("webauthn: failed to save credential: %w", err)
-		}
+	if err := s.saveCredential(ctx, ident, cred, hooks); err != nil {
+		return nil, err
 	}
 
 	if hooks.AfterFinishRegistration != nil {
@@ -465,7 +492,7 @@ func (s *WebAuthnStrategy) BeginLogin(
 		Challenge:        session.Challenge,
 		UserID:           session.UserID,
 		UserVerification: string(session.UserVerification),
-		ExpiresAt:        time.Now().Add(s.sessionTTL),
+		ExpiresAt:        s.clock.Now().Add(s.sessionTTL),
 	}
 
 	// Store allowed credential IDs
@@ -524,7 +551,7 @@ func (s *WebAuthnStrategy) FinishLogin(
 	}
 	defer s.sessionStore.DeleteSession(ctx, sessionID)
 
-	if time.Now().After(sessionData.ExpiresAt) {
+	if s.clock.Now().After(sessionData.ExpiresAt) {
 		return nil, errors.New("webauthn: session expired")
 	}
 
@@ -564,7 +591,9 @@ func (s *WebAuthnStrategy) FinishLogin(
 	// check below so the warning is persisted even though the login is about
 	// to be refused — otherwise the evidence is lost and the next attempt
 	// starts from a clean counter.
-	s.updateSignCount(ctx, ident, credential)
+	if err := s.updateSignCount(ctx, ident, credential); err != nil {
+		return nil, fmt.Errorf("webauthn: failed to persist sign count: %w", err)
+	}
 
 	// A backwards signature counter means the credential exists in two places.
 	// Recording that and letting the login through would be recording a
@@ -631,11 +660,18 @@ func (s *WebAuthnStrategy) getExistingCredentials(ident any) []webauthn.Credenti
 	return creds
 }
 
-// updateSignCount updates the sign count for a credential after successful auth.
-func (s *WebAuthnStrategy) updateSignCount(ctx context.Context, ident any, credential *webauthn.Credential) {
+// updateSignCount persists the authenticator counter after a successful
+// assertion.
+//
+// The error is returned rather than dropped. A failed write means the stored
+// counter stops advancing, and a counter that never advances can never go
+// backwards — so a silent failure here disables clone detection for that
+// credential permanently, which is exactly the case a caller needs to know
+// about.
+func (s *WebAuthnStrategy) updateSignCount(ctx context.Context, ident any, credential *webauthn.Credential) error {
 	cs, ok := ident.(CredentialSource)
 	if !ok {
-		return
+		return nil
 	}
 
 	credID := base64.RawURLEncoding.EncodeToString(credential.ID)
@@ -657,13 +693,13 @@ func (s *WebAuthnStrategy) updateSignCount(ctx context.Context, ident any, crede
 			}
 
 			creds[i].Config = identity.JSON(configBytes)
-			creds[i].UpdatedAt = time.Now()
+			creds[i].UpdatedAt = s.clock.Now()
 			break
 		}
 	}
 
 	cs.SetCredentials(creds)
-	s.repo.UpdateIdentity(ctx, ident)
+	return s.repo.UpdateIdentity(ctx, ident)
 }
 
 func (s *WebAuthnStrategy) generateSessionID() string {

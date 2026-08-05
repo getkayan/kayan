@@ -2,14 +2,17 @@ package flow
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/getkayan/kayan/core/identity"
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 func TestNewWebAuthnStrategy(t *testing.T) {
@@ -363,4 +366,172 @@ func TestWebAuthnCredentialFilterExcludes(t *testing.T) {
 	if seen != 1 {
 		t.Errorf("filter was called %d times, want 1", seen)
 	}
+}
+
+// insertOnlyRepo rejects CreateIdentity for an ID that already exists, which is
+// what a real database does and what mockRepo does not — it treats create and
+// update as the same map write, so it cannot distinguish an insert from an
+// update and never caught this.
+type insertOnlyRepo struct {
+	*mockRepo
+	updates int
+}
+
+func (r *insertOnlyRepo) CreateIdentity(ctx context.Context, ident any) error {
+	fi, ok := ident.(FlowIdentity)
+	if !ok {
+		return r.mockRepo.CreateIdentity(ctx, ident)
+	}
+	if _, exists := r.mockRepo.identities[fmt.Sprintf("%v", fi.GetID())]; exists {
+		return errors.New("duplicate key: identity already exists")
+	}
+	return r.mockRepo.CreateIdentity(ctx, ident)
+}
+
+func (r *insertOnlyRepo) UpdateIdentity(ctx context.Context, ident any) error {
+	r.updates++
+	return r.mockRepo.UpdateIdentity(ctx, ident)
+}
+
+// fakeClock is a domain.Clock whose time only moves when told. core cannot
+// import kayan-testing, so this is the local equivalent.
+type fakeClock struct{ now time.Time }
+
+func (c *fakeClock) Now() time.Time { return c.now }
+
+// TestWebAuthnRegistrationUpdatesRatherThanInserts covers a write that could
+// not succeed. FinishRegistration attaches a credential to an identity that
+// already exists — BeginRegistration was handed one — but persisted it with
+// CreateIdentity. On any storage that treats a create as an insert, enrolling
+// a second passkey failed with a duplicate key after the ceremony had already
+// succeeded, so the credential was lost.
+func TestWebAuthnRegistrationUpdatesRatherThanInserts(t *testing.T) {
+	ctx := context.Background()
+
+	repo := &insertOnlyRepo{mockRepo: &mockRepo{
+		identities: make(map[string]any),
+		creds:      make(map[string]*identity.Credential),
+	}}
+	ident := &identity.Identity{ID: "user-1"}
+	if err := repo.CreateIdentity(ctx, ident); err != nil {
+		t.Fatalf("seed identity: %v", err)
+	}
+
+	strategy, err := NewWebAuthnStrategy(repo, WebAuthnConfig{
+		RPDisplayName: "Test App",
+		RPID:          "localhost",
+		RPOrigins:     []string{"http://localhost:8080"},
+	}, func() any { return &identity.Identity{} }, NewMemoryWebAuthnSessionStore())
+	if err != nil {
+		t.Fatalf("NewWebAuthnStrategy: %v", err)
+	}
+
+	// Drive the persistence branch directly. The surrounding ceremony needs a
+	// real authenticator response, which is not what this is testing.
+	cred := &identity.Credential{
+		IdentityID: "user-1",
+		Type:       "webauthn",
+		Identifier: "cred-2",
+	}
+
+	if err := strategy.saveCredential(ctx, ident, cred, WebAuthnHooks{}); err != nil {
+		t.Fatalf("saveCredential: %v", err)
+	}
+	if repo.updates != 1 {
+		t.Errorf("UpdateIdentity called %d times, want 1", repo.updates)
+	}
+
+	stored, err := repo.GetIdentity(ctx, func() any { return &identity.Identity{} }, "user-1")
+	if err != nil {
+		t.Fatalf("GetIdentity: %v", err)
+	}
+	if got := len(stored.(*identity.Identity).Credentials); got != 1 {
+		t.Errorf("stored credentials = %d, want 1 — the credential was not persisted", got)
+	}
+}
+
+// TestWebAuthnUsesTheConfiguredClock proves ceremony expiry runs off the
+// injected clock rather than the wall clock, so a caller can drive a session
+// to its exact expiry boundary.
+func TestWebAuthnUsesTheConfiguredClock(t *testing.T) {
+	ctx := context.Background()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: start}
+
+	store := NewMemoryWebAuthnSessionStore()
+	strategy, err := NewWebAuthnStrategy(nil, WebAuthnConfig{
+		RPDisplayName: "Test App",
+		RPID:          "localhost",
+		RPOrigins:     []string{"http://localhost:8080"},
+		SessionTTL:    5 * time.Minute,
+		Clock:         clock,
+	}, func() any { return &identity.Identity{} }, store)
+	if err != nil {
+		t.Fatalf("NewWebAuthnStrategy: %v", err)
+	}
+
+	// A session that expires on the fake clock's timeline. Real wall-clock time
+	// is decades past this, so a strategy still calling time.Now() sees it as
+	// long expired.
+	expires := start.Add(5 * time.Minute)
+	if err := store.SaveSession(ctx, "sess", &WebAuthnSessionData{ExpiresAt: expires}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	ident := &identity.Identity{ID: "user-1"}
+
+	// FinishRegistration checks expiry before it parses anything, so a nil
+	// response still reaches the check. The distinguishing outcome is the
+	// error: "session expired" means the wall clock won.
+	_, err = strategy.FinishRegistration(ctx, ident, "sess", "ada@example.com", "Ada", nil)
+	if err != nil && strings.Contains(err.Error(), "session expired") {
+		t.Fatalf("a session valid on the fake clock was treated as expired: %v", err)
+	}
+
+	// Past the TTL on the fake clock, it must expire.
+	clock.now = start.Add(6 * time.Minute)
+	if err := store.SaveSession(ctx, "sess2", &WebAuthnSessionData{ExpiresAt: expires}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	_, err = strategy.FinishRegistration(ctx, ident, "sess2", "ada@example.com", "Ada", nil)
+	if err == nil || !strings.Contains(err.Error(), "session expired") {
+		t.Errorf("error = %v, want session expired after advancing the fake clock", err)
+	}
+}
+
+// TestWebAuthnSignCountFailureIsReported covers an error that was discarded.
+// A failed sign-count write means the stored counter stops advancing, and a
+// counter that never advances can never go backwards — so the failure silently
+// disabled clone detection for that credential.
+func TestWebAuthnSignCountFailureIsReported(t *testing.T) {
+	strategy := &WebAuthnStrategy{
+		repo:  &failingUpdateRepo{},
+		clock: &fakeClock{now: time.Now()},
+	}
+
+	credConfig, err := json.Marshal(WebAuthnCredentialData{CredentialID: []byte("c")})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	ident := &identity.Identity{
+		ID: "user-1",
+		Credentials: []identity.Credential{{
+			Type:       "webauthn",
+			Identifier: base64.RawURLEncoding.EncodeToString([]byte("c")),
+			Config:     identity.JSON(credConfig),
+		}},
+	}
+
+	err = strategy.updateSignCount(context.Background(), ident, &webauthn.Credential{ID: []byte("c")})
+	if err == nil {
+		t.Error("a failed sign-count write was reported as success")
+	}
+}
+
+type failingUpdateRepo struct {
+	*mockRepo
+}
+
+func (r *failingUpdateRepo) UpdateIdentity(ctx context.Context, ident any) error {
+	return errors.New("storage unavailable")
 }
