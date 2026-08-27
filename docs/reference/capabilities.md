@@ -15,15 +15,29 @@ Package-level freeze status and remaining evidence gates are tracked in the
 | Area | Status | Notes |
 |---|---|---|
 | Identity contracts and BYOS | Release candidate | Arbitrary models and ID types through `FlowIdentity`, `any`, and factories |
-| Password, OTP, TOTP, magic link, API key, recovery | Release candidate | Transient credentials have an atomic single-use storage contract; external review remains required |
+| Password, OTP, TOTP, magic link, API key, recovery | Release candidate | Transient credentials have an atomic single-use storage contract; OTP codes are bound to the account they were issued to and `PasswordAuth` installs lockout by default; external review remains required |
 | WebAuthn and social/OIDC login | Experimental | Security-sensitive multi-step flows are still being hardened |
-| JWT and database sessions | Release candidate | SSO has transport-neutral contracts plus optional GORM and Redis adapters; multi-node operation remains experimental |
+| JWT and database sessions | Release candidate | Revocation is keyed on the session id, so logout also ends the refresh token, and `Delete` errors rather than reporting a logout it cannot perform; SSO has transport-neutral contracts plus optional GORM and Redis adapters; multi-node operation remains experimental |
 | RBAC, ABAC, hybrid policy | Release candidate | ReBAC object enumeration remains incomplete |
-| OAuth 2.0 and OIDC provider | Experimental | Authorization code uses PKCE; protocol audit persistence has an explicit failure callback; formal certification remains pending |
+| OAuth 2.0 and OIDC provider | Experimental | Authorization code uses PKCE; access tokens are signed and introspected through the key provider, so rotation applies to them; protocol audit persistence has an explicit failure callback; formal certification remains pending |
 | SAML 2.0 | Experimental | Metadata retrieval is injectable, bounded, and public-HTTPS-only by default; interoperability evidence remains pending |
 | SCIM 2.0 | Experimental | Discovery, value-path parsing, and filtered PATCH sub-attributes are implemented; storage adapters may explicitly reject multi-valued shapes they cannot represent |
 | GORM and Redis adapters | Experimental, optional | GORM passes the shared storage suite; CI exercises concurrent atomicity on real PostgreSQL/MySQL and SSO lifecycle/concurrency on real Redis |
 | CLI | Experimental | Its remote administration API is not part of the stable library contract |
+
+## Multi-tenancy
+
+Tenant isolation in `kayan-gorm` covers identities, credentials, sessions,
+auth tokens, audit events, devices, MFA enrolments, role assignments, and SSO
+sessions. Isolation is applied by GORM callbacks, so it must be installed with
+`gormstore.RegisterTenantIsolation(db)`; without that call the callbacks are
+absent and queries run unscoped.
+
+One boundary is inherent to BYOS and cannot be closed from the adapter side.
+`GetIdentity` and `FindIdentity` query the caller's own identity struct, so a
+multi-tenant deployment must implement `tenant.Scoped` on that struct. A model
+that does not is invisible to the isolation callbacks and is read across
+tenants. The library does not own the type and cannot add the field to it.
 
 ## Deferred beyond 1.0
 
