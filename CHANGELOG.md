@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `flow.MFAIdentityFrom(err)`; `errors.Is(err, ErrMFARequired)` still works.
 - Login success is audited and dispatched after post-hooks run, so a login a
   post-hook denies is no longer recorded as successful.
+- `flow.PasswordAuth` installs account lockout by default. Tune it with
+  `WithLockout`/`WithLockoutStore`, or opt out explicitly with
+  `WithoutLockout`.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

@@ -4,6 +4,7 @@ import (
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/events"
 	"github.com/google/uuid"
+	"time"
 )
 
 // PasswordAuth creates a ready-to-use registration and login manager pair
@@ -58,7 +59,32 @@ func PasswordAuth(repo IdentityRepository, factory func() any, identifierField s
 	login := NewLoginManager(repo, factory, loginOpts...)
 
 	reg.RegisterStrategy(pwStrategy)
-	login.RegisterStrategy(pwStrategy)
+
+	// Registration takes the bare strategy; a failed registration is not a
+	// guess against an existing account. Login takes the throttled one.
+	//
+	// This is on by default because the alternative is worse than a missing
+	// option: the documented one-line setup produced a login endpoint that
+	// accepted unlimited password guesses, and nothing about calling it
+	// suggested otherwise.
+	if cfg.lockoutDisabled {
+		login.RegisterStrategy(pwStrategy)
+		return reg, login
+	}
+
+	config := LockoutConfig{
+		MaxFailures:     defaultQuickMaxFailures,
+		LockoutDuration: defaultQuickLockoutDuration,
+		FailureWindow:   defaultQuickFailureWindow,
+	}
+	if cfg.lockout != nil {
+		config = *cfg.lockout
+	}
+	store := cfg.lockoutStore
+	if store == nil {
+		store = NewMemoryLockoutStore()
+	}
+	login.RegisterStrategy(NewLockoutStrategyWithConfig(pwStrategy, store, config))
 
 	return reg, login
 }
@@ -68,6 +94,9 @@ type quickConfig struct {
 	identifierField string
 	idGenerator     domain.IDGenerator
 	dispatcher      events.Dispatcher
+	lockout         *LockoutConfig
+	lockoutStore    LockoutStore
+	lockoutDisabled bool
 	regPreHooks     []Hook
 	regPostHooks    []Hook
 	loginPreHooks   []Hook
@@ -76,7 +105,48 @@ type quickConfig struct {
 }
 
 // QuickOption configures the PasswordAuth convenience constructor.
+// Defaults for the lockout PasswordAuth installs. They are deliberately
+// unremarkable: enough to stop online guessing, loose enough not to lock a
+// user out over a few typos.
+const (
+	defaultQuickMaxFailures     = 5
+	defaultQuickLockoutDuration = 15 * time.Minute
+	defaultQuickFailureWindow   = 15 * time.Minute
+)
+
 type QuickOption func(*quickConfig)
+
+// WithLockout adjusts the brute-force protection PasswordAuth installs.
+// Zero-valued fields keep their defaults.
+func WithLockout(config LockoutConfig) QuickOption {
+	return func(c *quickConfig) {
+		if config.MaxFailures == 0 {
+			config.MaxFailures = defaultQuickMaxFailures
+		}
+		if config.LockoutDuration == 0 {
+			config.LockoutDuration = defaultQuickLockoutDuration
+		}
+		if config.FailureWindow == 0 {
+			config.FailureWindow = defaultQuickFailureWindow
+		}
+		c.lockout = &config
+	}
+}
+
+// WithLockoutStore supplies the store backing the lockout. The default is
+// in-memory, which counts failures per process: behind a load balancer each
+// replica keeps its own tally, so the effective limit is multiplied by the
+// number of replicas. Use a shared store in production.
+func WithLockoutStore(store LockoutStore) QuickOption {
+	return func(c *quickConfig) { c.lockoutStore = store }
+}
+
+// WithoutLockout registers the password strategy with no brute-force
+// protection. Intended for callers who wrap the strategy themselves; it is an
+// explicit choice rather than something reachable by omission.
+func WithoutLockout() QuickOption {
+	return func(c *quickConfig) { c.lockoutDisabled = true }
+}
 
 // WithHasherCost sets the bcrypt cost for password hashing. Default is 10.
 func WithHasherCost(cost int) QuickOption {
