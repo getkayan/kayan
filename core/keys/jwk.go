@@ -7,7 +7,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 )
@@ -124,14 +123,10 @@ func BuildJWKS(ctx context.Context, p Provider) (JWKS, error) {
 // encodeExponent renders an RSA public exponent as base64url with leading
 // zero bytes removed, per RFC 7518 section 6.3.1.2.
 func encodeExponent(e int) string {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, uint64(e))
-
-	start := 0
-	for start < len(buf)-1 && buf[start] == 0 {
-		start++
+	if e <= 0 {
+		return ""
 	}
-	return base64.RawURLEncoding.EncodeToString(buf[start:])
+	return base64.RawURLEncoding.EncodeToString(big.NewInt(int64(e)).Bytes())
 }
 
 // encodeCoordinate renders an EC coordinate as a fixed-width base64url octet

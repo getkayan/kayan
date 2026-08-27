@@ -3,7 +3,7 @@ package oauth2
 import (
 	"crypto/rsa"
 	"encoding/base64"
-	"encoding/binary"
+	"math/big"
 )
 
 // JWK represents a JSON Web Key.
@@ -26,15 +26,7 @@ func PublicKeyToJWK(key *rsa.PublicKey, kid string) JWK {
 	n := base64.RawURLEncoding.EncodeToString(key.N.Bytes())
 
 	// Encode E as base64url per RFC 7518
-	eBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(eBytes, uint32(key.E))
-
-	// Trim leading zeros
-	start := 0
-	for start < len(eBytes) && eBytes[start] == 0 {
-		start++
-	}
-	eStr := base64.RawURLEncoding.EncodeToString(eBytes[start:])
+	eStr := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())
 
 	return JWK{
 		Kty: "RSA",
