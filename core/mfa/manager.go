@@ -224,7 +224,9 @@ func (m *Manager) Verify(ctx context.Context, challengeID, response string) (boo
 	}
 
 	if challenge.ExpiresAt.Before(time.Now()) {
-		m.store.DeleteChallenge(ctx, challengeID)
+		if err := m.store.DeleteChallenge(ctx, challengeID); err != nil {
+			return false, fmt.Errorf("mfa: delete expired challenge: %w", err)
+		}
 		return false, fmt.Errorf("mfa: challenge expired")
 	}
 
@@ -247,7 +249,9 @@ func (m *Manager) Verify(ctx context.Context, challengeID, response string) (boo
 	}
 
 	// Consume challenge (one-time use)
-	m.store.DeleteChallenge(ctx, challengeID)
+	if err := m.store.DeleteChallenge(ctx, challengeID); err != nil {
+		return false, fmt.Errorf("mfa: consume challenge: %w", err)
+	}
 
 	return ok, nil
 }

@@ -127,7 +127,9 @@ func (i *Identity) GetPermissions() []string {
 // IsEmailVerified checks if the identity has a verified email trait.
 func (i *Identity) IsEmailVerified() bool {
 	var traits map[string]any
-	json.Unmarshal(i.Traits, &traits)
+	if err := json.Unmarshal(i.Traits, &traits); err != nil {
+		return false
+	}
 	if verified, ok := traits["email_verified"].(bool); ok {
 		return verified
 	}

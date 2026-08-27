@@ -46,6 +46,7 @@ package consent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -325,7 +326,9 @@ func (m *Manager) ProcessExpired(ctx context.Context) error {
 	for _, consent := range expired {
 		consent.Granted = false
 		consent.UpdatedAt = time.Now()
-		m.store.Save(ctx, consent)
+		if err := m.store.Save(ctx, consent); err != nil {
+			return fmt.Errorf("consent: save expired consent: %w", err)
+		}
 
 		if m.hooks.OnExpired != nil {
 			m.hooks.OnExpired(ctx, consent)

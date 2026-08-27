@@ -170,7 +170,9 @@ func (m *Manager) Evaluate(ctx context.Context, identityID string, info DeviceIn
 	if m.autoTrustAfter > 0 && device.Verified && device.TrustLevel == TrustMedium {
 		if time.Since(device.CreatedAt) > m.autoTrustAfter {
 			device.TrustLevel = TrustHigh
-			m.store.UpdateDevice(ctx, device)
+			if err := m.store.UpdateDevice(ctx, device); err != nil {
+				return nil, fmt.Errorf("device: persist trust upgrade: %w", err)
+			}
 		}
 	}
 
@@ -179,7 +181,9 @@ func (m *Manager) Evaluate(ctx context.Context, identityID string, info DeviceIn
 	if info.IPAddress != "" {
 		device.IPAddress = info.IPAddress
 	}
-	m.store.UpdateDevice(ctx, device)
+	if err := m.store.UpdateDevice(ctx, device); err != nil {
+		return nil, fmt.Errorf("device: update last seen: %w", err)
+	}
 
 	// Determine MFA requirement
 	requiresMFA := device.TrustLevel == TrustLow || device.TrustLevel == TrustUnknown

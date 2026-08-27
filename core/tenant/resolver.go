@@ -246,6 +246,9 @@ func (r *CacheResolver) Resolve(ctx context.Context, info ResolveInfo) (string, 
 
 	// Cache result
 	if tenantID != "" {
+		// Cache population is an optimization; resolution remains successful if
+		// the cache is temporarily unavailable.
+		// #nosec G104 -- intentionally best-effort cache write.
 		r.Cache.Set(ctx, key, tenantID, r.TTL)
 	}
 

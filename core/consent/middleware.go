@@ -62,6 +62,9 @@ func RequireConsent(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 				} else {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusForbidden)
+					// The status has already been committed; a client disconnect
+					// cannot be usefully recovered here.
+					// #nosec G104 -- intentionally ignore response-body write error.
 					w.Write([]byte(fmt.Sprintf(`{"error":"consent_required","purpose":"%s"}`, cfg.Purpose)))
 					return
 				}
