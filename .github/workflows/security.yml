@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -33,34 +33,44 @@ jobs:
           cache: true
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
       - name: Run govulncheck
         working-directory: ${{ matrix.module }}
         run: govulncheck ./...
 
   gosec:
-    name: gosec
+    name: gosec (${{ matrix.module }})
     runs-on: ubuntu-latest
-    # Known-failing on the current tree. Findings are triaged into the P0/P1
-    # backlog rather than blocking merges; flip continue-on-error off once the
-    # security phases land.
-    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     permissions:
       contents: read
       security-events: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Run gosec
-        uses: securego/gosec@5e72efc19d97e11549b3427b83fab3257a8c9894 # v2.21.4
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          args: '-no-fail -fmt sarif -out results.sarif ./...'
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+
+      - name: Run gosec
+        working-directory: ${{ matrix.module }}
+        run: gosec -fmt sarif -out results.sarif ./...
 
       - name: Upload SARIF
+        if: always()
         uses: github/codeql-action/upload-sarif@c3400c2f38909e0dcf3c3a41f2030a8217be5d3e # v3
         with:
-          sarif_file: results.sarif
+          sarif_file: ${{ matrix.module }}/results.sarif
+          category: gosec-${{ matrix.module }}
 
   codeql:
     name: CodeQL

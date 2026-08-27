@@ -62,10 +62,88 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: true
 
-  # NOTE: The integration job was removed. It ran `go test -tags=integration`
-  # against zero build-tagged files, so it reported success while executing
-  # nothing. It returns with the migration tests in Phase 5, which need a real
-  # Postgres service to verify the migration chain across dialects.
+  postgres-migrations:
+    name: PostgreSQL migration chain
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: kayan
+          POSTGRES_PASSWORD: kayan
+          POSTGRES_DB: kayan_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kayan -d kayan_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Apply and roll back every PostgreSQL migration
+        working-directory: kayan-gorm
+        env:
+          KAYAN_TEST_DIALECT: postgres
+          DATABASE_URL: postgres://kayan:kayan@127.0.0.1:5432/kayan_test?sslmode=disable
+        run: go test -race -tags=integration -run '^TestVersionedMigrationChain$' ./...
+
+  mysql-migrations:
+    name: MySQL migration chain
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: kayan_test
+          MYSQL_USER: kayan
+          MYSQL_PASSWORD: kayan
+          MYSQL_ROOT_PASSWORD: root
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -ukayan -pkayan"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Apply and roll back every MySQL migration
+        working-directory: kayan-gorm
+        env:
+          KAYAN_TEST_DIALECT: mysql
+          DATABASE_URL: kayan:kayan@tcp(127.0.0.1:3306)/kayan_test?parseTime=true&multiStatements=true
+        run: go test -race -tags=integration -run '^TestVersionedMigrationChain$' ./...
+
+  redis-integration:
+    name: Redis adapter integration
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Exercise SSO against real Redis
+        working-directory: kayan-redis
+        env:
+          KAYAN_TEST_REDIS_ADDR: 127.0.0.1:6379
+        run: go test -race -tags=integration -run '^TestRealRedisSSOLifecycle$' ./...
 
   fuzz:
     name: Fuzz (${{ matrix.module }})

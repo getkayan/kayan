@@ -10,13 +10,27 @@ env:
   GO_VERSION: '1.25.x'
 
 jobs:
+  api-compatibility:
+    name: Public API compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install pinned apidiff
+        run: go install golang.org/x/exp/cmd/apidiff@v0.0.0-20260709172345-9ea1abe57597
+      - name: Reject incompatible exported API changes
+        run: bash scripts/check-api.sh
+
   lint:
     name: Lint (${{ matrix.module }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -95,7 +109,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing, cmd/kayan-cli]
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
