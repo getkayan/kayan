@@ -37,14 +37,33 @@ func (s *HybridStrategy) Can(ctx context.Context, subject any, action string, re
 
 	switch s.combinator {
 	case AllowOverrides:
-		// OR logic: Return true if ANY engine returns true.
-		// Errors are ignored unless ALL fail? Or log?
-		// Common pattern: If one allows, allow.
+		// OR logic: allow if any engine allows.
+		//
+		// An engine that allows is a decision and ends the evaluation. An
+		// engine that fails is not a denial: it is an unanswered question, and
+		// the answer it would have given might have been "allow". Discarding
+		// those errors turned an outage into (false, nil) -- a clean,
+		// authoritative denial the caller could not distinguish from a real
+		// one, so a failing store surfaced as users losing access they have,
+		// with nothing in the error path to say why.
+		//
+		// So: allow wins immediately, and a denial is only returned when every
+		// engine actually answered. Otherwise the failure is reported.
+		var firstErr error
 		for _, e := range s.engines {
 			allowed, err := e.Can(ctx, subject, action, resource)
-			if err == nil && allowed {
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			if allowed {
 				return true, nil
 			}
+		}
+		if firstErr != nil {
+			return false, fmt.Errorf("hybrid: no engine allowed and at least one failed: %w", firstErr)
 		}
 		return false, nil
 
