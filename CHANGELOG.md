@@ -83,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by token introspection through the new `oidc.WithTokenIntrospector`.
 - ID tokens carry `at_hash` and `c_hash` when `IDTokenRequest.AccessToken` or
   `Code` is set, binding the ID token to what was issued alongside it.
+- SAML single logout: `ServiceProvider.InitiateLogout` builds a LogoutRequest
+  redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
+  session to end, and `BuildLogoutResponse` produces the reply. The signature
+  on an inbound request is mandatory.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.
