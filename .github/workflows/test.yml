@@ -28,36 +28,43 @@ jobs:
 
       - name: Run kayan-gorm Tests
         working-directory: kayan-gorm
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Run kayan-redis Tests
         working-directory: kayan-redis
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Run kayan-oidc-provider Tests
         working-directory: kayan-oidc-provider
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Run kayan-saml Tests
         working-directory: kayan-saml
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Run kayan-scim Tests
         working-directory: kayan-scim
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Run kayan-testing Tests
         working-directory: kayan-testing
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Run kayan-ldap Tests
         working-directory: kayan-ldap
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
-          file: core/coverage.out
+          # Every module reports. Uploading core alone left the adapter
+          # numbers invisible -- kayan-oidc-provider/oidc at 37.6% and
+          # kayan-ldap at 40.4% were not measured by anything.
+          files: >-
+            core/coverage.out,kayan-gorm/coverage.out,kayan-redis/coverage.out,
+            kayan-scim/coverage.out,kayan-saml/coverage.out,
+            kayan-oidc-provider/coverage.out,kayan-ldap/coverage.out,
+            kayan-testing/coverage.out
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: true
