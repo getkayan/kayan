@@ -24,6 +24,23 @@ jobs:
       - name: Reject incompatible exported API changes
         run: bash scripts/check-api.sh
 
+  coverage-floors:
+    name: Coverage floors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # Not a coverage target to chase. It stops packages that were
+      # deliberately covered from losing it again: core/admin gates every
+      # privileged operation and sat at 11.3%, core/audit is the record an
+      # incident is reconstructed from and sat at 13.0%, and nothing objected
+      # until somebody looked.
+      - name: Reject coverage below the recorded floors
+        run: bash scripts/check-coverage.sh
+
   lint:
     name: Lint (${{ matrix.module }})
     runs-on: ubuntu-latest

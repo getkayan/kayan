@@ -1,0 +1,48 @@
+# Per-package statement-coverage floors.
+#
+# CI fails when a package drops below its floor. The point is not to chase a
+# number: it is to stop a package that was deliberately covered from quietly
+# losing that coverage again. core/admin sat at 11.3% and core/audit at 13.0%
+# while both gate security decisions, and nothing objected until somebody
+# looked.
+#
+# Floors are set a couple of points below the coverage measured when they were
+# recorded, so ordinary drift does not break the build while a real regression
+# does. Raising a floor after improving a package is welcome. Lowering one is a
+# deliberate act that belongs in its own commit with a reason.
+#
+# Format: <package path relative to the repo root> <minimum percent>
+# A package with no entry here is reported but does not fail the build.
+
+core/admin 37
+core/audit 40
+core/compliance 79
+core/consent 58
+core/device 85
+core/domain 23
+core/events 82
+core/flow 69
+core/health 95
+core/identity 45
+core/keys 81
+core/mfa 79
+core/policy 70
+core/rbac 81
+core/rebac 72
+core/risk 82
+core/session 78
+core/tenant 64
+
+kayan-gorm 71
+kayan-ldap 38
+kayan-observability/config 88
+kayan-observability/logger 88
+kayan-observability/telemetry 57
+kayan-oidc-provider/gormstore 69
+kayan-oidc-provider/oauth2 79
+kayan-oidc-provider/oidc 67
+kayan-redis 67
+kayan-saml 72
+kayan-scim 74
+kayan-scim/gormstore 57
+kayan-testing 76
