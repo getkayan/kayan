@@ -13,7 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md with vulnerability reporting process
 - GitHub issue and PR templates
 
-## [1.0.0] - 2026-01-24
+## Unreleased 1.0 Roadmap (Not Yet Shipped)
+
+### Breaking changes from the historical 0.1 development release
+
+- Replaced the `kgorm` module path with the optional `kayan-gorm` adapter.
+- Split protocols and infrastructure dependencies out of `core`.
+- Added atomic `TokenStore.ConsumeToken` and atomic SSO storage contracts.
+- Replaced the social-login OAuth placeholder with the transport-neutral
+  `flow.OIDCClient` PKCE contract.
+- Made OIDC-provider audit configuration explicit and observable.
+
+See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
+upgrade path. These changes are not published as a stable 1.0 release yet.
 
 ### Added
 - **Authentication Strategies**
@@ -62,10 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Comprehensive examples directory
   - OpenAPI specification
 
-### Infrastructure
-- Docker and Docker Compose support
-- Kubernetes manifests
-- Helm charts
+The items below are historical aspirations, not claims about a released or
+supported version. The authoritative current status is in
+[docs/reference/capabilities.md](./docs/reference/capabilities.md).
 
 ---
 

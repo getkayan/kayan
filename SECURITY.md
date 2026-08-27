@@ -4,8 +4,11 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.x.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| 1.x.x   | Planned            |
+| < 1.0   | Best effort        |
+
+Kayan is currently pre-1.0. No production-supported release exists yet. The
+1.x support commitment starts when `v1.0.0` is published.
 
 ## Reporting a Vulnerability
 

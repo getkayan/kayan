@@ -31,11 +31,14 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 > - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code`,
 >   `refresh_token`, and `client_credentials`. No device code, token exchange,
 >   DPoP, `private_key_jwt`, or dynamic client registration.
-> - **SCIM** (`kayan-scim`) — no `/Schemas`, `/ResourceTypes`,
->   `/ServiceProviderConfig`, or bulk operations. Value filters
->   (`emails[type eq "work"]`) work in PATCH but not in list queries.
-> - **SSO sessions** (`core/session`) — the cross-application session store is
->   in-memory only, so single sign-on is single-process.
+> - **SCIM** (`kayan-scim`) — no bulk operations. Value filters
+>   (`emails[type eq "work"]`) work in PATCH, and parse in list queries, but
+>   the GORM store rejects them with `ErrFilterUnsupported` rather than
+>   over-returning rows, because a value filter needs a multi-valued storage
+>   mapping it does not have.
+>
+> Per-capability maturity is tracked in
+> [docs/reference/capabilities.md](./docs/reference/capabilities.md).
 
 ---
 

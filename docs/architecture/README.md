@@ -1,5 +1,8 @@
 # Architecture Overview
 
+The permanent library, transport, and persistence boundaries are defined in the
+[headless and backend-neutral contract](./headless-contract.md).
+
 Kayan is a Go multi-module workspace, not a single library with subpackages.
 There is no root module holding the code: `core/` is one module, and seven
 sibling modules sit beside it. The split is not organizational tidiness. It

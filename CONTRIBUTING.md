@@ -38,8 +38,8 @@ Kayan is a multi-module Go workspace with strict package-boundary rules. Before 
    Primary modules:
 
    - `core/` - main IAM library
-   - `kgorm/` - GORM storage adapter
-   - `kredis/` - Redis adapter
+   - `kayan-gorm/` - optional GORM storage adapter
+   - `kayan-redis/` - optional Redis adapters
    - `cmd/kayan-cli/` - administrative CLI
 
    Do not run `go test ./...` from the repository root.
@@ -47,16 +47,16 @@ Kayan is a multi-module Go workspace with strict package-boundary rules. Before 
 3. **Install dependencies**
    ```bash
    cd core && go mod download
-   cd ../kgorm && go mod download
-   cd ../kredis && go mod download
+   cd ../kayan-gorm && go mod download
+   cd ../kayan-redis && go mod download
    cd ..
    ```
 
 4. **Verify your setup**
    ```bash
    cd core && go test -race ./...
-   cd ../kgorm && go test -race ./...
-   cd ../kredis && go test -race ./...
+   cd ../kayan-gorm && go test -race ./...
+   cd ../kayan-redis && go test -race ./...
    cd ..
    ```
 
@@ -68,7 +68,10 @@ Kayan is a multi-module Go workspace with strict package-boundary rules. Before 
 
 ### Integration Tests
 
-Integration tests run separately from unit tests and require PostgreSQL 15.
+Database integration tests are not yet present. The commands below describe the
+planned PostgreSQL gate and must not be treated as an active test suite until
+`kayan-gorm` contains `integration`-tagged tests and CI runs them against a real
+PostgreSQL service.
 
 1. **Start PostgreSQL locally**
    ```bash
@@ -87,7 +90,7 @@ Integration tests run separately from unit tests and require PostgreSQL 15.
 
 3. **Run integration tests from the `core/` module**
    ```bash
-   cd core
+   cd kayan-gorm
    go test -race -tags=integration ./...
    ```
 
@@ -131,10 +134,10 @@ We welcome feature requests! Please:
    go test -race -coverprofile=coverage.out -covermode=atomic ./...
    golangci-lint run
 
-   cd ../kgorm
+   cd ../kayan-gorm
    go test -race ./...
 
-   cd ../kredis
+   cd ../kayan-redis
    go test -race ./...
 
    cd ../cmd/kayan-cli

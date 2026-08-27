@@ -7,7 +7,7 @@ Kayan follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 The compatibility contract for a stable release covers:
 
 - exported packages and symbols in `core/`
-- exported packages and symbols in `kgorm/` and `kredis/`
+- exported packages and symbols in `kayan-gorm/` and `kayan-redis/`
 - documented commands and flags in `cmd/kayan-cli/`
 - documented behavior in the main guides under `docs/`
 
@@ -31,6 +31,21 @@ Kayan uses these stability levels:
 - Stable: default for released, documented APIs unless explicitly marked otherwise.
 - Experimental: features or packages called out as experimental in docs, comments, or release notes. Experimental APIs may change in a minor release.
 - Deprecated: supported for the current major version, but scheduled for removal in a future major version. See [DEPRECATION.md](./DEPRECATION.md).
+
+The current pre-1.0 capability status is recorded in
+[docs/reference/capabilities.md](./docs/reference/capabilities.md). A package or
+feature is not stable merely because it is exported.
+
+The proposed 1.0 Go surface is machine-checked against the committed snapshots
+in [`api-baseline/`](./api-baseline/README.md). Historical breaking changes and
+upgrade guidance are listed in
+[`docs/reference/pre-1.0-migration.md`](./docs/reference/pre-1.0-migration.md).
+
+## Multi-Module Releases
+
+Kayan's modules are versioned together. A release uses one version across the
+workspace and tags each module using Go's subdirectory tag convention, for
+example `v1.0.0`, `core/v1.0.0`, and `kayan-gorm/v1.0.0`.
 
 ## Support Policy
 
