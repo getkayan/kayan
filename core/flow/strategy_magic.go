@@ -61,9 +61,17 @@ func (s *MagicLinkStrategy) identityFactory() func() any {
 
 func (s *MagicLinkStrategy) ID() string { return "magic_link" }
 
-// Authenticate verifies the magic link token.
-// 'identifier' is the email (for double check, optional) or identity ID?
-// 'secret' is the token.
+// Authenticate verifies the magic link token. The secret is the token; the
+// identifier is ignored.
+//
+// This deliberately differs from the OTP strategy, which requires the code to
+// belong to the identifier that presents it. A magic link is followed from an
+// email client, so the request carries the token and nothing else -- there is
+// no identifier to check against. What makes that safe here is entropy: the
+// token is a version 4 UUID, 122 random bits, so guessing one is not a
+// realistic attack the way guessing a six-digit code is. An OTP is short
+// enough that binding it to an account is the only thing that makes throttling
+// meaningful.
 func (s *MagicLinkStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
 	// 1. Get Token
 	token, err := s.tokenStore.ConsumeToken(ctx, secret, "magic_link")

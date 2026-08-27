@@ -124,12 +124,17 @@ func TestOTPHonoursTheIdentityFactory(t *testing.T) {
 		Type:       "otp",
 		ExpiresAt:  time.Now().Add(time.Minute),
 	})
+	// A code authenticates only the account it was issued to, so the
+	// identifier has to resolve to the identity the token names.
+	repo.creds["user-1@example.test:"] = &identity.Credential{
+		ID: "cred-1", IdentityID: "user-1", Identifier: "user-1@example.test",
+	}
 
 	strategy := NewOTPStrategy(repo, store, nil,
 		WithOTPFactory(func() any { return &factoryTestIdentity{} }),
 	)
 
-	got, err := strategy.Authenticate(ctx, "", "123456")
+	got, err := strategy.Authenticate(ctx, "user-1@example.test", "123456")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}

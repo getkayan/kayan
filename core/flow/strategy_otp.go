@@ -156,13 +156,31 @@ func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, err
 // Authenticate verifies the OTP code provided by the user.
 // The identifier is the phone number or email, and the secret is the OTP code.
 func (s *OTPStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
-	// 1. Get the stored token by the code value
+	// 1. A code is only valid for the account it was issued to.
+	//
+	// Consuming by code alone matched the secret against every live OTP in the
+	// store, and throttling could not compensate: lockout and rate limiting
+	// key on the identifier, so an attacker who varied it -- or omitted it --
+	// got a fresh counter for each guess while the search space stayed the
+	// union of all outstanding codes.
+	// Spend the code before anything else can reject the attempt. Every failed
+	// guess must cost the attacker the code it guessed; if an earlier check
+	// short-circuits -- an identifier that does not resolve, say -- the code
+	// survives and the attacker retries against it indefinitely.
 	token, err := s.tokenStore.ConsumeToken(ctx, secret, "otp")
 	if err != nil || token == nil {
 		return nil, fmt.Errorf("otp: invalid or expired code")
 	}
 
-	// 2. Find the identity
+	// 2. Resolve the identifier and require the code to belong to it.
+	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
+	if err != nil || cred == nil || token.IdentityID != cred.IdentityID {
+		// One error for every rejection. Distinguishing "no such account" from
+		// "that code is not yours" would turn this into an enumeration oracle.
+		return nil, fmt.Errorf("otp: invalid or expired code")
+	}
+
+	// 4. Find the identity
 	ident, err := s.repo.GetIdentity(ctx, s.identityFactory(), token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("otp: identity not found")

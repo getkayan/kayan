@@ -261,3 +261,69 @@ func TestOTPStrategy_GenerateCode(t *testing.T) {
 		t.Errorf("too many collisions: only %d unique codes from 100 generated", len(seen))
 	}
 }
+
+// TestOTPStrategy_CodeIsBoundToItsIdentifier is the OTP brute-force test.
+//
+// Authenticate looked the code up by value alone -- the identifier argument
+// was accepted and never used. Lockout and rate limiting both key on that
+// identifier, so an attacker who varied it got a fresh counter for every
+// guess while the code was still matched against every live OTP in the
+// store. Six digits against the union of all outstanding codes is a search
+// that gets cheaper as the deployment gets busier.
+//
+// The code must only authenticate the identity it was issued to.
+func TestOTPStrategy_CodeIsBoundToItsIdentifier(t *testing.T) {
+	strategy, sender, _, repo := setupOTPTest(t)
+	ctx := context.Background()
+
+	// A second, unrelated account.
+	victim := &identity.Identity{ID: "user-2"}
+	victim.SetTraits(identity.JSON(`{"email": "victim@example.com"}`))
+	repo.identities["user-2"] = victim
+	repo.creds["victim@example.com:password"] = &identity.Credential{
+		ID: "cred-2", IdentityID: "user-2", Type: "password",
+		Identifier: "victim@example.com",
+	}
+
+	if _, err := strategy.Initiate(ctx, "victim@example.com"); err != nil {
+		t.Fatalf("Initiate: %v", err)
+	}
+	victimCode := sender.lastCode("victim@example.com")
+	if victimCode == "" {
+		t.Fatal("no code was delivered to the victim")
+	}
+
+	// The attacker submits the victim's code under their own identifier -- or
+	// under one that does not exist at all, which is what defeats a lockout
+	// counter keyed on the identifier. Each attempt is checked against a
+	// freshly issued code, because a rejected guess still spends the code:
+	// that is the point, and it is what caps the attacker at one try per
+	// issuance instead of unlimited tries against every live code.
+	for _, attacker := range []string{"test@example.com", "attacker@example.com", ""} {
+		if _, err := strategy.Initiate(ctx, "victim@example.com"); err != nil {
+			t.Fatalf("Initiate: %v", err)
+		}
+		code := sender.lastCode("victim@example.com")
+
+		if _, err := strategy.Authenticate(ctx, attacker, code); err == nil {
+			t.Errorf("identifier %q authenticated with an OTP issued to victim@example.com", attacker)
+		}
+
+		// The guess burned the code, so the rightful owner cannot reuse it.
+		if _, err := strategy.Authenticate(ctx, "victim@example.com", code); err == nil {
+			t.Errorf("a code survived a failed attempt by %q and stayed usable", attacker)
+		}
+	}
+
+	// A freshly issued code still works for the account it belongs to.
+	if _, err := strategy.Initiate(ctx, "victim@example.com"); err != nil {
+		t.Fatalf("Initiate: %v", err)
+	}
+	got, err := strategy.Authenticate(ctx, "victim@example.com", sender.lastCode("victim@example.com"))
+	if err != nil {
+		t.Fatalf("the issuing identifier could not use its own code: %v", err)
+	}
+	if got.(*identity.Identity).ID != "user-2" {
+		t.Errorf("authenticated as %q, want user-2", got.(*identity.Identity).ID)
+	}
+}
