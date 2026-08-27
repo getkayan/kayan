@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/getkayan/kayan/core/audit"
@@ -145,6 +144,20 @@ func (m *LoginManager) ReloadStrategies(ctx context.Context) error {
 	// For safety, let's keep manually registered ones if they don't collide.
 	// But usually dynamic overrides static.
 
+	// Strategies that build are applied, and the ones that did not are
+	// reported together. Both halves matter.
+	//
+	// Applying the good ones means a single bad config does not take every
+	// other login method offline. Reporting the bad ones means the caller
+	// learns the reload did not do what it was asked to: the map is never
+	// cleared, so a strategy that failed to rebuild keeps serving its previous
+	// definition -- an operator tightening a misconfigured strategy gets the
+	// old, looser one and no indication of it.
+	//
+	// This used to write the failure to the process's stderr with the standard
+	// library logger and carry on, which a headless library has no business
+	// doing: the caller cannot intercept it, route it, or alert on it.
+	var failures []error
 	for _, cfg := range configs {
 		if !cfg.Enabled {
 			delete(m.strategies, cfg.ID)
@@ -153,11 +166,15 @@ func (m *LoginManager) ReloadStrategies(ctx context.Context) error {
 
 		strategy, err := m.strategyRegistry.Build(cfg)
 		if err != nil {
-			// Log error but continue?
-			log.Printf("login: failed to build strategy %s: %v", cfg.ID, err)
+			failures = append(failures, fmt.Errorf("strategy %q: %w", cfg.ID, err))
 			continue
 		}
 		m.strategies[cfg.ID] = strategy
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("login: %d strategy configuration(s) could not be applied and kept their previous definition: %w",
+			len(failures), errors.Join(failures...))
 	}
 	return nil
 }
