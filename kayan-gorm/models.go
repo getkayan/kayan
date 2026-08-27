@@ -19,7 +19,7 @@ type gormAuditEvent struct {
 	CreatedAt time.Time     `gorm:"index"`
 
 	// Compliance fields
-	TenantID     string `gorm:"index"`
+	TenantID_    string `gorm:"column:tenant_id;index"`
 	IPAddress    string `gorm:"index"`
 	UserAgent    string
 	DeviceID     string        `gorm:"index"`
@@ -39,7 +39,9 @@ type gormAuditEvent struct {
 	GeoLong    float64
 }
 
-func (gormAuditEvent) TableName() string { return "audit_events" }
+func (gormAuditEvent) TableName() string        { return "audit_events" }
+func (e *gormAuditEvent) TenantID() string      { return e.TenantID_ }
+func (e *gormAuditEvent) SetTenantID(id string) { e.TenantID_ = id }
 
 type gormAuthToken struct {
 	Token      string    `gorm:"primaryKey"`
@@ -84,7 +86,7 @@ func fromCoreAuditEvent(e *audit.AuditEvent) *gormAuditEvent {
 		Message:      e.Message,
 		Metadata:     identity.JSON(e.Metadata),
 		CreatedAt:    e.CreatedAt,
-		TenantID:     e.TenantID,
+		TenantID_:    e.TenantID,
 		IPAddress:    e.IPAddress,
 		UserAgent:    e.UserAgent,
 		DeviceID:     e.DeviceID,
@@ -119,7 +121,7 @@ func toCoreAuditEvent(ge *gormAuditEvent) *audit.AuditEvent {
 		Message:      ge.Message,
 		Metadata:     ge.Metadata,
 		CreatedAt:    ge.CreatedAt,
-		TenantID:     ge.TenantID,
+		TenantID:     ge.TenantID_,
 		IPAddress:    ge.IPAddress,
 		UserAgent:    ge.UserAgent,
 		DeviceID:     ge.DeviceID,

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/identity"
 	"github.com/getkayan/kayan/core/tenant"
@@ -205,5 +206,42 @@ func TestUnscopedIdentityModelIsNotIsolated(t *testing.T) {
 	if _, err := repo.GetIdentity(tenantCtx("tenant-b"), func() any { return &identity.Identity{} }, "shared-id"); err != nil {
 		t.Skipf("unscoped BYOS models are now isolated (%v); update the tenancy docs "+
 			"and TestScopedIdentityModelIsIsolated to match", err)
+	}
+}
+
+// TestAuditQueryIsTenantScoped covers a silent cross-tenant read.
+//
+// gormAuditEvent already carried a TenantID column, but applyFilter only
+// added the predicate when the caller populated filter.TenantID. A caller
+// who asked a narrower question -- "failed logins for this actor" -- and
+// left the tenant unset received every tenant's audit log, with nothing to
+// signal it. That is the exact shape core/tenant promises cannot happen:
+// the tenant came from a caller-supplied struct field rather than from the
+// context, so tenant.ErrNoTenant was unreachable.
+func TestAuditQueryIsTenantScoped(t *testing.T) {
+	repo := newIsolatedRepo(t)
+
+	for _, tc := range []struct{ tenantID, id string }{
+		{"tenant-a", "event-a"},
+		{"tenant-b", "event-b"},
+	} {
+		event := &audit.AuditEvent{ID: tc.id, Type: "login", Status: "failure", ActorID: "shared-actor"}
+		if err := repo.SaveEvent(tenantCtx(tc.tenantID), event); err != nil {
+			t.Fatalf("save event in %s: %v", tc.tenantID, err)
+		}
+	}
+
+	// The filter deliberately omits TenantID: the context is the authority.
+	events, err := repo.Query(tenantCtx("tenant-a"), audit.Filter{ActorID: "shared-actor"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	for _, e := range events {
+		if e.TenantID != "tenant-a" {
+			t.Errorf("query in tenant-a returned an event from %q", e.TenantID)
+		}
+	}
+	if len(events) != 1 {
+		t.Errorf("got %d events, want 1 (the other tenant's event must not appear)", len(events))
 	}
 }
