@@ -24,6 +24,31 @@ and HTTP dependencies in `core`. The reviewed API snapshots in
   observable and the client store is not required to implement audit storage.
 - SAML metadata retrieval defaults to public HTTPS URLs. Private IdP metadata
   endpoints require an explicit `WithMetadataURLPolicy` opt-in.
+- `flow.OIDCManager`, `flow.NewOIDCManager`, `flow.ClaimMapper`,
+  `flow.OIDCProviderData`, and `gormstore.NewDefaultOIDCManager` are removed.
+  Use `flow.NewKayanOIDCStrategy` instead.
+
+  `OIDCManager` was a second OIDC relying-party implementation with weaker
+  guarantees than the one beside it. Its callback took no `state` parameter, so
+  it could not validate CSRF state, and it requested no nonce, so an ID token
+  could be replayed. It also linked a federated login to an existing local
+  account on a bare `email` claim, without checking `email_verified` -- an
+  account takeover at any provider that lets a user assert an address. That
+  last one was fixed in place first, so the fix exists in history for anyone
+  pinned to an earlier commit, and the type is removed here rather than left
+  reachable with a deprecation comment.
+
+  `KayanOIDCStrategy` covers the same flow and carries state, nonce, and PKCE
+  explicitly:
+
+  ```go
+  strategy := flow.NewKayanOIDCStrategy(
+      issuer, clientID, redirectURI,
+      oauthClient, tokenParser, repo, factory,
+  )
+  // Initiate returns the authorization URL with state, nonce, and PKCE.
+  // Authenticate(ctx, state, code) validates state before exchanging the code.
+  ```
 
 There is no mixed-version persistence migration from the 0.1 development
 adapters. Pre-1.0 adopters should migrate application-owned data using their

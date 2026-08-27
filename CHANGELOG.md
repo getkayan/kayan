@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `session.Manager.Rotate` issues a new session and ends the one the request
   arrived with. Use it on login and after any step-up; `Create` alone leaves
   the previous session live.
+- Removed `flow.OIDCManager` and `gormstore.NewDefaultOIDCManager`. Use
+  `flow.NewKayanOIDCStrategy`, which validates CSRF state and requests a nonce.
+- `LoginManager.ReloadStrategies` returns an error naming any strategy that
+  failed to rebuild, rather than logging to stderr and keeping the previous
+  definition live.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

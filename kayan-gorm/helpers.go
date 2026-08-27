@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/getkayan/kayan/core/config"
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/flow"
 	"github.com/getkayan/kayan/core/identity"
@@ -49,12 +48,4 @@ func NewDefaultLoginManager(db *gorm.DB) *flow.LoginManager {
 func NewDefaultSessionManager(db *gorm.DB) *session.Manager {
 	repo := NewRepository(db)
 	return session.NewManager(session.NewDatabaseStrategy(repo))
-}
-
-// NewDefaultOIDCManager creates an OIDCManager using the default identity and GORM.
-func NewDefaultOIDCManager(db *gorm.DB, configs map[string]config.OIDCProvider) (*flow.OIDCManager, error) {
-	repo := NewRepository(db)
-	return flow.NewOIDCManager(repo, configs, func() any {
-		return &identity.Identity{}
-	})
 }
