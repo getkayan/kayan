@@ -43,12 +43,15 @@ func (gormAuditEvent) TableName() string { return "audit_events" }
 
 type gormAuthToken struct {
 	Token      string    `gorm:"primaryKey"`
+	TenantID_  string    `gorm:"column:tenant_id;index;not null;default:''"`
 	IdentityID string    `gorm:"index"`
 	Type       string    `gorm:"index"`
 	ExpiresAt  time.Time `gorm:"index"`
 }
 
-func (gormAuthToken) TableName() string { return "auth_tokens" }
+func (gormAuthToken) TableName() string        { return "auth_tokens" }
+func (t *gormAuthToken) TenantID() string      { return t.TenantID_ }
+func (t *gormAuthToken) SetTenantID(id string) { t.TenantID_ = id }
 
 func fromCoreAuthToken(t *domain.AuthToken) *gormAuthToken {
 	return &gormAuthToken{
@@ -142,6 +145,7 @@ func toCoreAuditEvent(ge *gormAuditEvent) *audit.AuditEvent {
 
 type gormIdentity struct {
 	ID          string        `gorm:"primaryKey"`
+	TenantID_   string        `gorm:"column:tenant_id;index;not null;default:''"`
 	Traits      identity.JSON `gorm:"type:json"`
 	Roles       identity.JSON `gorm:"type:json"`
 	Permissions identity.JSON `gorm:"type:json"`
@@ -155,7 +159,9 @@ type gormIdentity struct {
 	State       string
 }
 
-func (gormIdentity) TableName() string { return "identities" }
+func (gormIdentity) TableName() string        { return "identities" }
+func (i *gormIdentity) TenantID() string      { return i.TenantID_ }
+func (i *gormIdentity) SetTenantID(id string) { i.TenantID_ = id }
 
 func toCoreIdentity(gi *gormIdentity) *identity.Identity {
 	if gi == nil {
@@ -199,6 +205,7 @@ func fromCoreIdentity(i *identity.Identity) *gormIdentity {
 
 type gormCredential struct {
 	ID         string `gorm:"primaryKey"`
+	TenantID_  string `gorm:"column:tenant_id;index;not null;default:''"`
 	IdentityID string `gorm:"index"`
 	Type       string `gorm:"index"`
 	Identifier string `gorm:"index"`
@@ -208,7 +215,9 @@ type gormCredential struct {
 	UpdatedAt  time.Time
 }
 
-func (gormCredential) TableName() string { return "credentials" }
+func (gormCredential) TableName() string        { return "credentials" }
+func (c *gormCredential) TenantID() string      { return c.TenantID_ }
+func (c *gormCredential) SetTenantID(id string) { c.TenantID_ = id }
 
 func toCoreCredential(gc *gormCredential) *identity.Credential {
 	if gc == nil {
@@ -244,6 +253,7 @@ func fromCoreCredential(c *identity.Credential) *gormCredential {
 
 type gormSession struct {
 	ID               string `gorm:"primaryKey"`
+	TenantID_        string `gorm:"column:tenant_id;index;not null;default:''"`
 	IdentityID       string `gorm:"index"`
 	RefreshToken     string `gorm:"index"`
 	ExpiresAt        time.Time
@@ -252,4 +262,6 @@ type gormSession struct {
 	Active           bool
 }
 
-func (gormSession) TableName() string { return "sessions" }
+func (gormSession) TableName() string        { return "sessions" }
+func (s *gormSession) TenantID() string      { return s.TenantID_ }
+func (s *gormSession) SetTenantID(id string) { s.TenantID_ = id }

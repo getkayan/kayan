@@ -159,6 +159,18 @@ func TestMigrationsMatchTheModels(t *testing.T) {
 						table, column)
 				}
 			}
+
+			// The reverse direction matters just as much. A column the SQL
+			// creates and the model omits is invisible to GORM: it is never
+			// selected, never written, and never available as a predicate.
+			// That is how tenant_id came to exist on every core table while
+			// the models ignored it, leaving queries unscoped.
+			for column := range sqlColumns {
+				if !modelColumns[column] {
+					t.Errorf("the migration creates %s.%s but no model maps it, so GORM will never read or write it",
+						table, column)
+				}
+			}
 		})
 	}
 }
