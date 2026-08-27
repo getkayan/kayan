@@ -1,0 +1,10 @@
+# Normalize line endings. Go tooling (gofmt, apidiff) expects LF, and a
+# CRLF working tree makes every formatted file report as unformatted.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.exe binary
