@@ -302,7 +302,16 @@ func (s *server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upgrade to a full long-lived JWT.
+	// Upgrade to a full long-lived JWT, and destroy the partial one.
+	//
+	// The partial token proves only that the password step passed. Leaving it
+	// alive after the upgrade means anyone holding it can replay this endpoint
+	// for the rest of its lifetime, so the second factor gates nothing.
+	if err := s.partialSess.Delete(ctx, token); err != nil {
+		writeError(w, http.StatusInternalServerError, "session error")
+		return
+	}
+
 	fullSess, err := s.fullSess.Create(ctx, uuid.New().String(), ident.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "session error")
@@ -348,8 +357,14 @@ func main() {
 	totpLogin := flow.NewLoginManager(repo, factory)
 	totpLogin.RegisterStrategy(totpStrategy)
 
-	// Two JWT tiers: partial (5 min) and full (24 h)
-	partialSess := session.NewHS256Strategy(sessionSecret(), 5*time.Minute)
+	// Two JWT tiers: partial (5 min) and full (24 h).
+	//
+	// The partial tier carries a revocation store because its token has to be
+	// destroyed the moment the second factor succeeds. Without one, Delete has
+	// nowhere to record the revocation and the pre-MFA token stays valid for
+	// its full five minutes -- replayable against the verify endpoint.
+	partialSess := session.NewHS256Strategy(sessionSecret(), 5*time.Minute).
+		WithRevocationStore(session.NewMemoryRevocationStore())
 	fullSess := session.NewHS256Strategy(sessionSecret(), 24*time.Hour)
 
 	srv := &server{

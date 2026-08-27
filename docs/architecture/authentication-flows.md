@@ -459,13 +459,40 @@ case err != nil:
     return respondUnauthorized(w)
 
 default:
-    sess, err := sessions.Create(ctx, newSessionID(), identityOf(ident))
+    // Rotate, not Create. The session the request arrived with must not
+    // survive a change in what it authorises.
+    sess, err := sessions.Rotate(ctx, priorSessionID(r), newSessionID(), identityOf(ident))
     if err != nil {
         return err
     }
     return respondSession(w, sess)
 }
 ```
+
+### Rotate on every change of authority
+
+`Create` takes the identifier you give it and invalidates nothing, so the
+previous session stays live beside the new one. Two failures follow.
+
+**Session fixation.** An attacker who can plant a session identifier in a
+victim's browser — a URL parameter, a cookie set on a shared subdomain — and
+gets them to authenticate under it ends up holding a live authenticated
+session, because the identifier the victim logged in with is the one the
+attacker chose.
+
+**Privilege upgrade.** A partial session issued after the first factor stays
+valid once the second completes, so the pre-MFA token can be replayed against
+the step-up endpoint that trusts it.
+
+`Manager.Rotate` mints the new session, ends the old one, and returns an error
+rather than a session if the old one cannot be ended — handing back a new
+session while the previous one survives is the window staying open while the
+caller believes it closed. Pass a nil or unrecognised prior identifier for an
+ordinary login with nothing to replace.
+
+Call it on login, and again after a second factor or any step-up. For JWT
+sessions the strategy needs a revocation store: without one there is nowhere to
+record that the old token is dead, and it stays valid until it expires.
 
 A handler written as `if err != nil { return unauthorized }` is correct here —
 it refuses. A handler written as `ident, _ := Authenticate(...)` followed by a
