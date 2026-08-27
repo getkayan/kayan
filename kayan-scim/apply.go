@@ -206,14 +206,37 @@ func applyMultiValued(target *[]MultiValued, path Path, op PatchOperation, name 
 	switch op.Op {
 	case PatchOpRemove:
 		if path.Filter == nil {
+			if path.SubAttribute != "" {
+				return NewError("400", "invalidPath", fmt.Sprintf("%s.%s requires a value filter", name, path.SubAttribute))
+			}
 			*target = nil
+			return nil
+		}
+		matched := false
+		if path.SubAttribute != "" {
+			for i := range *target {
+				if matchesMultiValued((*target)[i], path.Filter) {
+					matched = true
+					if err := clearMultiValuedSubAttribute(&(*target)[i], path.SubAttribute, name); err != nil {
+						return err
+					}
+				}
+			}
+			if !matched {
+				return NewError("400", "noTarget", fmt.Sprintf("no %s entry matches the filter", name))
+			}
 			return nil
 		}
 		kept := (*target)[:0]
 		for _, entry := range *target {
-			if !matchesMultiValued(entry, path.Filter) {
+			if matchesMultiValued(entry, path.Filter) {
+				matched = true
+			} else {
 				kept = append(kept, entry)
 			}
+		}
+		if !matched {
+			return NewError("400", "noTarget", fmt.Sprintf("no %s entry matches the filter", name))
 		}
 		*target = kept
 		return nil
@@ -270,6 +293,8 @@ func applyMultiValued(target *[]MultiValued, path Path, op PatchOperation, name 
 				(*target)[i].Type = replacement
 			case "display":
 				(*target)[i].Display = replacement
+			case "$ref":
+				(*target)[i].Ref = replacement
 			case "primary":
 				var primary bool
 				if err := json.Unmarshal(op.Value, &primary); err != nil {
@@ -290,6 +315,24 @@ func applyMultiValued(target *[]MultiValued, path Path, op PatchOperation, name 
 	default:
 		return NewError("400", "invalidValue", fmt.Sprintf("unknown op %q", op.Op))
 	}
+}
+
+func clearMultiValuedSubAttribute(entry *MultiValued, subAttribute, name string) error {
+	switch strings.ToLower(subAttribute) {
+	case "value":
+		entry.Value = ""
+	case "type":
+		entry.Type = ""
+	case "display":
+		entry.Display = ""
+	case "$ref":
+		entry.Ref = ""
+	case "primary":
+		entry.Primary = false
+	default:
+		return NewError("400", "invalidPath", fmt.Sprintf("unsupported sub-attribute %s.%s", name, subAttribute))
+	}
+	return nil
 }
 
 func decodeMultiValued(raw json.RawMessage, name string) ([]MultiValued, error) {
@@ -320,8 +363,20 @@ func matchesMultiValued(entry MultiValued, filter FilterExpr) bool {
 		case "display":
 			field = entry.Display
 		case "primary":
+			if f.Operator == OpPresent {
+				return entry.Primary
+			}
 			want, ok := f.Value.(bool)
-			return ok && entry.Primary == want
+			switch f.Operator {
+			case OpEqual:
+				return ok && entry.Primary == want
+			case OpNotEqual:
+				return ok && entry.Primary != want
+			default:
+				return false
+			}
+		case "$ref":
+			field = entry.Ref
 		default:
 			return false
 		}

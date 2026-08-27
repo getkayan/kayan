@@ -45,6 +45,15 @@ type Comparison struct {
 
 func (Comparison) filterNode() {}
 
+// ValuePath selects a multi-valued attribute when at least one entry matches
+// its nested filter, for example emails[type eq "work"].
+type ValuePath struct{ Path Path }
+
+func (ValuePath) filterNode() {}
+
+// String implements [FilterExpr].
+func (v ValuePath) String() string { return v.Path.String() }
+
 // String implements [FilterExpr].
 func (c Comparison) String() string {
 	if c.Operator == OpPresent {
@@ -177,6 +186,7 @@ func tokenizeFilter(input string) ([]filterToken, error) {
 						if err != nil {
 							return nil, NewError("400", "invalidFilter", "malformed \\u escape")
 						}
+						// #nosec G115 -- exactly four hex digits cap code at 0xffff.
 						b.WriteRune(rune(code))
 						i += 6
 						continue
@@ -206,8 +216,51 @@ func tokenizeFilter(input string) ([]filterToken, error) {
 
 		default:
 			start := i
-			for i < len(runes) && !unicode.IsSpace(runes[i]) && runes[i] != '(' && runes[i] != ')' {
+			inBracket := false
+			inString := false
+			escaped := false
+			for i < len(runes) {
+				c := runes[i]
+				if inString {
+					if escaped {
+						escaped = false
+					} else if c == '\\' {
+						escaped = true
+					} else if c == '"' {
+						inString = false
+					}
+					i++
+					continue
+				}
+				switch c {
+				case '"':
+					if inBracket {
+						inString = true
+						i++
+						continue
+					}
+				case '[':
+					if inBracket {
+						return nil, NewError("400", "invalidFilter", "nested value filters are not supported")
+					}
+					inBracket = true
+					i++
+					continue
+				case ']':
+					if !inBracket {
+						return nil, NewError("400", "invalidFilter", "unbalanced value filter")
+					}
+					inBracket = false
+					i++
+					continue
+				}
+				if !inBracket && (unicode.IsSpace(c) || c == '(' || c == ')') {
+					break
+				}
 				i++
+			}
+			if inBracket || inString {
+				return nil, NewError("400", "invalidFilter", "unterminated value filter")
 			}
 			word := string(runes[start:i])
 			kind := tokenWord
@@ -343,6 +396,10 @@ func (p *filterParser) parseComparison() (FilterExpr, error) {
 	}
 
 	operator, ok := p.peek()
+	if path.Filter != nil && (!ok || operator.kind == tokenRParen ||
+		strings.EqualFold(operator.text, "and") || strings.EqualFold(operator.text, "or")) {
+		return ValuePath{Path: path}, nil
+	}
 	if !ok {
 		return nil, NewError("400", "invalidFilter",
 			fmt.Sprintf("expected an operator after %q", attribute.text))

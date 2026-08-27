@@ -200,6 +200,21 @@ func TestApplyPatchOperations(t *testing.T) {
 			},
 		},
 		{
+			name: "remove a selected sub-attribute through a value filter",
+			user: User{Emails: []MultiValued{
+				{Value: "home@example.test", Type: "home", Display: "Home"},
+				{Value: "work@example.test", Type: "work", Display: "Work"},
+			}},
+			ops: []PatchOperation{
+				{Op: PatchOpRemove, Path: `emails[type eq "work"].display`},
+			},
+			verify: func(t *testing.T, u *User) {
+				if len(u.Emails) != 2 || u.Emails[0].Display != "Home" || u.Emails[1].Display != "" {
+					t.Errorf("Emails = %+v", u.Emails)
+				}
+			},
+		},
+		{
 			name: "several attributes without a path",
 			ops: []PatchOperation{
 				{Op: PatchOpReplace, Value: json.RawMessage(`{"active":true,"title":"Engineer"}`)},

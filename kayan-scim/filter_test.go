@@ -118,6 +118,23 @@ func TestFilterASTShape(t *testing.T) {
 	}
 }
 
+func TestParseValuePathFilter(t *testing.T) {
+	expr, err := ParseFilter(`emails[type eq "work" and value co "@example.com"]`)
+	if err != nil {
+		t.Fatalf("ParseFilter: %v", err)
+	}
+	valuePath, ok := expr.(ValuePath)
+	if !ok {
+		t.Fatalf("expression = %T, want ValuePath", expr)
+	}
+	if valuePath.Path.Attribute != "emails" || valuePath.Path.Filter == nil {
+		t.Fatalf("path = %+v", valuePath.Path)
+	}
+	if rendered := expr.String(); rendered != `emails[(type eq "work" and value co "@example.com")]` {
+		t.Fatalf("String = %q", rendered)
+	}
+}
+
 // TestFilterValueTypes proves literals keep their JSON type, so a backend can
 // bind them as parameters rather than as strings.
 func TestFilterValueTypes(t *testing.T) {

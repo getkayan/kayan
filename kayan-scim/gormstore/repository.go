@@ -110,7 +110,9 @@ func (r *ScimRepository) ListScimUsers(ctx context.Context, filter string, start
 	users := make([]*scim.User, 0)
 	for rows.Next() {
 		inst := r.mapper.ToModelPlaceholder()
-		r.db.ScanRows(rows, inst)
+		if err := r.db.ScanRows(rows, inst); err != nil {
+			return nil, 0, fmt.Errorf("scim gormstore: scan resource: %w", err)
+		}
 		u, err := r.mapper.FromModel(inst)
 		if err == nil && u != nil {
 			users = append(users, u)

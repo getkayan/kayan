@@ -28,6 +28,9 @@ func applyFilter(db *gorm.DB, expr scim.FilterExpr, columnFor func(scim.Path) (s
 // buildClause renders one expression to a SQL fragment and its arguments.
 func buildClause(expr scim.FilterExpr, columnFor func(scim.Path) (string, error)) (string, []any, error) {
 	switch e := expr.(type) {
+	case scim.ValuePath:
+		return "", nil, fmt.Errorf("%w: value-path filters require a multi-valued storage mapping", scim.ErrFilterUnsupported)
+
 	case scim.Comparison:
 		return comparisonClause(e, columnFor)
 
