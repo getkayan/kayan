@@ -45,6 +45,19 @@ type IDTokenRequest struct {
 
 	// TTL overrides the token lifetime. Defaults to [DefaultIDTokenTTL].
 	TTL time.Duration
+
+	// AccessToken is the access token issued alongside this ID token. When
+	// set, the token carries an "at_hash" binding the two together.
+	//
+	// Without that binding a relying party cannot tell the pair arrived
+	// together, and in flows where they travel separately an attacker who can
+	// substitute one ends up with an ID token describing the victim beside an
+	// access token for their own account.
+	AccessToken string
+
+	// Code is the authorization code issued alongside this ID token, which
+	// happens in the hybrid flow. When set, the token carries a "c_hash".
+	Code string
 }
 
 // DefaultIDTokenTTL is how long an ID token is valid when no TTL is given.
@@ -94,6 +107,35 @@ func (s *Server) IssueIDToken(ctx context.Context, req IDTokenRequest) (string, 
 
 	if req.Nonce != "" {
 		claims["nonce"] = req.Nonce
+	}
+
+	// Hash claims are written with the other reserved ones, after the claims
+	// source, so a source cannot assert a binding the issuer did not make.
+	//
+	// Absent rather than empty when there is nothing to bind: a client that
+	// checks only for the claim's presence would otherwise verify a hash of
+	// the empty string and consider the token bound.
+	alg, err := s.signingAlgorithm(ctx)
+	if err != nil {
+		return "", err
+	}
+	if req.AccessToken != "" {
+		hash, err := halfHash(alg, req.AccessToken)
+		if err != nil {
+			return "", err
+		}
+		claims["at_hash"] = hash
+	} else {
+		delete(claims, "at_hash")
+	}
+	if req.Code != "" {
+		hash, err := halfHash(alg, req.Code)
+		if err != nil {
+			return "", err
+		}
+		claims["c_hash"] = hash
+	} else {
+		delete(claims, "c_hash")
 	}
 	if !req.AuthTime.IsZero() {
 		claims["auth_time"] = req.AuthTime.Unix()

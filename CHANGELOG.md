@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `saml.NewRSADecrypter`. Key transport is RSA-OAEP and content encryption is
   AES-GCM; `rsa-1_5` and CBC modes are refused as unsafe for an endpoint that
   decrypts unauthenticated input.
+- `oidc.Server.UserInfo` implements the UserInfo endpoint's logic, authorized
+  by token introspection through the new `oidc.WithTokenIntrospector`.
+- ID tokens carry `at_hash` and `c_hash` when `IDTokenRequest.AccessToken` or
+  `Code` is set, binding the ID token to what was issued alongside it.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

@@ -68,6 +68,7 @@ type Server struct {
 
 	keyProvider             keys.Provider
 	claims                  ClaimsSource
+	introspector            TokenIntrospector
 	clock                   domain.Clock
 	allowPlainCodeChallenge bool
 }
