@@ -68,7 +68,9 @@ func (c *CLI) listRoles(args []string) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", r.ID, r.Name, perms)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("render roles: %w", err)
+	}
 	fmt.Printf("\nTotal: %d\n", result.Total)
 	return nil
 }

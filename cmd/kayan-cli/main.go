@@ -59,8 +59,7 @@ func main() {
 	}
 }
 
-func printUsage() {
-	fmt.Print(`kayan-cli - Kayan IAM Command Line Interface
+const usage = `kayan-cli - Kayan IAM Command Line Interface
 
 Usage:
   kayan-cli <command> [subcommand] [options]
@@ -133,5 +132,8 @@ Examples:
 
   # Check server health
   kayan-cli health full
-`)
+`
+
+func printUsage() {
+	fmt.Print(usage)
 }

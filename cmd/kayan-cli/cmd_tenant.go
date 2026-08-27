@@ -69,7 +69,9 @@ func (c *CLI) listTenants(args []string) error {
 	for _, t := range result.Data {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n", t.ID, t.Name, t.Domain, t.Active)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("render tenants: %w", err)
+	}
 	fmt.Printf("\nTotal: %d\n", result.Total)
 	return nil
 }

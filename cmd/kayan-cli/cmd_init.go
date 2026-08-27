@@ -15,6 +15,8 @@ func initCommand(args []string) error {
 
 	// Create project directory if needed
 	if projectName != "." {
+		// #nosec G301,G703 -- projectName is the explicit CLI destination and
+		// generated source directories must remain traversable by collaborators.
 		if err := os.MkdirAll(projectName, 0755); err != nil {
 			return err
 		}
@@ -28,7 +30,7 @@ func initCommand(args []string) error {
 	}
 
 	// Generate go.mod
-	goModContent := fmt.Sprintf("module %s\n\ngo 1.25\n\nrequire github.com/getkayan/kayan v1.0.0\n", moduleName)
+	goModContent := fmt.Sprintf("module %s\n\ngo 1.25\n\nrequire github.com/getkayan/kayan/core v1.0.0\n", moduleName)
 	if err := writeFile(projectName+"/go.mod", goModContent); err != nil {
 		return err
 	}
@@ -37,41 +39,29 @@ func initCommand(args []string) error {
 	mainContent := `package main
 
 import (
-	"log"
-	"net/http"
-	"time"
+	"fmt"
 
-	"github.com/getkayan/kayan/core/session"
-	"github.com/getkayan/kayan/core/flow"
 	"github.com/getkayan/kayan/core/identity"
-	"github.com/getkayan/kayan/kayan-gorm"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
+// User is your application-owned schema. Kayan only requires GetID and SetID;
+// it does not prescribe a database, ORM, table, or HTTP framework.
+type User struct {
+	ID    string
+	Email string
+}
+
+func (u *User) GetID() any  { return u.ID }
+func (u *User) SetID(id any) { u.ID = id.(string) }
+
+var _ identity.FlowIdentity = (*User)(nil)
+
 func main() {
-	// 1. Database
-	db, err := gorm.Open(sqlite.Open("app.db"), &gorm.Config{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	repo := gormstore.NewRepository(db)
-	factory := func() any { return &identity.Identity{} }
+	userFactory := func() any { return &User{} }
+	fmt.Printf("Kayan identity factory ready: %T\n", userFactory())
 
-	// 2. Kayan Setup
-	reg, login := flow.PasswordAuth(repo, factory, "email")
-	sess := session.NewManager(session.NewHS256Strategy("secret-key", 24*time.Hour))
-
-	_ = reg
-	_ = login
-	_ = sess
-
-	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Login endpoint"))
-	})
-	
-	log.Println("Server starting on :8080")
-	http.ListenAndServe(":8080", nil)
+	// Next: choose any storage implementation of core/domain contracts and any
+	// transport layer. Optional official adapters are separate Kayan modules.
 }
 `
 	if err := writeFile(projectName+"/main.go", mainContent); err != nil {
@@ -95,5 +85,7 @@ func generateCommand(args []string) error {
 }
 
 func writeFile(path, content string) error {
+	// #nosec G306,G703 -- path is derived from the explicit init destination;
+	// generated Go source is intentionally readable like normal source files.
 	return os.WriteFile(path, []byte(content), 0644)
 }

@@ -49,6 +49,7 @@ func (c *CLI) request(method, path string, body interface{}) ([]byte, error) {
 		bodyReader = bytes.NewReader(data)
 	}
 
+	// #nosec G704 -- BaseURL is the explicit IAM endpoint configured by the CLI operator.
 	req, err := http.NewRequest(method, c.BaseURL+path, bodyReader)
 	if err != nil {
 		return nil, err
@@ -59,6 +60,7 @@ func (c *CLI) request(method, path string, body interface{}) ([]byte, error) {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
+	// #nosec G704 -- this client exists specifically to call the operator-selected endpoint.
 	resp, err := c.Client.Do(req)
 	if err != nil {
 		return nil, err
