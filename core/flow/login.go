@@ -19,7 +19,7 @@ type Attacher interface {
 
 type LoginManager struct {
 	repo       IdentityRepository
-	auditStore audit.AuditStore
+	auditSink  *auditSink
 	dispatcher events.Dispatcher
 
 	// Dynamic Config
@@ -41,6 +41,11 @@ func WithLoginDispatcher(d events.Dispatcher) LoginOption {
 	return func(m *LoginManager) { m.dispatcher = d }
 }
 
+// WithLoginAudit explicitly enables audit persistence and error reporting.
+func WithLoginAudit(store audit.AuditStore, onError AuditErrorHandler) LoginOption {
+	return func(m *LoginManager) { m.auditSink = newAuditSink(store, onError) }
+}
+
 // WithStrategyStore sets the dynamic strategy configuration store.
 func WithStrategyStore(s domain.StrategyStore) LoginOption {
 	return func(m *LoginManager) { m.strategyStore = s }
@@ -59,15 +64,8 @@ func WithLoginPostHook(h Hook) LoginOption {
 var ErrMFARequired = errors.New("login: mfa required")
 
 func NewLoginManager(repo IdentityRepository, factory func() any, opts ...LoginOption) *LoginManager {
-	store, ok := repo.(audit.AuditStore)
-	var auditStore audit.AuditStore
-	if ok {
-		auditStore = store
-	}
-
 	m := &LoginManager{
 		repo:             repo,
-		auditStore:       auditStore,
 		strategies:       make(map[string]LoginStrategy),
 		strategyRegistry: NewStrategyRegistry(),
 		factory:          factory,
@@ -179,7 +177,7 @@ func (m *LoginManager) AddPostHook(h Hook) {
 func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier string) (any, error) {
 	m.mu.RLock()
 	strategy, ok := m.strategies[method]
-	auditStore := m.auditStore
+	auditSink := m.auditSink
 	dispatcher := m.dispatcher
 	m.mu.RUnlock()
 
@@ -197,8 +195,8 @@ func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier str
 		return nil, err
 	}
 
-	if auditStore != nil {
-		auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if auditSink != nil {
+		auditSink.save(ctx, &audit.AuditEvent{
 			Type:    string(events.TopicLoginInitiated),
 			ActorID: identifier,
 			Status:  "success",
@@ -209,6 +207,7 @@ func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier str
 	if dispatcher != nil {
 		event := events.NewEvent(events.TopicLoginInitiated, events.CodeAccepted)
 		event.ActorID = identifier
+		// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 		dispatcher.Dispatch(ctx, event)
 	}
 
@@ -220,7 +219,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	strategy, ok := m.strategies[method]
 	preHooks := append([]Hook(nil), m.preHooks...)
 	postHooks := append([]Hook(nil), m.postHooks...)
-	auditStore := m.auditStore
+	auditSink := m.auditSink
 	dispatcher := m.dispatcher
 	m.mu.RUnlock()
 
@@ -238,8 +237,8 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	// 2. Delegate to strategy
 	ident, err := strategy.Authenticate(ctx, identifier, secret)
 	if err != nil {
-		if auditStore != nil {
-			auditStore.SaveEvent(ctx, &audit.AuditEvent{
+		if auditSink != nil {
+			auditSink.save(ctx, &audit.AuditEvent{
 				Type:    string(events.TopicLoginFailure),
 				ActorID: identifier,
 				Status:  "failure",
@@ -249,6 +248,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 		if dispatcher != nil {
 			event := events.NewEvent(events.TopicLoginFailure, events.CodeUnauthorized)
 			event.ActorID = identifier
+			// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 			dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
@@ -258,8 +258,8 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 	if mfaIdent, ok := ident.(MFAIdentity); ok {
 		enabled, _ := mfaIdent.MFAConfig()
 		if enabled {
-			if auditStore != nil {
-				auditStore.SaveEvent(ctx, &audit.AuditEvent{
+			if auditSink != nil {
+				auditSink.save(ctx, &audit.AuditEvent{
 					Type:    string(events.TopicLoginMFARequired),
 					ActorID: identifier,
 					Status:  "success",
@@ -269,14 +269,15 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 			if dispatcher != nil {
 				event := events.NewEvent(events.TopicLoginMFARequired, events.CodeAccepted)
 				event.ActorID = identifier
+				// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 				dispatcher.Dispatch(ctx, event)
 			}
 			return ident, ErrMFARequired
 		}
 	}
 
-	if auditStore != nil {
-		auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if auditSink != nil {
+		auditSink.save(ctx, &audit.AuditEvent{
 			Type:    string(events.TopicLoginSuccess),
 			ActorID: identifier,
 			Status:  "success",
@@ -290,6 +291,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 		if fi, ok := ident.(FlowIdentity); ok {
 			event.SubjectID = fi.GetID()
 		}
+		// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 		dispatcher.Dispatch(ctx, event)
 	}
 
@@ -319,8 +321,8 @@ func (m *LoginManager) LinkMethod(ctx context.Context, ident any, method, identi
 	}
 
 	// 1. Audit link attempt
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if m.auditSink != nil {
+		m.auditSink.save(ctx, &audit.AuditEvent{
 			Type:    "identity.link.initiate",
 			ActorID: identifier,
 			Status:  "success",
@@ -330,8 +332,8 @@ func (m *LoginManager) LinkMethod(ctx context.Context, ident any, method, identi
 
 	// 2. Perform linking
 	if err := attacher.Attach(ctx, ident, identifier, secret); err != nil {
-		if m.auditStore != nil {
-			m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+		if m.auditSink != nil {
+			m.auditSink.save(ctx, &audit.AuditEvent{
 				Type:    string(events.TopicIdentityFailure),
 				ActorID: identifier,
 				Status:  "failure",
@@ -341,8 +343,8 @@ func (m *LoginManager) LinkMethod(ctx context.Context, ident any, method, identi
 		return err
 	}
 
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if m.auditSink != nil {
+		m.auditSink.save(ctx, &audit.AuditEvent{
 			Type:    string(events.TopicIdentityCreated),
 			ActorID: identifier,
 			Status:  "success",

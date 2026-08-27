@@ -11,17 +11,17 @@ import (
 )
 
 type RegistrationManager struct {
-	mu                     sync.RWMutex
-	repo                   IdentityRepository
-	auditStore             audit.AuditStore
-	dispatcher             events.Dispatcher
-	strategies             map[string]RegistrationStrategy
-	preHooks               []Hook
-	postHooks              []Hook
-	factory                func() any
-	schema                 identity.Schema
-	linker                 Linker
-	allowPasswordCapture   bool
+	mu                   sync.RWMutex
+	repo                 IdentityRepository
+	auditSink            *auditSink
+	dispatcher           events.Dispatcher
+	strategies           map[string]RegistrationStrategy
+	preHooks             []Hook
+	postHooks            []Hook
+	factory              func() any
+	schema               identity.Schema
+	linker               Linker
+	allowPasswordCapture bool
 }
 
 // RegistrationOption configures a RegistrationManager.
@@ -30,6 +30,11 @@ type RegistrationOption func(*RegistrationManager)
 // WithRegDispatcher sets the event dispatcher.
 func WithRegDispatcher(d events.Dispatcher) RegistrationOption {
 	return func(m *RegistrationManager) { m.dispatcher = d }
+}
+
+// WithRegistrationAudit explicitly enables audit persistence and error reporting.
+func WithRegistrationAudit(store audit.AuditStore, onError AuditErrorHandler) RegistrationOption {
+	return func(m *RegistrationManager) { m.auditSink = newAuditSink(store, onError) }
 }
 
 // WithSchema sets the trait validation schema.
@@ -74,15 +79,8 @@ func WithAllowPasswordCapture() RegistrationOption {
 }
 
 func NewRegistrationManager(repo IdentityRepository, factory func() any, opts ...RegistrationOption) *RegistrationManager {
-	store, ok := repo.(audit.AuditStore)
-	var auditStore audit.AuditStore
-	if ok {
-		auditStore = store
-	}
-
 	m := &RegistrationManager{
 		repo:       repo,
-		auditStore: auditStore,
 		strategies: make(map[string]RegistrationStrategy),
 		factory:    factory,
 	}
@@ -136,7 +134,7 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 	strategy, ok := m.strategies[method]
 	preHooks := append([]Hook(nil), m.preHooks...)
 	postHooks := append([]Hook(nil), m.postHooks...)
-	auditStore := m.auditStore
+	auditSink := m.auditSink
 	dispatcher := m.dispatcher
 	schema := m.schema
 	linker := m.linker
@@ -186,8 +184,8 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 	// 3. Delegate to strategy
 	ident, err := strategy.Register(ctx, traits, secret)
 	if err != nil {
-		if auditStore != nil {
-			auditStore.SaveEvent(ctx, &audit.AuditEvent{
+		if auditSink != nil {
+			auditSink.save(ctx, &audit.AuditEvent{
 				Type:    string(events.TopicIdentityFailure),
 				Status:  "failure",
 				Message: err.Error(),
@@ -195,13 +193,14 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 		}
 		if dispatcher != nil {
 			event := events.NewEvent(events.TopicIdentityFailure, events.CodeBadRequest)
+			// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 			dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
 	}
 
-	if auditStore != nil {
-		auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if auditSink != nil {
+		auditSink.save(ctx, &audit.AuditEvent{
 			Type:   string(events.TopicIdentityCreated),
 			Status: "success",
 		})
@@ -212,6 +211,7 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 		if fi, ok := ident.(FlowIdentity); ok {
 			event.SubjectID = fi.GetID()
 		}
+		// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 		dispatcher.Dispatch(ctx, event)
 	}
 

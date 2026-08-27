@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/identity"
 )
@@ -72,15 +77,97 @@ func StorageSuite(t *testing.T, newStore func() domain.Storage) {
 // it already knows, such as one carrying database struct tags.
 func StorageSuiteWithModel(t *testing.T, newStore func() domain.Storage, factory func() any) {
 	t.Helper()
+	IdentityStorageSuiteWithModel(t, func() domain.IdentityStorage { return newStore() }, factory)
+	CredentialStorageSuite(t, func() CredentialStore { return newStore() })
+	SessionStorageSuite(t, func() domain.SessionStorage { return newStore() })
+	TokenStoreSuite(t, func() domain.TokenStore { return newStore() })
+	AuditStoreSuite(t, func() audit.AuditStore { return newStore() })
+}
 
+// IdentityStorageSuite runs the identity contract with [SuiteIdentity].
+func IdentityStorageSuite(t *testing.T, newStore func() domain.IdentityStorage) {
+	t.Helper()
+	IdentityStorageSuiteWithModel(t, newStore, func() any { return &SuiteIdentity{} })
+}
+
+// IdentityStorageSuiteWithModel runs the identity contract with a caller model.
+func IdentityStorageSuiteWithModel(t *testing.T, newStore func() domain.IdentityStorage, factory func() any) {
+	t.Helper()
 	if err := checkModel(factory); err != nil {
 		t.Fatalf("identity model is unusable: %v", err)
 	}
+	suiteIdentity(t, newStore, factory)
+}
 
-	t.Run("Identity", func(t *testing.T) { suiteIdentity(t, newStore, factory) })
-	t.Run("Credential", func(t *testing.T) { suiteCredential(t, newStore) })
-	t.Run("Session", func(t *testing.T) { suiteSession(t, newStore) })
-	t.Run("Token", func(t *testing.T) { suiteToken(t, newStore) })
+// CredentialStore is the complete credential contract exercised by the suite.
+type CredentialStore interface {
+	domain.CredentialStorage
+	CreateCredential(ctx context.Context, cred any) error
+}
+
+// CredentialStorageSuite runs the credential create, lookup, and update contract.
+func CredentialStorageSuite(t *testing.T, newStore func() CredentialStore) {
+	t.Helper()
+	suiteCredential(t, newStore)
+}
+
+// SessionStorageSuite runs the session lifecycle contract.
+func SessionStorageSuite(t *testing.T, newStore func() domain.SessionStorage) {
+	t.Helper()
+	suiteSession(t, newStore)
+}
+
+// TokenStoreSuite runs the transient-token lifecycle contract.
+func TokenStoreSuite(t *testing.T, newStore func() domain.TokenStore) {
+	t.Helper()
+	suiteToken(t, newStore)
+}
+
+// AuditStoreSuite runs persistence, filtering, pagination, export, and purge
+// behavior required by [audit.AuditStore].
+func AuditStoreSuite(t *testing.T, newStore func() audit.AuditStore) {
+	t.Helper()
+	ctx := context.Background()
+	store := newStore()
+	now := time.Now().UTC()
+	events := []*audit.AuditEvent{
+		{ID: "a1", Type: audit.EventLoginFailure, ActorID: "u1", Status: "failure", CreatedAt: now.Add(-2 * time.Hour)},
+		{ID: "a2", Type: audit.EventLoginSuccess, ActorID: "u1", Status: "success", CreatedAt: now},
+	}
+	for _, event := range events {
+		if err := store.SaveEvent(ctx, event); err != nil {
+			t.Fatalf("SaveEvent: %v", err)
+		}
+	}
+
+	filtered, err := store.Query(ctx, audit.Filter{ActorID: "u1", Statuses: []string{"success"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != "a2" {
+		t.Fatalf("filtered events = %#v, want a2", filtered)
+	}
+	count, err := store.Count(ctx, audit.Filter{ActorID: "u1"})
+	if err != nil || count != 2 {
+		t.Fatalf("Count = %d, %v; want 2, nil", count, err)
+	}
+	for _, format := range []audit.ExportFormat{audit.ExportJSON, audit.ExportCSV} {
+		reader, err := store.Export(ctx, audit.Filter{ActorID: "u1"}, format)
+		if err != nil {
+			t.Fatalf("Export(%s): %v", format, err)
+		}
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatalf("read Export(%s): %v", format, err)
+		}
+		if !strings.Contains(string(data), "a1") || !strings.Contains(string(data), "a2") {
+			t.Errorf("Export(%s) omitted events: %s", format, data)
+		}
+	}
+	purged, err := store.Purge(ctx, now.Add(-time.Hour))
+	if err != nil || purged != 1 {
+		t.Fatalf("Purge = %d, %v; want 1, nil", purged, err)
+	}
 }
 
 // checkModel reports whether the factory yields a struct the suite can drive.
@@ -148,7 +235,7 @@ func identityField(t *testing.T, ident any, field string) string {
 	return f.String()
 }
 
-func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() any) {
+func suiteIdentity(t *testing.T, newStore func() domain.IdentityStorage, factory func() any) {
 	t.Helper()
 
 	t.Run("create then get", func(t *testing.T) {
@@ -172,7 +259,9 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 	t.Run("get missing reports an error", func(t *testing.T) {
 		ctx := context.Background()
 		store := newStore()
-		if _, err := store.GetIdentity(ctx, factory, "nope"); err == nil {
+		if _, err := store.GetIdentity(ctx, factory, "nope"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("GetIdentity error = %v, want domain.ErrNotFound", err)
+		} else if err == nil {
 			t.Error("GetIdentity returned no error for a missing identity")
 		}
 	})
@@ -286,7 +375,7 @@ func suiteIdentity(t *testing.T, newStore func() domain.Storage, factory func() 
 	})
 }
 
-func suiteCredential(t *testing.T, newStore func() domain.Storage) {
+func suiteCredential(t *testing.T, newStore func() CredentialStore) {
 	t.Helper()
 
 	t.Run("create then look up", func(t *testing.T) {
@@ -330,8 +419,8 @@ func suiteCredential(t *testing.T, newStore func() domain.Storage) {
 	t.Run("missing credential reports an error", func(t *testing.T) {
 		ctx := context.Background()
 		store := newStore()
-		if _, err := store.GetCredentialByIdentifier(ctx, "absent@example.test", "password"); err == nil {
-			t.Error("GetCredentialByIdentifier returned no error for a missing credential")
+		if _, err := store.GetCredentialByIdentifier(ctx, "absent@example.test", "password"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("GetCredentialByIdentifier error = %v, want domain.ErrNotFound", err)
 		}
 	})
 
@@ -358,7 +447,7 @@ func suiteCredential(t *testing.T, newStore func() domain.Storage) {
 	})
 }
 
-func suiteSession(t *testing.T, newStore func() domain.Storage) {
+func suiteSession(t *testing.T, newStore func() domain.SessionStorage) {
 	t.Helper()
 
 	newSession := func() *identity.Session {
@@ -426,14 +515,59 @@ func suiteSession(t *testing.T, newStore func() domain.Storage) {
 	t.Run("missing session reports an error", func(t *testing.T) {
 		ctx := context.Background()
 		store := newStore()
-		if _, err := store.GetSession(ctx, "absent"); err == nil {
-			t.Error("GetSession returned no error for a missing session")
+		if _, err := store.GetSession(ctx, "absent"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("GetSession error = %v, want domain.ErrNotFound", err)
 		}
 	})
 }
 
-func suiteToken(t *testing.T, newStore func() domain.Storage) {
+func suiteToken(t *testing.T, newStore func() domain.TokenStore) {
 	t.Helper()
+
+	t.Run("consume is atomic and type scoped", func(t *testing.T) {
+		ctx := context.Background()
+		store := newStore()
+		if err := store.SaveToken(ctx, &domain.AuthToken{
+			Token: "single-use", IdentityID: "u1", Type: "magic_link", ExpiresAt: time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("SaveToken: %v", err)
+		}
+		if _, err := store.ConsumeToken(ctx, "single-use", "otp"); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("wrong-type ConsumeToken error = %v, want ErrNotFound", err)
+		}
+		if _, err := store.ConsumeToken(ctx, "single-use", "magic_link"); err != nil {
+			t.Fatalf("ConsumeToken: %v", err)
+		}
+		if _, err := store.ConsumeToken(ctx, "single-use", "magic_link"); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("second ConsumeToken error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("concurrent consume has one winner", func(t *testing.T) {
+		ctx := context.Background()
+		store := newStore()
+		if err := store.SaveToken(ctx, &domain.AuthToken{
+			Token: "raced", IdentityID: "u1", Type: "otp", ExpiresAt: time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("SaveToken: %v", err)
+		}
+
+		var winners atomic.Int32
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := store.ConsumeToken(ctx, "raced", "otp"); err == nil {
+					winners.Add(1)
+				}
+			}()
+		}
+		wg.Wait()
+		if got := winners.Load(); got != 1 {
+			t.Fatalf("successful concurrent consumes = %d, want 1", got)
+		}
+	})
 
 	t.Run("save then get", func(t *testing.T) {
 		ctx := context.Background()
@@ -484,8 +618,8 @@ func suiteToken(t *testing.T, newStore func() domain.Storage) {
 		}
 		// An expired token must never be handed back: it is a live credential
 		// for password recovery and magic-link login.
-		if _, err := store.GetToken(ctx, "expired"); err == nil {
-			t.Error("an expired token was returned")
+		if _, err := store.GetToken(ctx, "expired"); !errors.Is(err, domain.ErrExpired) {
+			t.Errorf("expired token error = %v, want domain.ErrExpired", err)
 		}
 	})
 
@@ -508,6 +642,9 @@ func suiteToken(t *testing.T, newStore func() domain.Storage) {
 		}
 		if _, err := store.GetToken(ctx, "live"); err != nil {
 			t.Errorf("a live token was swept: %v", err)
+		}
+		if _, err := store.GetToken(ctx, "dead"); err == nil {
+			t.Error("an expired token survived DeleteExpiredTokens")
 		}
 	})
 }

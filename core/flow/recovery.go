@@ -14,7 +14,7 @@ type RecoveryManager struct {
 	repo        IdentityRepository // To find user and update credential
 	tokenStore  domain.TokenStore
 	hasher      domain.Hasher
-	auditStore  audit.AuditStore
+	auditSink   *auditSink
 	ttl         time.Duration
 	rateLimiter RateLimiter
 	rateLimit   int
@@ -38,17 +38,16 @@ func WithRecoveryTTL(ttl time.Duration) RecoveryOption {
 	return func(m *RecoveryManager) { m.ttl = ttl }
 }
 
+// WithRecoveryAudit explicitly enables audit persistence and error reporting.
+func WithRecoveryAudit(store audit.AuditStore, onError AuditErrorHandler) RecoveryOption {
+	return func(m *RecoveryManager) { m.auditSink = newAuditSink(store, onError) }
+}
+
 func NewRecoveryManager(repo IdentityRepository, store domain.TokenStore, hasher domain.Hasher, opts ...RecoveryOption) *RecoveryManager {
-	storeAudit, ok := repo.(audit.AuditStore)
-	var auditStore audit.AuditStore
-	if ok {
-		auditStore = storeAudit
-	}
 	m := &RecoveryManager{
 		repo:       repo,
 		tokenStore: store,
 		hasher:     hasher,
-		auditStore: auditStore,
 		ttl:        1 * time.Hour,
 	}
 	for _, opt := range opts {
@@ -92,8 +91,8 @@ func (m *RecoveryManager) Initiate(ctx context.Context, identifier string) (*dom
 	}
 
 	// Audit
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if m.auditSink != nil {
+		m.auditSink.save(ctx, &audit.AuditEvent{
 			Type:    "identity.recovery.initiate",
 			ActorID: identifier,
 			Status:  "success",
@@ -117,18 +116,9 @@ func (m *RecoveryManager) ResetPassword(ctx context.Context, tokenStr string, ne
 	}
 
 	// 1. Get Token
-	token, err := m.tokenStore.GetToken(ctx, tokenStr)
+	token, err := m.tokenStore.ConsumeToken(ctx, tokenStr, "recovery")
 	if err != nil {
 		return fmt.Errorf("recovery: invalid or expired token")
-	}
-
-	if token.Type != "recovery" {
-		return fmt.Errorf("recovery: invalid token type")
-	}
-
-	if token.ExpiresAt.Before(time.Now()) {
-		m.tokenStore.DeleteToken(ctx, tokenStr)
-		return fmt.Errorf("recovery: token expired")
 	}
 
 	// 2. Hash New Password
@@ -149,12 +139,9 @@ func (m *RecoveryManager) ResetPassword(ctx context.Context, tokenStr string, ne
 		return err
 	}
 
-	// 4. Consume Token
-	m.tokenStore.DeleteToken(ctx, tokenStr)
-
 	// Audit
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if m.auditSink != nil {
+		m.auditSink.save(ctx, &audit.AuditEvent{
 			Type:      "identity.recovery.success",
 			SubjectID: token.IdentityID,
 			Status:    "success",

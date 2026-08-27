@@ -22,6 +22,7 @@ type testOAuth2Store struct {
 	authCodes     map[string]*AuthCode
 	refreshTokens map[string]*RefreshToken
 	auditEvents   []*audit.AuditEvent
+	auditErr      error
 }
 
 func newTestOAuth2Store() *testOAuth2Store {
@@ -87,6 +88,9 @@ func (s *testOAuth2Store) DeleteRefreshToken(_ context.Context, token string) er
 }
 
 func (s *testOAuth2Store) SaveEvent(_ context.Context, event *audit.AuditEvent) error {
+	if s.auditErr != nil {
+		return s.auditErr
+	}
 	s.auditEvents = append(s.auditEvents, event)
 	return nil
 }
@@ -117,7 +121,8 @@ func TestProviderExchangeWithPKCEAndIntrospection(t *testing.T) {
 		t.Fatalf("generate RSA key: %v", err)
 	}
 
-	provider := NewProvider(store, store, store, "https://issuer.example.com", privateKey, "kid-1")
+	provider := NewProvider(store, store, store, "https://issuer.example.com", privateKey, "kid-1",
+		WithProviderAudit(store, func(context.Context, error) {}))
 
 	verifier := "verifier-value"
 	code, err := provider.GenerateAuthCode(ctx, "client-1", "user-1", "https://app.example.com/callback", []string{"openid", "profile"}, providerChallenge(verifier), "S256")
@@ -186,7 +191,8 @@ func TestProviderRefreshRotatesRefreshToken(t *testing.T) {
 		t.Fatalf("generate RSA key: %v", err)
 	}
 
-	provider := NewProvider(store, store, store, "https://issuer.example.com", privateKey, "kid-1")
+	provider := NewProvider(store, store, store, "https://issuer.example.com", privateKey, "kid-1",
+		WithProviderAudit(store, func(context.Context, error) {}))
 
 	tokens, err := provider.Refresh(ctx, "refresh-old", "client-1", "top-secret")
 	if err != nil {
@@ -214,7 +220,8 @@ func TestProviderExchangeRejectsInvalidVerifier(t *testing.T) {
 		t.Fatalf("generate RSA key: %v", err)
 	}
 
-	provider := NewProvider(store, store, store, "https://issuer.example.com", privateKey, "kid-1")
+	provider := NewProvider(store, store, store, "https://issuer.example.com", privateKey, "kid-1",
+		WithProviderAudit(store, func(context.Context, error) {}))
 	code, err := provider.GenerateAuthCode(ctx, "client-1", "user-1", "https://app.example.com/callback", []string{"openid"}, providerChallenge("expected-verifier"), "S256")
 	if err != nil {
 		t.Fatalf("generate auth code: %v", err)
@@ -238,6 +245,34 @@ func providerChallenge(verifier string) string {
 	hasher := crypto.SHA256.New()
 	hasher.Write([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(hasher.Sum(nil))
+}
+
+func TestProviderAuditFailureIsReported(t *testing.T) {
+	want := errors.New("audit unavailable")
+	store := newTestOAuth2Store()
+	store.auditErr = want
+	reported := make(chan error, 1)
+	provider := NewProvider(store, store, store, "https://issuer.example.com", nil, "",
+		WithProviderAudit(store, func(_ context.Context, err error) { reported <- err }))
+
+	provider.logAudit(context.Background(), "oauth2.test", "client", "user", "success", "")
+	select {
+	case got := <-reported:
+		if !errors.Is(got, want) {
+			t.Fatalf("reported error = %v, want %v", got, want)
+		}
+	default:
+		t.Fatal("audit persistence failure was not reported")
+	}
+}
+
+func TestProviderAuditRequiresErrorHandler(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected missing audit error handler to panic")
+		}
+	}()
+	WithProviderAudit(newTestOAuth2Store(), nil)
 }
 
 func TestProviderRevokeAndIntrospect(t *testing.T) {

@@ -44,7 +44,6 @@ package gormstore
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -285,20 +284,7 @@ func (r *Repository) Export(ctx context.Context, filter audit.Filter, format aud
 		return nil, err
 	}
 
-	pr, pw := io.Pipe()
-	go func() {
-		defer pw.Close()
-		if format == audit.ExportJSON {
-			if err := json.NewEncoder(pw).Encode(events); err != nil {
-				pw.CloseWithError(err)
-			}
-		} else {
-			// CSV or other formats could be implemented here
-			pw.CloseWithError(errors.New("kgorm: unsupported export format"))
-		}
-	}()
-
-	return pr, nil
+	return audit.ExportEvents(events, format)
 }
 
 // Purge implements audit.AuditStore.

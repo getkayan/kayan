@@ -63,6 +63,7 @@ type Provider struct {
 	authCodeStore     AuthCodeStore
 	refreshTokenStore RefreshTokenStore
 	auditStore        audit.AuditStore
+	auditErrorHandler AuditErrorHandler
 	issuer            string
 	signingKey        any // RSA or ECDSA key
 	keyID             string
@@ -127,6 +128,22 @@ func WithAllowPlainCodeChallenge(allow bool) ProviderOption {
 // ProviderOption configures optional Provider behavior.
 type ProviderOption func(*Provider)
 
+// AuditErrorHandler receives audit persistence failures. OAuth side effects
+// are not rolled back, so callers should route these errors to durable alerts.
+type AuditErrorHandler func(context.Context, error)
+
+// WithProviderAudit enables protocol audit events. A handler is mandatory so
+// persistence failures cannot disappear silently.
+func WithProviderAudit(store audit.AuditStore, onError AuditErrorHandler) ProviderOption {
+	if store != nil && onError == nil {
+		panic("oauth2: audit error handler is required with an audit store")
+	}
+	return func(p *Provider) {
+		p.auditStore = store
+		p.auditErrorHandler = onError
+	}
+}
+
 // WithRevocationStore enables token revocation via the supplied store.
 func WithRevocationStore(rs RevocationStore) ProviderOption {
 	return func(p *Provider) { p.revocationStore = rs }
@@ -155,12 +172,10 @@ type TokenResponse struct {
 }
 
 func NewProvider(cs ClientStore, acs AuthCodeStore, rts RefreshTokenStore, issuer string, signingKey any, keyID string, opts ...ProviderOption) *Provider {
-	store, _ := cs.(audit.AuditStore)
 	p := &Provider{
 		clientStore:       cs,
 		authCodeStore:     acs,
 		refreshTokenStore: rts,
-		auditStore:        store,
 		issuer:            issuer,
 		signingKey:        signingKey,
 		keyID:             keyID,
@@ -455,13 +470,15 @@ func (p *Provider) logAudit(ctx context.Context, eventType, actor, subject, stat
 	if p.auditStore == nil {
 		return
 	}
-	p.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if err := p.auditStore.SaveEvent(ctx, &audit.AuditEvent{
 		Type:      eventType,
 		ActorID:   actor,
 		SubjectID: subject,
 		Status:    status,
 		Message:   message,
-	})
+	}); err != nil {
+		p.auditErrorHandler(ctx, err)
+	}
 }
 
 // PKCE code challenge methods (RFC 7636 section 4.2).

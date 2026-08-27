@@ -14,27 +14,33 @@ import (
 type VerificationManager struct {
 	repo       IdentityRepository
 	tokenStore domain.TokenStore
-	auditStore audit.AuditStore
+	auditSink  *auditSink
 	ttl        time.Duration
 	factory    func() any
 }
 
-func NewVerificationManager(repo IdentityRepository, store domain.TokenStore, factory func() any) *VerificationManager {
-	storeAudit, ok := repo.(audit.AuditStore)
-	var auditStore audit.AuditStore
-	if ok {
-		auditStore = storeAudit
-	}
+// VerificationOption configures a VerificationManager.
+type VerificationOption func(*VerificationManager)
+
+// WithVerificationAudit explicitly enables audit persistence and error reporting.
+func WithVerificationAudit(store audit.AuditStore, onError AuditErrorHandler) VerificationOption {
+	return func(m *VerificationManager) { m.auditSink = newAuditSink(store, onError) }
+}
+
+func NewVerificationManager(repo IdentityRepository, store domain.TokenStore, factory func() any, opts ...VerificationOption) *VerificationManager {
 	if factory == nil {
 		factory = func() any { return &identity.Identity{} }
 	}
-	return &VerificationManager{
+	m := &VerificationManager{
 		repo:       repo,
 		tokenStore: store,
-		auditStore: auditStore,
 		ttl:        24 * time.Hour,
 		factory:    factory,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // Initiate generates a verification token.
@@ -68,8 +74,8 @@ func (m *VerificationManager) Initiate(ctx context.Context, ident any) (*domain.
 	}
 
 	// Audit
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if m.auditSink != nil {
+		m.auditSink.save(ctx, &audit.AuditEvent{
 			Type:      "identity.verification.initiate",
 			SubjectID: fmt.Sprintf("%v", fi.GetID()),
 			Status:    "success",
@@ -82,18 +88,9 @@ func (m *VerificationManager) Initiate(ctx context.Context, ident any) (*domain.
 // Verify consumes the token and marks identity as verified.
 func (m *VerificationManager) Verify(ctx context.Context, tokenStr string) error {
 	// 1. Get Token
-	token, err := m.tokenStore.GetToken(ctx, tokenStr)
+	token, err := m.tokenStore.ConsumeToken(ctx, tokenStr, "verification")
 	if err != nil {
 		return fmt.Errorf("verification: invalid or expired token")
-	}
-
-	if token.Type != "verification" {
-		return fmt.Errorf("verification: invalid token type")
-	}
-
-	if token.ExpiresAt.Before(time.Now()) {
-		m.tokenStore.DeleteToken(ctx, tokenStr)
-		return fmt.Errorf("verification: token expired")
 	}
 
 	// 2. Get Identity
@@ -120,12 +117,9 @@ func (m *VerificationManager) Verify(ctx context.Context, tokenStr string) error
 		return err
 	}
 
-	// 4. Consume Token
-	m.tokenStore.DeleteToken(ctx, tokenStr)
-
 	// Audit
-	if m.auditStore != nil {
-		m.auditStore.SaveEvent(ctx, &audit.AuditEvent{
+	if m.auditSink != nil {
+		m.auditSink.save(ctx, &audit.AuditEvent{
 			Type:      "identity.verification.success",
 			SubjectID: fmt.Sprintf("%v", fi.GetID()),
 			Status:    "success",
