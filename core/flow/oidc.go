@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -117,13 +118,23 @@ func (m *OIDCManager) reconcileIdentity(ctx context.Context, providerID string, 
 	// 1. Check if OIDC credential already exists
 	oidcIdentifier := fmt.Sprintf("%s:%s", providerID, subject)
 	cred, err := m.repo.GetCredentialByIdentifier(ctx, oidcIdentifier, "oidc")
-	if err == nil {
+	if err == nil && cred != nil {
 		// Existing OIDC user
 		return m.repo.GetIdentity(ctx, m.factory, cred.IdentityID)
 	}
 
-	// 2. Account Linking: Check if user exists by email
-	if email != "" {
+	// 2. Account linking by email address.
+	//
+	// The address alone is not evidence. Linking on a bare email claim means
+	// any provider that lets a user assert an arbitrary address -- public
+	// self-registration, a permissive directory -- can mint a login as any
+	// local account holding it, with no credential and no interaction with the
+	// owner. Only a provider that vouches for the address may link.
+	//
+	// The claim must be a true boolean. A provider that sends the string
+	// "false", or omits it, is not vouching for anything.
+	verified, _ := claims["email_verified"].(bool)
+	if email != "" && verified {
 		if m.linker != nil {
 			traits := m.mapClaims(claims)
 			existingIdent, err := m.linker.FindExisting(ctx, traits)
@@ -182,9 +193,21 @@ func (m *OIDCManager) mapClaims(claims map[string]any) identity.JSON {
 	if m.claimMapper != nil {
 		return m.claimMapper(claims)
 	}
-	// Default: just include email
+	// Default: just include email.
+	//
+	// Built with the JSON encoder rather than string formatting. An address is
+	// attacker-influenced data from a federated provider, and one containing a
+	// quote would otherwise close the string and inject sibling keys into the
+	// traits document -- letting the claim set fields the mapper never
+	// intended to expose.
 	email, _ := claims["email"].(string)
-	return identity.JSON(fmt.Sprintf(`{"email": "%s"}`, email))
+	encoded, err := json.Marshal(map[string]string{"email": email})
+	if err != nil {
+		// A map[string]string cannot fail to marshal; fall back to an empty
+		// document rather than to a hand-built one.
+		return identity.JSON(`{}`)
+	}
+	return identity.JSON(encoded)
 }
 
 func (m *OIDCManager) linkOIDC(ctx context.Context, ident any, providerID, subject string) (any, error) {
