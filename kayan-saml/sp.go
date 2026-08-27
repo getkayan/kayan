@@ -232,6 +232,19 @@ type Response struct {
 	Issuer       Issuer     `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	Status       Status     `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
 	Assertion    *Assertion `xml:"urn:oasis:names:tc:SAML:2.0:assertion Assertion"`
+
+	// EncryptedAssertion carries the assertion when the identity provider
+	// encrypts it. It is captured as raw XML rather than parsed: nothing in it
+	// is readable until it has been decrypted, and the decrypted plaintext is
+	// then verified before anything is read from it.
+	EncryptedAssertion *EncryptedAssertion `xml:"urn:oasis:names:tc:SAML:2.0:assertion EncryptedAssertion"`
+}
+
+// EncryptedAssertion is an assertion the identity provider encrypted to this
+// service provider's public key.
+type EncryptedAssertion struct {
+	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:assertion EncryptedAssertion"`
+	Raw     []byte   `xml:",innerxml"`
 }
 
 // Status represents the SAML status.
@@ -397,6 +410,7 @@ type ServiceProvider struct {
 	hooks        Hooks
 
 	verifier           SignatureVerifier
+	decrypter          Decrypter
 	signer             Signer
 	replayCache        ReplayCache
 	clock              domain.Clock
@@ -442,6 +456,17 @@ func WithSignatureVerifier(v SignatureVerifier) SPOption {
 }
 
 // WithSPSigner sets the signer used for outgoing AuthnRequests.
+// WithDecrypter enables encrypted assertions.
+//
+// Without one, a response carrying an EncryptedAssertion is refused with
+// [ErrNoDecrypter] rather than ignored: an encrypted assertion that silently
+// yields no identity would look to the caller like a failed login, and the
+// operator would have no indication their identity provider is sending
+// something this service provider cannot read.
+func WithDecrypter(d Decrypter) SPOption {
+	return func(sp *ServiceProvider) { sp.decrypter = d }
+}
+
 func WithSPSigner(s Signer) SPOption {
 	return func(sp *ServiceProvider) { sp.signer = s }
 }
@@ -800,7 +825,33 @@ func (sp *ServiceProvider) ProcessResponse(ctx context.Context, samlResponse, re
 		return nil, err
 	}
 
-	verified, err := sp.verify(ctx, responseBytes, idp)
+	// An encrypted assertion is decrypted before verification, because the
+	// signature it carries is inside the ciphertext. The decrypted plaintext
+	// is then verified like any other assertion -- decrypting is not
+	// authenticating, and treating a successful decryption as proof of origin
+	// is the classic way to accept a forged assertion from anyone holding this
+	// service provider's public key, which is published in its metadata.
+	verifyBytes := responseBytes
+	if envelope.EncryptedAssertion != nil {
+		if sp.decrypter == nil {
+			return nil, ErrNoDecrypter
+		}
+		plaintext, err := sp.decrypter.Decrypt(ctx, envelope.EncryptedAssertion.Raw)
+		if err != nil {
+			return nil, err
+		}
+		verifyBytes = plaintext
+	}
+
+	// Verification runs over the decrypted plaintext, and the envelope's own
+	// signature is deliberately not consulted for an encrypted response. A
+	// signature over the ciphertext says nothing about what the ciphertext
+	// contained, so accepting one would let anybody who can encrypt to this
+	// service provider -- which is anybody, the key is in the metadata --
+	// substitute an assertion of their choosing inside a genuinely signed
+	// envelope. The verifier refuses an unsigned document, so a decrypted
+	// assertion with no signature of its own is rejected here.
+	verified, err := sp.verify(ctx, verifyBytes, idp)
 	if err != nil {
 		return nil, err
 	}

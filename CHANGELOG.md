@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scim.ApplyGroupPatch` applies PATCH to groups, including membership add,
   remove, and replace in the shapes Okta and Entra send. Group provisioning
   previously could not be served: `ApplyPatch` accepted only users.
+- SAML encrypted assertions are supported through `saml.WithDecrypter` and
+  `saml.NewRSADecrypter`. Key transport is RSA-OAEP and content encryption is
+  AES-GCM; `rsa-1_5` and CBC modes are refused as unsafe for an endpoint that
+  decrypts unauthenticated input.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.
