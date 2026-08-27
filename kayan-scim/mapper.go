@@ -44,18 +44,18 @@ func (m *Mapper) Config() MapperConfig {
 // ToModel converts a SCIM User to the target model.
 func (m *Mapper) ToModel(user *User) (any, error) {
 	model := m.factory()
-	
+
 	// Set standard ID if it exists and model implements FlowIdentity
 	if fi, ok := model.(interface{ SetID(any) }); ok && user.ID != "" {
 		fi.SetID(user.ID)
 	}
 
 	traits := make(map[string]any)
-	
-	// Strategy: 
+
+	// Strategy:
 	// 1. Check FieldMappings (Direct struct field)
 	// 2. Check TraitMappings (Traits JSON)
-	
+
 	// Helper to extract value from SCIM User using path
 	extractValue := func(path string) any {
 		return m.getScimValue(user, path)
@@ -89,7 +89,7 @@ func (m *Mapper) ToModel(user *User) (any, error) {
 // FromModel converts the target model to a SCIM User.
 func (m *Mapper) FromModel(model any) (*User, error) {
 	user := NewUser()
-	
+
 	// Set ID
 	if fi, ok := model.(interface{ GetID() any }); ok {
 		user.ID = fmt.Sprintf("%v", fi.GetID())
@@ -97,7 +97,9 @@ func (m *Mapper) FromModel(model any) (*User, error) {
 
 	var traits map[string]any
 	if ts, ok := model.(interface{ GetTraits() identity.JSON }); ok {
-		json.Unmarshal(ts.GetTraits(), &traits)
+		if err := json.Unmarshal(ts.GetTraits(), &traits); err != nil {
+			return nil, fmt.Errorf("scim: decode model traits: %w", err)
+		}
 	}
 
 	// 1. Map from struct fields
@@ -122,7 +124,7 @@ func (m *Mapper) FromModel(model any) (*User, error) {
 func (m *Mapper) getScimValue(user *User, path string) any {
 	parts := strings.Split(path, ".")
 	v := reflect.ValueOf(user).Elem()
-	
+
 	for _, part := range parts {
 		// Handle simple fields
 		f := v.FieldByName(strings.Title(part))
@@ -138,7 +140,7 @@ func (m *Mapper) getScimValue(user *User, path string) any {
 			v = f
 		}
 	}
-	
+
 	if v.IsValid() {
 		return v.Interface()
 	}
@@ -148,7 +150,7 @@ func (m *Mapper) getScimValue(user *User, path string) any {
 func (m *Mapper) setScimValue(user *User, path string, value any) {
 	parts := strings.Split(path, ".")
 	v := reflect.ValueOf(user).Elem()
-	
+
 	for i, part := range parts {
 		name := strings.Title(part)
 		f := v.FieldByName(name)
@@ -185,7 +187,7 @@ func (m *Mapper) setField(obj any, field string, value any) error {
 	if !f.IsValid() || !f.CanSet() {
 		return fmt.Errorf("field %s not found or cannot be set", field)
 	}
-	
+
 	val := reflect.ValueOf(value)
 	if val.Type().AssignableTo(f.Type()) {
 		f.Set(val)

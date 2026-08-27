@@ -24,27 +24,27 @@ type Meta struct {
 
 type User struct {
 	Resource
-	UserName          string          `json:"userName"`
-	Name              *Name           `json:"name,omitempty"`
-	DisplayName       string          `json:"displayName,omitempty"`
-	NickName          string          `json:"nickName,omitempty"`
-	ProfileURL        string          `json:"profileUrl,omitempty"`
-	Title             string          `json:"title,omitempty"`
-	UserType          string          `json:"userType,omitempty"`
-	PreferredLanguage string          `json:"preferredLanguage,omitempty"`
-	Locale            string          `json:"locale,omitempty"`
-	Timezone          string          `json:"timezone,omitempty"`
-	Active            bool            `json:"active"`
-	Password          string          `json:"password,omitempty"`
-	Emails            []MultiValued   `json:"emails,omitempty"`
-	PhoneNumbers      []MultiValued   `json:"phoneNumbers,omitempty"`
-	Ims               []MultiValued   `json:"ims,omitempty"`
-	Photos            []MultiValued   `json:"photos,omitempty"`
-	Addresses         []Address       `json:"addresses,omitempty"`
-	Groups            []MemberRef     `json:"groups,omitempty" scim:"readonly"`
-	Entitlements      []MultiValued   `json:"entitlements,omitempty"`
-	Roles             []MultiValued   `json:"roles,omitempty"`
-	Certificates      []MultiValued   `json:"x509Certificates,omitempty"`
+	UserName          string         `json:"userName"`
+	Name              *Name          `json:"name,omitempty"`
+	DisplayName       string         `json:"displayName,omitempty"`
+	NickName          string         `json:"nickName,omitempty"`
+	ProfileURL        string         `json:"profileUrl,omitempty"`
+	Title             string         `json:"title,omitempty"`
+	UserType          string         `json:"userType,omitempty"`
+	PreferredLanguage string         `json:"preferredLanguage,omitempty"`
+	Locale            string         `json:"locale,omitempty"`
+	Timezone          string         `json:"timezone,omitempty"`
+	Active            bool           `json:"active"`
+	Password          string         `json:"password,omitempty"`
+	Emails            []MultiValued  `json:"emails,omitempty"`
+	PhoneNumbers      []MultiValued  `json:"phoneNumbers,omitempty"`
+	Ims               []MultiValued  `json:"ims,omitempty"`
+	Photos            []MultiValued  `json:"photos,omitempty"`
+	Addresses         []Address      `json:"addresses,omitempty"`
+	Groups            []MemberRef    `json:"groups,omitempty" scim:"readonly"`
+	Entitlements      []MultiValued  `json:"entitlements,omitempty"`
+	Roles             []MultiValued  `json:"roles,omitempty"`
+	Certificates      []MultiValued  `json:"x509Certificates,omitempty"`
 	ExtensionSchema   map[string]any `json:"-"`
 }
 
@@ -90,11 +90,11 @@ type MemberRef struct {
 }
 
 type ListResponse struct {
-	Schemas      []string   `json:"schemas"`
-	TotalResults int        `json:"totalResults"`
-	ItemsPerPage int        `json:"itemsPerPage"`
-	StartIndex   int        `json:"startIndex"`
-	Resources    []any      `json:"Resources"`
+	Schemas      []string `json:"schemas"`
+	TotalResults int      `json:"totalResults"`
+	ItemsPerPage int      `json:"itemsPerPage"`
+	StartIndex   int      `json:"startIndex"`
+	Resources    []any    `json:"Resources"`
 }
 
 func NewUser() *User {

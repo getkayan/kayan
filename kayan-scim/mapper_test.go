@@ -8,26 +8,26 @@ import (
 )
 
 type TestUser struct {
-	ID    string
-	Email string
-	Name  string
+	ID     string
+	Email  string
+	Name   string
 	Traits identity.JSON
 }
 
-func (u *TestUser) GetID() any { return u.ID }
-func (u *TestUser) SetID(id any) { u.ID = id.(string) }
-func (u *TestUser) GetTraits() identity.JSON { return u.Traits }
+func (u *TestUser) GetID() any                { return u.ID }
+func (u *TestUser) SetID(id any)              { u.ID = id.(string) }
+func (u *TestUser) GetTraits() identity.JSON  { return u.Traits }
 func (u *TestUser) SetTraits(t identity.JSON) { u.Traits = t }
 
 func TestMapper(t *testing.T) {
 	factory := func() any { return &TestUser{} }
 	config := MapperConfig{
 		FieldMappings: map[string]string{
-			"userName": "Email",
+			"userName":    "Email",
 			"displayName": "Name",
 		},
 		TraitMappings: map[string]string{
-			"name.givenName": "first_name",
+			"name.givenName":  "first_name",
 			"name.familyName": "last_name",
 		},
 	}
