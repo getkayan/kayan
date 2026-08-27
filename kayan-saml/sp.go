@@ -95,6 +95,15 @@ type Config struct {
 	// SignatureMethod for signing (default: RSA-SHA256).
 	SignatureMethod string
 
+	// NameIDFormat is the format this service provider asks for and
+	// advertises in its metadata. Empty advertises the unspecified format.
+	NameIDFormat string
+
+	// EncryptionCertificate is the certificate identity providers should
+	// encrypt assertions to. When empty, Certificate is advertised for both
+	// signing and encryption, which is the common single-key deployment.
+	EncryptionCertificate *x509.Certificate
+
 	// SessionTTL for pending authentication sessions.
 	SessionTTL time.Duration
 
@@ -365,6 +374,22 @@ type Attribute struct {
 type AttributeValue struct {
 	Value string `xml:",chardata"`
 }
+
+// SAML 2.0 protocol and binding identifiers.
+const (
+	// BindingHTTPPost is the HTTP-POST binding, used for responses and
+	// assertions because they exceed what a URL can carry.
+	BindingHTTPPost = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+
+	// BindingHTTPRedirect is the HTTP-Redirect binding, used for requests.
+	BindingHTTPRedirect = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+
+	// ProtocolSAML2 is the protocol a descriptor declares support for.
+	ProtocolSAML2 = "urn:oasis:names:tc:SAML:2.0:protocol"
+
+	// NameIDFormatUnspecified is advertised when no format is configured.
+	NameIDFormatUnspecified = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+)
 
 // ---- Extracted User Info ----
 
@@ -1116,17 +1141,6 @@ func (sp *ServiceProvider) linkCredential(ctx context.Context, ident any, identi
 }
 
 // GetMetadata returns this SP's metadata XML.
-func (sp *ServiceProvider) GetMetadata() ([]byte, error) {
-	// Simplified metadata generation
-	metadata := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="%s">
-  <SPSSODescriptor AuthnRequestsSigned="%t" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
-    <AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="%s" index="0"/>
-  </SPSSODescriptor>
-</EntityDescriptor>`, sp.config.EntityID, sp.config.SignRequests, sp.config.ACSUrl)
-
-	return []byte(metadata), nil
-}
 
 // ---- Helper Functions ----
 

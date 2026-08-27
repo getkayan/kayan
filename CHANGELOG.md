@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- SAML metadata generation emits `KeyDescriptor` elements, logout endpoints,
+  NameID formats, and `WantAssertionsSigned`. The previous documents carried
+  no key material, so an identity provider had nothing to verify signatures
+  against or encrypt to. `saml.Config` gains `NameIDFormat` and
+  `EncryptionCertificate`.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

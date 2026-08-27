@@ -464,17 +464,6 @@ func (idp *IdentityProvider) PostBindingForm(acsURL string, response []byte, rel
 }
 
 // GetMetadata returns this IdP's metadata XML.
-func (idp *IdentityProvider) GetMetadata() ([]byte, error) {
-	metadata := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="%s">
-  <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
-    <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="%s"/>
-    <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="%s"/>
-  </IDPSSODescriptor>
-</EntityDescriptor>`, idp.config.EntityID, idp.config.SSOUrl, idp.config.SSOUrl)
-
-	return []byte(metadata), nil
-}
 
 // ---- Strategy Implementation ----
 
