@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `flow.PasswordAuth` installs account lockout by default. Tune it with
   `WithLockout`/`WithLockoutStore`, or opt out explicitly with
   `WithoutLockout`.
+- Sessions can be revoked in bulk: `JWTStrategy.RevokeAll` and
+  `DatabaseStrategy.RevokeAll`, backed by the new
+  `session.IdentityRevocationStore` and `domain.BulkSessionStorage`.
+- `RecoveryManager` ends the identity's other sessions on a successful
+  password reset when a revoker is supplied with
+  `WithRecoverySessionRevoker`.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

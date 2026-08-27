@@ -19,6 +19,27 @@ type RecoveryManager struct {
 	rateLimiter RateLimiter
 	rateLimit   int
 	rateWindow  time.Duration
+	revoker     SessionRevoker
+}
+
+// SessionRevoker ends every session belonging to an identity.
+//
+// Both session strategies implement it. It is declared here rather than taken
+// as a concrete type so core/flow keeps no dependency on a session
+// implementation, and a caller with their own session layer can supply it.
+type SessionRevoker interface {
+	RevokeAll(ctx context.Context, identityID any) error
+}
+
+// WithRecoverySessionRevoker ends the identity's other sessions when a
+// password reset completes.
+//
+// Without it a reset changes the password and leaves every existing session
+// alive, so an attacker holding a stolen session keeps it -- while the victim,
+// who has just done the one thing everybody believes ends a compromise,
+// believes they are safe.
+func WithRecoverySessionRevoker(r SessionRevoker) RecoveryOption {
+	return func(m *RecoveryManager) { m.revoker = r }
 }
 
 // RecoveryOption configures the RecoveryManager.
@@ -137,6 +158,26 @@ func (m *RecoveryManager) ResetPassword(ctx context.Context, tokenStr string, ne
 
 	if err := updater.UpdateCredentialSecret(ctx, token.IdentityID, "password", hashed); err != nil {
 		return err
+	}
+
+	// 4. End every other session.
+	//
+	// After the credential is updated, so a revocation failure cannot leave
+	// the old password working; and reported rather than swallowed, because a
+	// reset that did not end the attacker's session has not done what the
+	// person asking for it wanted.
+	if m.revoker != nil {
+		if err := m.revoker.RevokeAll(ctx, token.IdentityID); err != nil {
+			if m.auditSink != nil {
+				m.auditSink.save(ctx, &audit.AuditEvent{
+					Type:      "identity.recovery.failure",
+					SubjectID: token.IdentityID,
+					Status:    "failure",
+					Message:   "password reset but sessions were not revoked: " + err.Error(),
+				})
+			}
+			return fmt.Errorf("recovery: password updated but existing sessions were not revoked: %w", err)
+		}
 	}
 
 	// Audit
