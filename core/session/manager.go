@@ -69,6 +69,53 @@ func (m *Manager) Create(ctx context.Context, sessionID, identityID any) (*ident
 	return m.strategy.Create(ctx, sessionID, identityID)
 }
 
+// Rotate issues a new session and ends the one the request arrived with.
+//
+// Call it whenever the authority of a session changes -- on login, and again
+// after a second factor or any step-up. Create alone does not do this: it
+// takes a caller-supplied identifier and invalidates nothing, so the previous
+// session stays live alongside the new one.
+//
+// Two failures follow from that, and Rotate is the answer to both.
+//
+// Session fixation: an attacker who can plant a session identifier in a
+// victim's browser -- a URL parameter, a cookie set on a shared subdomain --
+// and gets the victim to authenticate under it ends up holding a live
+// authenticated session, because the identifier the victim logged in with is
+// the one the attacker chose.
+//
+// Privilege upgrade: a partial session issued after the first factor stays
+// valid once the second completes, so the pre-MFA token can be replayed
+// against the step-up endpoint that trusts it.
+//
+// priorSessionID may be nil or empty for an ordinary login with nothing to
+// replace, and an identifier the strategy does not recognise is ignored: a
+// stale or forged value is not a live session, so there is nothing to end and
+// no reason to refuse the login.
+//
+// A revocation that fails is reported and no session is returned. Handing back
+// a new session while the old one survives is the fixation window staying open
+// while the caller believes it closed.
+func (m *Manager) Rotate(ctx context.Context, priorSessionID, sessionID, identityID any) (*identity.Session, error) {
+	if priorSessionID != nil && fmt.Sprintf("%v", priorSessionID) != "" {
+		// Only end a session that exists. Validate also gives us the identity
+		// for the logout notifiers.
+		if prior, err := m.strategy.Validate(ctx, priorSessionID); err == nil {
+			sid := fmt.Sprintf("%v", priorSessionID)
+			for _, n := range m.notifiers {
+				// As in Delete: a notifier failure must not stop the session
+				// being revoked, which is the part that ends it here.
+				_ = n.NotifyLogout(sid, prior.IdentityID)
+			}
+			if err := m.strategy.Delete(ctx, priorSessionID); err != nil {
+				return nil, fmt.Errorf("session: rotate could not end the previous session: %w", err)
+			}
+		}
+	}
+
+	return m.strategy.Create(ctx, sessionID, identityID)
+}
+
 func (m *Manager) Validate(ctx context.Context, sessionID any) (*identity.Session, error) {
 	return m.strategy.Validate(ctx, sessionID)
 }

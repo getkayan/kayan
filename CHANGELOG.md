@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RecoveryManager` ends the identity's other sessions on a successful
   password reset when a revoker is supplied with
   `WithRecoverySessionRevoker`.
+- `session.Manager.Rotate` issues a new session and ends the one the request
+  arrived with. Use it on login and after any step-up; `Create` alone leaves
+  the previous session live.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.
