@@ -91,6 +91,19 @@ func (s *DatabaseStrategy) Refresh(ctx context.Context, refreshToken string) (*i
 	return sess, nil
 }
 
+// RevokeAll deletes every stored session belonging to an identity.
+//
+// Stored sessions are enumerable, so unlike the JWT strategy this removes the
+// rows outright and needs no cutoff.
+func (s *DatabaseStrategy) RevokeAll(ctx context.Context, identityID any) error {
+	bulk, ok := s.repo.(domain.BulkSessionStorage)
+	if !ok {
+		return fmt.Errorf("session: the configured session storage does not implement " +
+			"domain.BulkSessionStorage, so it cannot revoke every session for an identity")
+	}
+	return bulk.DeleteSessionsByIdentity(ctx, identityID)
+}
+
 func (s *DatabaseStrategy) Delete(ctx context.Context, sessionID any) error {
 	return s.repo.DeleteSession(ctx, sessionID)
 }
@@ -135,14 +148,61 @@ type RevocationStore interface {
 	IsRevoked(ctx context.Context, sessionID string) (bool, error)
 }
 
+// IdentityRevocationStore revokes every session belonging to an identity.
+//
+// It is a separate interface so existing RevocationStore implementations keep
+// compiling; a store that does not implement it cannot support RevokeAll and
+// says so rather than silently doing nothing.
+//
+// The contract is a cutoff rather than a list of sessions. JWT sessions are
+// bearer tokens the server never stored, so they cannot be enumerated to be
+// deleted one by one -- but every one of them carries an issued-at claim, so a
+// single timestamp per identity invalidates all of them at once and keeps
+// working for tokens the store has never seen.
+type IdentityRevocationStore interface {
+	RevocationStore
+
+	// RevokeIdentity records that every session issued to identityID at or
+	// before cutoff is revoked.
+	RevokeIdentity(ctx context.Context, identityID string, cutoff time.Time) error
+
+	// IdentityRevokedBefore returns the cutoff for an identity, or the zero
+	// time when none is recorded.
+	IdentityRevokedBefore(ctx context.Context, identityID string) (time.Time, error)
+}
+
 // MemoryRevocationStore is an in-memory RevocationStore for testing/dev.
 type MemoryRevocationStore struct {
-	mu      sync.RWMutex
-	revoked map[string]time.Time // sessionID -> expiry
+	mu         sync.RWMutex
+	revoked    map[string]time.Time // sessionID -> expiry
+	identities map[string]time.Time // identityID -> revocation cutoff
 }
 
 func NewMemoryRevocationStore() *MemoryRevocationStore {
-	return &MemoryRevocationStore{revoked: make(map[string]time.Time)}
+	return &MemoryRevocationStore{
+		revoked:    make(map[string]time.Time),
+		identities: make(map[string]time.Time),
+	}
+}
+
+// RevokeIdentity implements [IdentityRevocationStore].
+func (s *MemoryRevocationStore) RevokeIdentity(_ context.Context, identityID string, cutoff time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Keep the latest cutoff: a second revocation must not widen the window
+	// back open for sessions the first one already ended.
+	if existing, ok := s.identities[identityID]; ok && existing.After(cutoff) {
+		return nil
+	}
+	s.identities[identityID] = cutoff
+	return nil
+}
+
+// IdentityRevokedBefore implements [IdentityRevocationStore].
+func (s *MemoryRevocationStore) IdentityRevokedBefore(_ context.Context, identityID string) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.identities[identityID], nil
 }
 
 func (s *MemoryRevocationStore) Revoke(ctx context.Context, sessionID string, expiresAt time.Time) error {
@@ -286,7 +346,7 @@ func (s *JWTStrategy) Validate(ctx context.Context, sessionID any) (*identity.Se
 		// the token string. A session has at least two tokens -- the access
 		// token and the refresh token -- and they are different strings, so
 		// revoking by string ends one and leaves the other working.
-		if err := s.checkRevoked(ctx, claims.SessionID); err != nil {
+		if err := s.checkRevoked(ctx, claims); err != nil {
 			return nil, err
 		}
 		return &identity.Session{
@@ -327,7 +387,7 @@ func (s *JWTStrategy) Refresh(ctx context.Context, refreshToken string) (*identi
 		// A revoked session must not be refreshable. Checking only in Validate
 		// meant logout stopped the access token while the refresh token kept
 		// minting replacements until it expired on its own.
-		if err := s.checkRevoked(ctx, claims.SessionID); err != nil {
+		if err := s.checkRevoked(ctx, claims); err != nil {
 			return nil, err
 		}
 
@@ -393,18 +453,70 @@ func (s *JWTStrategy) Delete(ctx context.Context, sessionID any) error {
 // It is a no-op when no revocation store is configured, which keeps stateless
 // verification working for deployments that accept it. Delete is the operation
 // that refuses to pretend in that configuration.
-func (s *JWTStrategy) checkRevoked(ctx context.Context, sessionID string) error {
-	if s.revocation == nil || sessionID == "" {
+func (s *JWTStrategy) checkRevoked(ctx context.Context, claims *JWTClaims) error {
+	if s.revocation == nil {
 		return nil
 	}
-	revoked, err := s.revocation.IsRevoked(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("revocation check failed: %w", err)
+	if claims.SessionID != "" {
+		revoked, err := s.revocation.IsRevoked(ctx, claims.SessionID)
+		if err != nil {
+			return fmt.Errorf("revocation check failed: %w", err)
+		}
+		if revoked {
+			return fmt.Errorf("session revoked")
+		}
 	}
-	if revoked {
+
+	// Identity-level revocation. A token issued at or before the cutoff was
+	// live when every session for this identity was ended, so it is revoked
+	// even though the store has never seen its session id.
+	store, ok := s.revocation.(IdentityRevocationStore)
+	if !ok || claims.Subject == "" || claims.IssuedAt == nil {
+		return nil
+	}
+	cutoff, err := store.IdentityRevokedBefore(ctx, claims.Subject)
+	if err != nil {
+		return fmt.Errorf("identity revocation check failed: %w", err)
+	}
+	if !cutoff.IsZero() && !claims.IssuedAt.Time.After(cutoff) {
 		return fmt.Errorf("session revoked")
 	}
 	return nil
+}
+
+// RevokeAll ends every session belonging to an identity.
+//
+// JWT sessions are bearer tokens the server never stored, so they cannot be
+// enumerated and deleted. Revocation is recorded as a cutoff instead: every
+// token issued at or before now stops verifying, while a session created
+// afterwards -- the user signing back in -- is unaffected.
+//
+// This is what makes a password reset mean what users assume it means. Without
+// it an attacker holding a stolen session kept it through the victim's reset.
+func (s *JWTStrategy) RevokeAll(ctx context.Context, identityID any) error {
+	if s.revocation == nil {
+		return fmt.Errorf("session: revoking every session requires a revocation store; " +
+			"configure one with WithRevocationStore")
+	}
+	store, ok := s.revocation.(IdentityRevocationStore)
+	if !ok {
+		return fmt.Errorf("session: the configured revocation store does not implement " +
+			"IdentityRevocationStore, so it cannot revoke every session for an identity")
+	}
+	// RFC 7519 "iat" is a whole number of seconds and jwt.NewNumericDate
+	// rounds down to match, so every token minted during the current second
+	// carries the same iat regardless of which side of this call it fell on.
+	// A timestamp cannot separate them, and the two ways of being wrong are
+	// not equal: missing a session leaves an attacker logged in, while
+	// catching an extra one costs a user one retry.
+	//
+	// The cutoff is therefore the start of the current second, and a token is
+	// revoked when its iat is at or before it. Every session issued earlier is
+	// ended, and so is one issued moments later within the same second. The
+	// cutoff must not be pushed into the future: that would revoke sessions
+	// created after the call, locking the user out for as long as the skew.
+	cutoff := time.Now().Truncate(time.Second)
+	return store.RevokeIdentity(ctx, fmt.Sprintf("%v", identityID), cutoff)
 }
 
 func NewSession(sessionID, identityID any) *identity.Session {

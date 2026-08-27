@@ -92,6 +92,17 @@ type SessionStorage interface {
 	DeleteSession(ctx context.Context, id any) error
 }
 
+// BulkSessionStorage deletes every session belonging to an identity.
+//
+// It is separate from [SessionStorage] so existing implementations keep
+// compiling. A store that does not implement it cannot end a user's other
+// sessions, and the caller is told so rather than left believing a password
+// reset logged the attacker out.
+type BulkSessionStorage interface {
+	// DeleteSessionsByIdentity removes every session for identityID.
+	DeleteSessionsByIdentity(ctx context.Context, identityID any) error
+}
+
 type CredentialStorage interface {
 	GetCredentialByIdentifier(ctx context.Context, identifier string, method string) (*identity.Credential, error)
 	UpdateCredentialSecret(ctx context.Context, identityID, method, secret string) error
