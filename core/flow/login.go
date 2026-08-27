@@ -63,6 +63,35 @@ func WithLoginPostHook(h Hook) LoginOption {
 
 var ErrMFARequired = errors.New("login: mfa required")
 
+// MFARequiredError reports that the first factor succeeded and a second is
+// outstanding. It carries the identity so the caller can drive the challenge
+// and pass it to VerifyMFA.
+//
+// The identity travels on the error rather than as Authenticate's first return
+// value on purpose. Returning a usable identity alongside a non-nil error let
+// a caller who wrote `ident, _ := Authenticate(...)` mint a session with no
+// second factor ever presented. Reaching the identity now requires
+// acknowledging the error that explains why it is not yet authenticated.
+type MFARequiredError struct {
+	// Identity is the partially authenticated identity. It has passed the
+	// first factor only and must not be treated as logged in.
+	Identity any
+}
+
+func (e *MFARequiredError) Error() string { return ErrMFARequired.Error() }
+
+// Unwrap lets errors.Is(err, ErrMFARequired) keep working.
+func (e *MFARequiredError) Unwrap() error { return ErrMFARequired }
+
+// MFAIdentityFrom returns the pending identity from an MFA-required error.
+func MFAIdentityFrom(err error) (any, bool) {
+	var mfaErr *MFARequiredError
+	if errors.As(err, &mfaErr) && mfaErr.Identity != nil {
+		return mfaErr.Identity, true
+	}
+	return nil, false
+}
+
 func NewLoginManager(repo IdentityRepository, factory func() any, opts ...LoginOption) *LoginManager {
 	m := &LoginManager{
 		repo:             repo,
@@ -272,7 +301,35 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 				// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 				dispatcher.Dispatch(ctx, event)
 			}
-			return ident, ErrMFARequired
+			// The identity travels on the error, not as the first return
+			// value: the first factor succeeding is not authentication while
+			// a second is outstanding, and `ident, _ :=` must not yield
+			// something a session can be minted from.
+			return nil, &MFARequiredError{Identity: ident}
+		}
+	}
+
+	// 3. Post-hooks run before success is recorded. A hook that returns an
+	// error denies the login, so emitting the success event first told the
+	// audit trail and every subscriber about a login that did not happen --
+	// and the audit trail is what an incident is reconstructed from.
+	for _, h := range postHooks {
+		if err := h(ctx, ident); err != nil {
+			if auditSink != nil {
+				auditSink.save(ctx, &audit.AuditEvent{
+					Type:    string(events.TopicLoginFailure),
+					ActorID: identifier,
+					Status:  "failure",
+					Message: "Login denied by a post-hook: " + err.Error(),
+				})
+			}
+			if dispatcher != nil {
+				event := events.NewEvent(events.TopicLoginFailure, events.CodeUnauthorized)
+				event.ActorID = identifier
+				// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
+				dispatcher.Dispatch(ctx, event)
+			}
+			return nil, err
 		}
 	}
 
@@ -293,13 +350,6 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 		}
 		// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
 		dispatcher.Dispatch(ctx, event)
-	}
-
-	// 3. Post-hooks
-	for _, h := range postHooks {
-		if err := h(ctx, ident); err != nil {
-			return nil, err
-		}
 	}
 
 	return ident, nil

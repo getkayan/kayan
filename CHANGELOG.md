@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `OTPStrategy.Authenticate` requires the code to belong to the identifier
   presenting it; a code issued to one account no longer authenticates another.
 - OIDC account linking requires a `email_verified` claim that is boolean true.
+- `LoginManager.Authenticate` returns a nil identity with `*MFARequiredError`
+  when a second factor is outstanding. The pending identity is reachable with
+  `flow.MFAIdentityFrom(err)`; `errors.Is(err, ErrMFARequired)` still works.
+- Login success is audited and dispatched after post-hooks run, so a login a
+  post-hook denies is no longer recorded as successful.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

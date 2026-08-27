@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/base32"
+	"errors"
 	"testing"
 	"time"
 
@@ -46,12 +47,19 @@ func TestMFAFlow(t *testing.T) {
 
 	// 4. Attempt Login - Should expect MFA Error
 	res, err := logMgr.Authenticate(context.Background(), "password", "mfa@example.com", password)
-	if err != ErrMFARequired {
+	if !errors.Is(err, ErrMFARequired) {
 		t.Errorf("Expected ErrMFARequired, got %v", err)
 	}
-	if res == nil {
-		t.Error("Expected identity to be returned with error, got nil")
+	if res != nil {
+		t.Errorf("Authenticate returned an identity alongside ErrMFARequired: %T", res)
 	}
+	// The pending identity travels on the error so it cannot be mistaken for
+	// an authenticated one.
+	pending, hasPending := MFAIdentityFrom(err)
+	if !hasPending {
+		t.Fatal("the MFA error carries no pending identity")
+	}
+	_ = pending
 
 	// 5. Generate Code
 	// We use the same generation logic as the validater (TOTP logic)

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -85,11 +86,18 @@ func TestLoginSupportsBYOSIdentity(t *testing.T) {
 	}
 
 	res, err := logMgr.Authenticate(context.Background(), "password", "byos@example.com", password)
-	if err != ErrMFARequired {
+	if !errors.Is(err, ErrMFARequired) {
 		t.Fatalf("expected ErrMFARequired, got %v", err)
 	}
-	if _, ok := res.(*customIdentity); !ok {
-		t.Fatalf("expected *customIdentity during MFA challenge, got %T", res)
+	if res != nil {
+		t.Fatalf("Authenticate returned an identity alongside ErrMFARequired: %T", res)
+	}
+	pending, ok := MFAIdentityFrom(err)
+	if !ok {
+		t.Fatal("the MFA error carries no pending identity")
+	}
+	if _, ok := pending.(*customIdentity); !ok {
+		t.Fatalf("expected *customIdentity during MFA challenge, got %T", pending)
 	}
 
 	strategy := &TOTPStrategy{}
