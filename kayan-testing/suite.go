@@ -546,26 +546,42 @@ func suiteToken(t *testing.T, newStore func() domain.TokenStore) {
 	t.Run("concurrent consume has one winner", func(t *testing.T) {
 		ctx := context.Background()
 		store := newStore()
-		if err := store.SaveToken(ctx, &domain.AuthToken{
-			Token: "raced", IdentityID: "u1", Type: "otp", ExpiresAt: time.Now().Add(time.Hour),
-		}); err != nil {
-			t.Fatalf("SaveToken: %v", err)
-		}
 
-		var winners atomic.Int32
-		var wg sync.WaitGroup
-		for range 8 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if _, err := store.ConsumeToken(ctx, "raced", "otp"); err == nil {
-					winners.Add(1)
-				}
-			}()
-		}
-		wg.Wait()
-		if got := winners.Load(); got != 1 {
-			t.Fatalf("successful concurrent consumes = %d, want 1", got)
+		// Each round races a fresh token. Goroutines are started first and
+		// released together, so they contend inside ConsumeToken rather than
+		// finishing one after another as they are spawned -- a staggered start
+		// lets a non-atomic read-then-delete pass by accident. Several rounds
+		// run because a single interleaving is not guaranteed to expose it.
+		for round := range 256 {
+			token := fmt.Sprintf("raced-%d", round)
+			if err := store.SaveToken(ctx, &domain.AuthToken{
+				Token: token, IdentityID: "u1", Type: "otp", ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatalf("SaveToken: %v", err)
+			}
+
+			var winners atomic.Int32
+			var ready, done sync.WaitGroup
+			release := make(chan struct{})
+			for range 8 {
+				ready.Add(1)
+				done.Add(1)
+				go func() {
+					defer done.Done()
+					ready.Done()
+					<-release
+					if _, err := store.ConsumeToken(ctx, token, "otp"); err == nil {
+						winners.Add(1)
+					}
+				}()
+			}
+			ready.Wait()
+			close(release)
+			done.Wait()
+
+			if got := winners.Load(); got != 1 {
+				t.Fatalf("round %d: successful concurrent consumes = %d, want 1", round, got)
+			}
 		}
 	})
 

@@ -2,6 +2,10 @@ package gormstore
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,12 +17,29 @@ import (
 	"gorm.io/gorm"
 )
 
+// dbCounter keeps each in-memory database name unique, so tests that run in
+// the same process do not share rows through the shared cache.
+var dbCounter atomic.Int64
+
 func setupSQLiteDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// A plain ":memory:" DSN gives every *connection* its own empty database,
+	// so a query that lands on a second pooled connection sees no tables at
+	// all. Tests that issue few queries never open one and pass by luck. The
+	// shared-cache DSN backs the whole pool with one database, and capping the
+	// pool at a single connection keeps SQLite's writer semantics predictable
+	// under the concurrent cases in the storage contract suite.
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", url.PathEscape(t.Name()+"-"+strconv.Itoa(int(dbCounter.Add(1)))))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sqlite pool: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db
 }
 
