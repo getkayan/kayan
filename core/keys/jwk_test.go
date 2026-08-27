@@ -238,3 +238,43 @@ func containsSubstring(haystack, needle string) bool {
 	}
 	return false
 }
+
+// TestEncodeExponentIsMinimalBigEndian pins the RFC 7518 requirement that "e"
+// carries the minimal big-endian representation of the exponent. An encoder
+// that pads to a fixed width, or that truncates a large exponent into a
+// narrower integer, publishes a value a strict client decodes as a different
+// exponent -- so every signature Kayan produces fails to verify, with nothing
+// on the serving side reporting an error.
+func TestEncodeExponentIsMinimalBigEndian(t *testing.T) {
+	cases := []struct {
+		name string
+		e    int
+		want string
+	}{
+		{"common F4", 65537, "AQAB"},
+		{"small exponent 3", 3, "Aw"},
+		{"single byte 17", 17, "EQ"},
+		{"just above 32 bits", 1 << 32, "AQAAAAA"},
+		// Truncating this to 32 bits yields "AQAB", the encoding of 65537 --
+		// a different exponent that still looks entirely valid to a client.
+		{"above 32 bits sharing low word with F4", (1 << 32) + 65537, "AQABAAE"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := encodeExponent(tc.e); got != tc.want {
+				t.Fatalf("encodeExponent(%d) = %q, want %q", tc.e, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEncodeExponentRejectsNonPositive covers exponents that have no valid
+// representation. Encoding them as a padded zero would publish a JWK whose
+// "e" decodes to a number the key does not use.
+func TestEncodeExponentRejectsNonPositive(t *testing.T) {
+	for _, e := range []int{0, -1} {
+		if got := encodeExponent(e); got != "" {
+			t.Fatalf("encodeExponent(%d) = %q, want empty", e, got)
+		}
+	}
+}
