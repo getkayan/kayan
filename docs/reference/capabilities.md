@@ -21,7 +21,7 @@ Package-level freeze status and remaining evidence gates are tracked in the
 | RBAC, ABAC, hybrid policy | Release candidate | ReBAC object enumeration remains incomplete |
 | OAuth 2.0 and OIDC provider | Experimental | Authorization code uses PKCE; access tokens are signed and introspected through the key provider, so rotation applies to them; protocol audit persistence has an explicit failure callback; formal certification remains pending |
 | SAML 2.0 | Experimental | Metadata retrieval is injectable, bounded, and public-HTTPS-only by default; interoperability evidence remains pending |
-| SCIM 2.0 | Experimental | Discovery, value-path parsing, and filtered PATCH sub-attributes are implemented; storage adapters may explicitly reject multi-valued shapes they cannot represent |
+| SCIM 2.0 | Experimental | Discovery, value-path parsing, and filtered PATCH sub-attributes are implemented, including group-membership PATCH in the shapes Okta and Entra send; storage adapters may explicitly reject multi-valued shapes they cannot represent |
 | GORM and Redis adapters | Experimental, optional | GORM passes the shared storage suite; CI exercises concurrent atomicity on real PostgreSQL/MySQL and SSO lifecycle/concurrency on real Redis |
 | CLI | Experimental | Its remote administration API is not part of the stable library contract |
 
