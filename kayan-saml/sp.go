@@ -1125,20 +1125,36 @@ func ParseIdPMetadata(id string, metadata []byte) (*IdPConfig, error) {
 		idp.SSOUrl = idpDesc.SingleSignOnService[0].Location
 	}
 
-	// Extract Certificate
+	// Extract every signing certificate, not just the first.
+	//
+	// An identity provider rotating its signing key publishes both the
+	// outgoing and the incoming certificate for the overlap, then switches
+	// which one it signs with at a moment the relying party does not choose.
+	// Keeping only the first meant that at cutover every assertion failed
+	// signature verification and nobody could log in -- an outage scheduled by
+	// somebody else, with nothing on this side having changed.
+	//
+	// A KeyDescriptor with no "use" attribute is valid for both signing and
+	// encryption per the SAML metadata schema, so it is accepted here; one
+	// marked "encryption" is not a signing key and is skipped, because
+	// accepting it would widen what the SP trusts to verify assertions.
 	for _, key := range idpDesc.KeyDescriptors {
-		if key.Use == "signing" || key.Use == "" {
-			certData, err := base64.StdEncoding.DecodeString(key.KeyInfo.X509Data.X509Certificate)
-			if err != nil {
-				continue
-			}
-			cert, err := x509.ParseCertificate(certData)
-			if err != nil {
-				continue
-			}
-			idp.Certificate = cert
-			break
+		if key.Use != "signing" && key.Use != "" {
+			continue
 		}
+		certData, err := base64.StdEncoding.DecodeString(key.KeyInfo.X509Data.X509Certificate)
+		if err != nil {
+			continue
+		}
+		cert, err := x509.ParseCertificate(certData)
+		if err != nil {
+			continue
+		}
+		if idp.Certificate == nil {
+			idp.Certificate = cert
+			continue
+		}
+		idp.ExtraCertificates = append(idp.ExtraCertificates, cert)
 	}
 
 	return idp, nil

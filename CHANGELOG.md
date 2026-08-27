@@ -69,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logger.InitLogger` returns an error instead of panicking, and `logger.Log`
   starts as a no-op logger rather than nil, so logging before configuration
   discards the line instead of crashing.
+- `saml.ParseIdPMetadata` keeps every advertised signing certificate rather
+  than only the first, so an IdP signing-key rollover no longer breaks logins
+  at cutover.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.
