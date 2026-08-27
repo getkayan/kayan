@@ -89,7 +89,7 @@ jobs:
         env:
           KAYAN_TEST_DIALECT: postgres
           DATABASE_URL: postgres://kayan:kayan@127.0.0.1:5432/kayan_test?sslmode=disable
-        run: go test -race -tags=integration -run '^TestVersionedMigrationChain$' ./...
+        run: bash ../scripts/run-integration.sh
 
   mysql-migrations:
     name: MySQL migration chain
@@ -119,7 +119,7 @@ jobs:
         env:
           KAYAN_TEST_DIALECT: mysql
           DATABASE_URL: kayan:kayan@tcp(127.0.0.1:3306)/kayan_test?parseTime=true&multiStatements=true
-        run: go test -race -tags=integration -run '^TestVersionedMigrationChain$' ./...
+        run: bash ../scripts/run-integration.sh
 
   redis-integration:
     name: Redis adapter integration
@@ -143,7 +143,7 @@ jobs:
         working-directory: kayan-redis
         env:
           KAYAN_TEST_REDIS_ADDR: 127.0.0.1:6379
-        run: go test -race -tags=integration -run '^TestRealRedisSSOLifecycle$' ./...
+        run: bash ../scripts/run-integration.sh
 
   fuzz:
     name: Fuzz (${{ matrix.module }})
