@@ -3,7 +3,7 @@ package flow
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- RFC 6238 requires HMAC-SHA-1 as the interoperable default; it is not used for password hashing.
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
@@ -100,7 +100,11 @@ func (s *TOTPStrategy) Verify(secret string, code string) bool {
 func (s *TOTPStrategy) findMatchingCounter(key []byte, code string) (uint64, bool) {
 	now := time.Now().Unix() / 30
 	for i := int64(-1); i <= 1; i++ {
-		counter := uint64(now + i)
+		step := now + i
+		if step < 0 {
+			continue
+		}
+		counter := uint64(step)
 		generated := s.generateCode(key, counter)
 		if subtle.ConstantTimeCompare([]byte(generated), []byte(code)) == 1 {
 			return counter, true

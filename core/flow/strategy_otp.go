@@ -144,7 +144,9 @@ func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, err
 	// 4. Deliver the code via the sender
 	if err := s.sender.Send(ctx, identifier, code); err != nil {
 		// Clean up the token if delivery fails
-		s.tokenStore.DeleteToken(ctx, code)
+		if deleteErr := s.tokenStore.DeleteToken(ctx, code); deleteErr != nil {
+			return nil, fmt.Errorf("otp: send failed: %v; delete undelivered code: %w", err, deleteErr)
+		}
 		return nil, fmt.Errorf("otp: failed to send code: %w", err)
 	}
 
@@ -155,30 +157,16 @@ func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, err
 // The identifier is the phone number or email, and the secret is the OTP code.
 func (s *OTPStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
 	// 1. Get the stored token by the code value
-	token, err := s.tokenStore.GetToken(ctx, secret)
+	token, err := s.tokenStore.ConsumeToken(ctx, secret, "otp")
 	if err != nil || token == nil {
 		return nil, fmt.Errorf("otp: invalid or expired code")
 	}
 
-	// 2. Validate token type
-	if token.Type != "otp" {
-		return nil, fmt.Errorf("otp: invalid token type")
-	}
-
-	// 3. Check expiry
-	if token.ExpiresAt.Before(time.Now()) {
-		s.tokenStore.DeleteToken(ctx, secret)
-		return nil, fmt.Errorf("otp: code expired")
-	}
-
-	// 4. Find the identity
+	// 2. Find the identity
 	ident, err := s.repo.GetIdentity(ctx, s.identityFactory(), token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("otp: identity not found")
 	}
-
-	// 5. Consume the token (one-time use)
-	s.tokenStore.DeleteToken(ctx, secret)
 
 	return ident, nil
 }

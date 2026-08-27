@@ -66,31 +66,17 @@ func (s *MagicLinkStrategy) ID() string { return "magic_link" }
 // 'secret' is the token.
 func (s *MagicLinkStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
 	// 1. Get Token
-	token, err := s.tokenStore.GetToken(ctx, secret)
+	token, err := s.tokenStore.ConsumeToken(ctx, secret, "magic_link")
 	if err != nil {
 		return nil, fmt.Errorf("magic_link: invalid or expired token")
 	}
 
-	// 2. Validate Token Type
-	if token.Type != "magic_link" {
-		return nil, fmt.Errorf("magic_link: invalid token type")
-	}
-
-	// 3. Check Expiry (Store should handle this, but double check)
-	if token.ExpiresAt.Before(time.Now()) {
-		s.tokenStore.DeleteToken(ctx, secret)
-		return nil, fmt.Errorf("magic_link: token expired")
-	}
-
-	// 4. Find Identity
+	// 2. Find Identity
 	// We use the IdentityID from the token
 	ident, err := s.repo.GetIdentity(ctx, s.identityFactory(), token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("magic_link: identity not found")
 	}
-
-	// 5. Consume Token (One-time use)
-	s.tokenStore.DeleteToken(ctx, secret)
 
 	return ident, nil
 }

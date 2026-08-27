@@ -14,29 +14,24 @@ import (
 // ---- mock oauth ----
 
 type mockOAuthConfig struct {
-	authURL     string
-	exchangeErr error
-	idToken     string
+	authURL       string
+	exchangeErr   error
+	idToken       string
+	authorization OIDCAuthorizationRequest
+	exchange      OIDCTokenExchangeRequest
 }
 
-func (m *mockOAuthConfig) AuthCodeURL(state string, _ ...AuthCodeOption) string {
-	return m.authURL + "?state=" + state
+func (m *mockOAuthConfig) AuthorizationURL(request OIDCAuthorizationRequest) (string, error) {
+	m.authorization = request
+	return m.authURL + "?state=" + request.State, nil
 }
 
-func (m *mockOAuthConfig) Exchange(_ context.Context, _ string, _ ...AuthCodeOption) (OAuthToken, error) {
+func (m *mockOAuthConfig) Exchange(_ context.Context, request OIDCTokenExchangeRequest) (*OIDCTokenSet, error) {
+	m.exchange = request
 	if m.exchangeErr != nil {
 		return nil, m.exchangeErr
 	}
-	return &mockOAuthToken{idToken: m.idToken}, nil
-}
-
-type mockOAuthToken struct{ idToken string }
-
-func (t *mockOAuthToken) Extra(key string) any {
-	if key == "id_token" {
-		return t.idToken
-	}
-	return nil
+	return &OIDCTokenSet{IDToken: m.idToken}, nil
 }
 
 // ---- mock token parser ----
@@ -130,6 +125,15 @@ func TestKayanOIDCStrategy_Initiate(t *testing.T) {
 	if m["state"] == "" {
 		t.Error("state is empty")
 	}
+	if oauthCfg.authorization.Nonce == "" {
+		t.Error("authorization nonce is empty")
+	}
+	if oauthCfg.authorization.CodeChallenge == "" {
+		t.Error("PKCE code challenge is empty")
+	}
+	if oauthCfg.authorization.CodeChallengeMethod != "S256" {
+		t.Errorf("challenge method = %q, want S256", oauthCfg.authorization.CodeChallengeMethod)
+	}
 }
 
 func TestKayanOIDCStrategy_Authenticate(t *testing.T) {
@@ -214,6 +218,12 @@ func TestKayanOIDCStrategy_Authenticate(t *testing.T) {
 			}
 			if got == nil {
 				t.Error("expected identity, got nil")
+			}
+			if oauthCfg.exchange.CodeVerifier != "verifier" {
+				t.Errorf("exchange verifier = %q, want verifier", oauthCfg.exchange.CodeVerifier)
+			}
+			if oauthCfg.exchange.RedirectURI != "https://app/callback" {
+				t.Errorf("exchange redirect URI = %q", oauthCfg.exchange.RedirectURI)
 			}
 		})
 	}

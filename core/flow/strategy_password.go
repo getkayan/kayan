@@ -148,7 +148,9 @@ func (s *PasswordStrategy) Register(ctx context.Context, traits identity.JSON, p
 			var identifier string
 			if len(s.identifierFields) > 0 {
 				var traitsMap map[string]any
-				json.Unmarshal(traits, &traitsMap)
+				if err := json.Unmarshal(traits, &traitsMap); err != nil {
+					return nil, fmt.Errorf("password: decode identity traits: %w", err)
+				}
 				identifier = fmt.Sprintf("%v", traitsMap[s.identifierFields[0]])
 			} else {
 				identifier = string(traits)

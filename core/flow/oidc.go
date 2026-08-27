@@ -15,7 +15,7 @@ import (
 type ClaimMapper func(claims map[string]any) identity.JSON
 
 type OIDCManager struct {
-	repo        domain.Storage
+	repo        IdentityRepository
 	providers   map[string]*OIDCProviderData
 	generator   domain.IDGenerator
 	factory     func() any
@@ -28,7 +28,7 @@ type OIDCProviderData struct {
 	OAuthConfig *oauth2.Config
 }
 
-func NewOIDCManager(repo domain.Storage, configs map[string]config.OIDCProvider, factory func() any) (*OIDCManager, error) {
+func NewOIDCManager(repo IdentityRepository, configs map[string]config.OIDCProvider, factory func() any) (*OIDCManager, error) {
 	providers := make(map[string]*OIDCProviderData)
 	ctx := context.Background()
 
@@ -209,11 +209,7 @@ func (m *OIDCManager) linkOIDC(ctx context.Context, ident any, providerID, subje
 
 	cs.SetCredentials(append(cs.GetCredentials(), newCred))
 
-	// Update the identity with the new credential
-	// Using CreateIdentity here might fail if it's meant only for new ones,
-	// but in most GORM implementations it should handle updates or we might need a dedicated Save/Update.
-	// For now, we assume the repo can handle it.
-	if err := m.repo.CreateIdentity(ctx, ident); err != nil {
+	if err := m.repo.UpdateIdentity(ctx, ident); err != nil {
 		return nil, err
 	}
 

@@ -2,6 +2,8 @@ package flow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -20,19 +22,34 @@ type KayanOIDCRepository interface {
 	FindOrCreateByProviderSub(ctx context.Context, sub string, traits identity.JSON, factory func() any) (any, error)
 }
 
-// OAuthConfiger is an interface over golang.org/x/oauth2.Config so core/ does not import that package directly.
-type OAuthConfiger interface {
-	AuthCodeURL(state string, opts ...AuthCodeOption) string
-	Exchange(ctx context.Context, code string, opts ...AuthCodeOption) (OAuthToken, error)
+// OIDCAuthorizationRequest is the transport-neutral input for constructing an
+// authorization URL.
+type OIDCAuthorizationRequest struct {
+	State               string
+	Nonce               string
+	CodeChallenge       string
+	CodeChallengeMethod string
 }
 
-// AuthCodeOption is a placeholder for oauth2 options (S256 challenge, verifier, etc.).
-// Callers construct concrete options outside core/ and pass them in.
-type AuthCodeOption interface{ isAuthCodeOption() }
+// OIDCTokenExchangeRequest is the transport-neutral input for exchanging an
+// authorization code.
+type OIDCTokenExchangeRequest struct {
+	Code         string
+	CodeVerifier string
+	RedirectURI  string
+}
 
-// OAuthToken is a minimal interface over an oauth2 token returned by Exchange.
-type OAuthToken interface {
-	Extra(key string) any
+// OIDCTokenSet contains the token material Kayan consumes from an exchange.
+// Access and refresh tokens intentionally do not cross this boundary.
+type OIDCTokenSet struct {
+	IDToken string
+}
+
+// OIDCClient performs the two external OAuth operations used by the strategy.
+// Implementations may wrap any OAuth client library.
+type OIDCClient interface {
+	AuthorizationURL(request OIDCAuthorizationRequest) (string, error)
+	Exchange(ctx context.Context, request OIDCTokenExchangeRequest) (*OIDCTokenSet, error)
 }
 
 // IDTokenParser verifies a raw OIDC ID token JWT and returns its claims.
@@ -61,7 +78,7 @@ type KayanOIDCStrategy struct {
 	issuer      string
 	clientID    string
 	redirectURI string
-	oauthConfig OAuthConfiger
+	oauthClient OIDCClient
 	tokenParser IDTokenParser
 	repo        KayanOIDCRepository
 	factory     func() any
@@ -70,7 +87,7 @@ type KayanOIDCStrategy struct {
 // NewKayanOIDCStrategy creates a KayanOIDCStrategy.
 func NewKayanOIDCStrategy(
 	issuer, clientID, redirectURI string,
-	oauthConfig OAuthConfiger,
+	oauthClient OIDCClient,
 	tokenParser IDTokenParser,
 	repo KayanOIDCRepository,
 	factory func() any,
@@ -79,7 +96,7 @@ func NewKayanOIDCStrategy(
 		issuer:      issuer,
 		clientID:    clientID,
 		redirectURI: redirectURI,
-		oauthConfig: oauthConfig,
+		oauthClient: oauthClient,
 		tokenParser: tokenParser,
 		repo:        repo,
 		factory:     factory,
@@ -108,9 +125,16 @@ func (s *KayanOIDCStrategy) Initiate(ctx context.Context, _ string) (any, error)
 		return nil, fmt.Errorf("flow: kayan_oidc: store state: %w", err)
 	}
 
-	// The caller's OAuthConfiger implementation constructs the full URL with PKCE + nonce.
-	// We pass state; PKCE and nonce parameters are injected by the concrete oauth2.Config wrapper.
-	url := s.oauthConfig.AuthCodeURL(state)
+	digest := sha256.Sum256([]byte(verifier))
+	url, err := s.oauthClient.AuthorizationURL(OIDCAuthorizationRequest{
+		State:               state,
+		Nonce:               nonce,
+		CodeChallenge:       base64.RawURLEncoding.EncodeToString(digest[:]),
+		CodeChallengeMethod: "S256",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("flow: kayan_oidc: authorization URL: %w", err)
+	}
 	return map[string]string{"redirect_url": url, "state": state}, nil
 }
 
@@ -125,19 +149,20 @@ func (s *KayanOIDCStrategy) Authenticate(ctx context.Context, state, code string
 		return nil, ErrKayanOIDCStateInvalid
 	}
 
-	_ = verifier // passed to Exchange by the OAuthConfiger implementation
-
-	oauthToken, err := s.oauthConfig.Exchange(ctx, code)
+	tokens, err := s.oauthClient.Exchange(ctx, OIDCTokenExchangeRequest{
+		Code:         code,
+		CodeVerifier: verifier,
+		RedirectURI:  s.redirectURI,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("flow: kayan_oidc: token exchange: %w", err)
 	}
 
-	rawIDToken, ok := oauthToken.Extra("id_token").(string)
-	if !ok || rawIDToken == "" {
+	if tokens == nil || tokens.IDToken == "" {
 		return nil, ErrKayanOIDCMissingIDToken
 	}
 
-	claims, err := s.tokenParser.ParseAndVerify(rawIDToken, s.issuer, s.clientID, nonce)
+	claims, err := s.tokenParser.ParseAndVerify(tokens.IDToken, s.issuer, s.clientID, nonce)
 	if err != nil {
 		return nil, ErrKayanOIDCTokenInvalid
 	}
