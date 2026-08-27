@@ -56,6 +56,17 @@ func (s *memTokenStore) GetToken(_ context.Context, token string) (*domain.AuthT
 	return t, nil
 }
 
+func (s *memTokenStore) ConsumeToken(_ context.Context, token, tokenType string) (*domain.AuthToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tokens[token]
+	if !ok || t.Type != tokenType || !time.Now().Before(t.ExpiresAt) {
+		return nil, errors.New("token not found or expired")
+	}
+	delete(s.tokens, token)
+	return t, nil
+}
+
 func (s *memTokenStore) DeleteToken(_ context.Context, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

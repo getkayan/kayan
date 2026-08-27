@@ -4,7 +4,7 @@
 // Demonstrates:
 //   - flow.NewKayanOIDCStrategy() with PKCE S256, state CSRF protection, nonce validation
 //   - KayanOIDCRepository (store/consume state, find-or-create by provider sub)
-//   - OAuthConfiger + IDTokenParser interface implementations
+//   - OIDCClient + IDTokenParser interface implementations
 //   - JWT session via session.NewHS256Strategy()
 //
 // The demo uses SIMULATED OAuthConfiger and IDTokenParser — no real Kayan server needed.
@@ -33,6 +33,7 @@ import (
 	"github.com/google/uuid"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -127,7 +128,7 @@ func (r *memRepo) FindOrCreateByProviderSub(_ context.Context, sub string, trait
 
 // domain.IdentityStorage implementation
 
-// ---------- Simulated OAuthConfiger + IDTokenParser ----------
+// ---------- Simulated OIDCClient + IDTokenParser ----------
 
 // simulatedIDClaims is what gets encoded in the fake id_token.
 type simulatedIDClaims struct {
@@ -136,7 +137,7 @@ type simulatedIDClaims struct {
 	Nonce string `json:"nonce"`
 }
 
-// simulatedOAuthConfig implements flow.OAuthConfiger without a real Kayan server.
+// simulatedOAuthConfig implements flow.OIDCClient without a real Kayan server.
 // It shares the repo's nonceByState map so it can embed the correct nonce in the id_token.
 //
 // Demo trick: Exchange treats its "code" argument as the state value, allowing it to look
@@ -148,12 +149,24 @@ type simulatedOAuthConfig struct {
 	repo        *memRepo
 }
 
-func (c *simulatedOAuthConfig) AuthCodeURL(state string, _ ...flow.AuthCodeOption) string {
-	return fmt.Sprintf("%s/oauth2/authorize?response_type=code&client_id=%s&redirect_uri=%s&state=%s",
-		c.issuer, c.clientID, c.redirectURI, state)
+func (c *simulatedOAuthConfig) AuthorizationURL(request flow.OIDCAuthorizationRequest) (string, error) {
+	query := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {c.clientID},
+		"redirect_uri":          {c.redirectURI},
+		"state":                 {request.State},
+		"nonce":                 {request.Nonce},
+		"code_challenge":        {request.CodeChallenge},
+		"code_challenge_method": {request.CodeChallengeMethod},
+	}
+	return c.issuer + "/oauth2/authorize?" + query.Encode(), nil
 }
 
-func (c *simulatedOAuthConfig) Exchange(_ context.Context, fakeCode string, _ ...flow.AuthCodeOption) (flow.OAuthToken, error) {
+func (c *simulatedOAuthConfig) Exchange(_ context.Context, request flow.OIDCTokenExchangeRequest) (*flow.OIDCTokenSet, error) {
+	if request.CodeVerifier == "" {
+		return nil, errors.New("simulated exchange: PKCE verifier is required")
+	}
+	fakeCode := request.Code
 	// In the demo, fakeCode IS the state value (see /api/oidc/demo-callback handler).
 	// This lets us look up the nonce that was stored during Initiate.
 	c.repo.mu.RLock()
@@ -185,19 +198,7 @@ func (c *simulatedOAuthConfig) Exchange(_ context.Context, fakeCode string, _ ..
 	claimsJSON, _ := json.Marshal(claims)
 	idToken := base64.StdEncoding.EncodeToString(claimsJSON)
 
-	return &simulatedOAuthToken{idToken: idToken}, nil
-}
-
-// simulatedOAuthToken implements flow.OAuthToken.
-type simulatedOAuthToken struct {
-	idToken string
-}
-
-func (t *simulatedOAuthToken) Extra(key string) any {
-	if key == "id_token" {
-		return t.idToken
-	}
-	return nil
+	return &flow.OIDCTokenSet{IDToken: idToken}, nil
 }
 
 // simulatedIDTokenParser implements flow.IDTokenParser.
