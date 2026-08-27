@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -89,8 +90,14 @@ func TestHandleSSORequest_ValidPOST(t *testing.T) {
 	reqBytes, _ := xml.Marshal(req)
 	reqEncoded := base64.StdEncoding.EncodeToString(reqBytes)
 
-	// Create HTTP request
-	body := strings.NewReader("SAMLRequest=" + reqEncoded)
+	// Create HTTP request.
+	//
+	// The value is URL-encoded rather than concatenated. Standard base64 uses
+	// '+', which form decoding reads as a space -- so roughly one run in
+	// twelve produced a corrupted SAMLRequest and a spurious failure, varying
+	// with the IssueInstant baked into each encoding.
+	form := url.Values{"SAMLRequest": {reqEncoded}}
+	body := strings.NewReader(form.Encode())
 	r := httptest.NewRequest("POST", "/sso", body)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
