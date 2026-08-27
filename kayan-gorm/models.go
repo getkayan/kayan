@@ -267,3 +267,33 @@ type gormSession struct {
 func (gormSession) TableName() string        { return "sessions" }
 func (s *gormSession) TenantID() string      { return s.TenantID_ }
 func (s *gormSession) SetTenantID(id string) { s.TenantID_ = id }
+
+func fromCoreSession(s *identity.Session) *gormSession {
+	if s == nil {
+		return nil
+	}
+	return &gormSession{
+		ID:               s.ID,
+		IdentityID:       s.IdentityID,
+		RefreshToken:     s.RefreshToken,
+		ExpiresAt:        s.ExpiresAt,
+		RefreshExpiresAt: s.RefreshExpiresAt,
+		IssuedAt:         s.IssuedAt,
+		Active:           s.Active,
+	}
+}
+
+func toCoreSession(s *gormSession) *identity.Session {
+	if s == nil {
+		return nil
+	}
+	return &identity.Session{
+		ID:               s.ID,
+		IdentityID:       s.IdentityID,
+		RefreshToken:     s.RefreshToken,
+		ExpiresAt:        s.ExpiresAt,
+		RefreshExpiresAt: s.RefreshExpiresAt,
+		IssuedAt:         s.IssuedAt,
+		Active:           s.Active,
+	}
+}

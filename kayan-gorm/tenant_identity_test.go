@@ -245,3 +245,33 @@ func TestAuditQueryIsTenantScoped(t *testing.T) {
 		t.Errorf("got %d events, want 1 (the other tenant's event must not appear)", len(events))
 	}
 }
+
+// TestSessionLookupIsTenantScoped closes a gap left by the first tenancy fix.
+//
+// gormSession implements tenant.Scoped, but SessionRepository never queries
+// through it: every method operates on identity.Session, the core type, which
+// has no tenant field and cannot implement the interface. The isolation
+// callback keys off the model being queried, so mapping tenant_id onto
+// gormSession did nothing for the code path that actually reads sessions.
+func TestSessionLookupIsTenantScoped(t *testing.T) {
+	repo := newIsolatedRepo(t)
+
+	sess := &identity.Session{
+		ID: "session-a", IdentityID: "id-a", RefreshToken: "refresh-a",
+		ExpiresAt: time.Now().Add(time.Hour), Active: true,
+	}
+	if err := repo.CreateSession(tenantCtx("tenant-a"), sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	if _, err := repo.GetSession(tenantCtx("tenant-b"), "session-a"); err == nil {
+		t.Error("tenant-b read a session belonging to tenant-a")
+	}
+	if _, err := repo.GetSessionByRefreshToken(tenantCtx("tenant-b"), "refresh-a"); err == nil {
+		t.Error("tenant-b resolved a refresh token belonging to tenant-a")
+	}
+
+	if _, err := repo.GetSession(tenantCtx("tenant-a"), "session-a"); err != nil {
+		t.Errorf("the owning tenant could not read its own session: %v", err)
+	}
+}
