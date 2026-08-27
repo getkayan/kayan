@@ -25,6 +25,23 @@ Package-level freeze status and remaining evidence gates are tracked in the
 | GORM and Redis adapters | Experimental, optional | GORM passes the shared storage suite; CI exercises concurrent atomicity on real PostgreSQL/MySQL and SSO lifecycle/concurrency on real Redis |
 | CLI | Experimental | Its remote administration API is not part of the stable library contract |
 
+## Observability
+
+Kayan emits domain events through `core/events`, which `core/flow` already
+dispatches for login, registration, MFA challenges, session lifecycle, lockout,
+and rate limiting. That is the instrumentation seam: subscribe to it and route
+events wherever the deployment already sends telemetry.
+
+The optional `kayan-observability` module provides an OpenTelemetry
+implementation. `telemetry.Subscribe(dispatcher, provider)` connects a provider
+to those events, giving login, MFA, session, and throttling metrics without
+`core` importing OpenTelemetry -- the whole SDK stays out of the build for
+deployments that do not ask for it.
+
+Kayan writes nothing to stdout or stderr. A headless library cannot know where
+a host wants its logs, and a log line the caller cannot intercept is not
+observability.
+
 ## Multi-tenancy
 
 Tenant isolation in `kayan-gorm` covers identities, credentials, sessions,

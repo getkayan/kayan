@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path. This drops `core` from 265 transitive dependencies to 53 by removing
   the OpenTelemetry SDK, its exporters, zap, and viper from every consumer's
   build.
+- `telemetry.Subscribe(dispatcher, provider)` connects OpenTelemetry metrics to
+  the domain events `core/flow` already emits, so login, MFA, session, lockout,
+  and rate-limit metrics work without `core` importing OpenTelemetry.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

@@ -19,6 +19,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/getkayan/kayan/core v0.0.0
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -47,3 +48,5 @@ require (
 	google.golang.org/grpc v1.69.0-dev // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
+
+replace github.com/getkayan/kayan/core => ../core
