@@ -44,8 +44,8 @@ import (
 // Errors reported by [MemoryStore]. They match the wording storage adapters
 // conventionally use, so tests asserting on them behave the same either way.
 var (
-	ErrNotFound      = errors.New("kayantesting: not found")
-	ErrAlreadyExists = errors.New("kayantesting: already exists")
+	ErrNotFound      = domain.ErrNotFound
+	ErrAlreadyExists = domain.ErrConflict
 )
 
 // MemoryStore is an in-memory [domain.Storage].
@@ -355,8 +355,24 @@ func (s *MemoryStore) GetToken(_ context.Context, token string) (*domain.AuthTok
 		return nil, fmt.Errorf("%w: token", ErrNotFound)
 	}
 	if !t.ExpiresAt.IsZero() && !s.clock.Now().Before(t.ExpiresAt) {
-		return nil, fmt.Errorf("%w: token expired", ErrNotFound)
+		return nil, fmt.Errorf("%w: token", domain.ErrExpired)
 	}
+	return t, nil
+}
+
+// ConsumeToken atomically retrieves and removes a live token of the expected type.
+func (s *MemoryStore) ConsumeToken(_ context.Context, token, tokenType string) (*domain.AuthToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tokens[token]
+	if !ok || t.Type != tokenType {
+		return nil, fmt.Errorf("%w: token", ErrNotFound)
+	}
+	if !t.ExpiresAt.IsZero() && !s.clock.Now().Before(t.ExpiresAt) {
+		delete(s.tokens, token)
+		return nil, fmt.Errorf("%w: token", domain.ErrExpired)
+	}
+	delete(s.tokens, token)
 	return t, nil
 }
 
@@ -441,10 +457,13 @@ func (s *MemoryStore) Count(_ context.Context, filter audit.Filter) (int64, erro
 	return n, nil
 }
 
-// Export is not implemented; [MemoryStore] is a test double, and export
-// formatting belongs to real adapters.
-func (s *MemoryStore) Export(context.Context, audit.Filter, audit.ExportFormat) (io.Reader, error) {
-	return nil, errors.New("kayantesting: Export is not implemented")
+// Export returns matching events as JSON or CSV.
+func (s *MemoryStore) Export(ctx context.Context, filter audit.Filter, format audit.ExportFormat) (io.Reader, error) {
+	events, err := s.Query(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return audit.ExportEvents(events, format)
 }
 
 // Purge deletes audit events recorded before olderThan and returns the count.

@@ -57,6 +57,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository is a facade that combines all sub-repositories.
@@ -143,12 +144,44 @@ func (r *Repository) SaveToken(ctx context.Context, token *domain.AuthToken) err
 // expiry rather than relying on every caller to re-check it.
 func (r *Repository) GetToken(ctx context.Context, token string) (*domain.AuthToken, error) {
 	var gt gormAuthToken
-	err := r.db.WithContext(ctx).
-		First(&gt, "token = ? AND expires_at > ?", token, time.Now()).Error
+	err := r.db.WithContext(ctx).First(&gt, "token = ?", token).Error
 	if err != nil {
-		return nil, err
+		return nil, storageError("get token", err)
+	}
+	if !gt.ExpiresAt.After(time.Now()) {
+		return nil, fmt.Errorf("gormstore: get token: %w", domain.ErrExpired)
 	}
 	return toCoreAuthToken(&gt), nil
+}
+
+// ConsumeToken atomically retrieves and deletes a live token of the expected type.
+func (r *Repository) ConsumeToken(ctx context.Context, token, tokenType string) (*domain.AuthToken, error) {
+	var consumed *domain.AuthToken
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var stored gormAuthToken
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&stored, "token = ? AND type = ?", token, tokenType).Error; err != nil {
+			return err
+		}
+		if !stored.ExpiresAt.After(time.Now()) {
+			if err := tx.Delete(&stored).Error; err != nil {
+				return err
+			}
+			return domain.ErrExpired
+		}
+		if err := tx.Delete(&stored).Error; err != nil {
+			return err
+		}
+		consumed = toCoreAuthToken(&stored)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrExpired) {
+			return nil, err
+		}
+		return nil, storageError("consume token", err)
+	}
+	return consumed, nil
 }
 
 // DeleteToken implements domain.TokenStore.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/identity"
@@ -24,6 +25,19 @@ func (m *mockTokenStore) GetToken(ctx context.Context, token string) (*domain.Au
 		return t, nil
 	}
 	return nil, fmt.Errorf("token not found")
+}
+
+func (m *mockTokenStore) ConsumeToken(ctx context.Context, token, tokenType string) (*domain.AuthToken, error) {
+	t, ok := m.tokens[token]
+	if !ok || t.Type != tokenType {
+		return nil, domain.ErrNotFound
+	}
+	if !t.ExpiresAt.After(time.Now()) {
+		delete(m.tokens, token)
+		return nil, domain.ErrExpired
+	}
+	delete(m.tokens, token)
+	return t, nil
 }
 
 func (m *mockTokenStore) DeleteToken(ctx context.Context, token string) error {

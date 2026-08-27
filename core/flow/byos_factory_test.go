@@ -57,6 +57,15 @@ func (s *memTokenStore) GetToken(ctx context.Context, token string) (*domain.Aut
 	return t, nil
 }
 
+func (s *memTokenStore) ConsumeToken(ctx context.Context, token, tokenType string) (*domain.AuthToken, error) {
+	t, ok := s.tokens[token]
+	if !ok || t.Type != tokenType {
+		return nil, errors.New("token not found")
+	}
+	delete(s.tokens, token)
+	return t, nil
+}
+
 func (s *memTokenStore) DeleteToken(ctx context.Context, token string) error {
 	delete(s.tokens, token)
 	return nil

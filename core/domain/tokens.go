@@ -18,6 +18,9 @@ type AuthToken struct {
 type TokenStore interface {
 	SaveToken(ctx context.Context, token *AuthToken) error
 	GetToken(ctx context.Context, token string) (*AuthToken, error)
+	// ConsumeToken atomically retrieves and deletes a live token of tokenType.
+	// Concurrent callers must not both receive the same token.
+	ConsumeToken(ctx context.Context, token, tokenType string) (*AuthToken, error)
 	DeleteToken(ctx context.Context, token string) error
 	DeleteExpiredTokens(ctx context.Context) error
 }
