@@ -204,7 +204,10 @@ func (idp *IdentityProvider) HandleSSORequest(w http.ResponseWriter, r *http.Req
 	if samlRequest == "" {
 		// Check POST binding
 		if r.Method == "POST" {
-			r.ParseForm()
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "Invalid form", http.StatusBadRequest)
+				return
+			}
 			samlRequest = r.FormValue("SAMLRequest")
 			relayState = r.FormValue("RelayState")
 		}
@@ -212,6 +215,10 @@ func (idp *IdentityProvider) HandleSSORequest(w http.ResponseWriter, r *http.Req
 
 	if samlRequest == "" {
 		http.Error(w, "Missing SAMLRequest", http.StatusBadRequest)
+		return
+	}
+	if len(samlRequest) > 1<<20 {
+		http.Error(w, "SAMLRequest too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -223,6 +230,8 @@ func (idp *IdentityProvider) HandleSSORequest(w http.ResponseWriter, r *http.Req
 	}
 
 	var authnRequest AuthnRequest
+	// #nosec G709 -- AuthnRequest is the deliberately narrow wire schema;
+	// decoded input is size-limited above and validated before it is trusted.
 	if err := xml.Unmarshal(decoded, &authnRequest); err != nil {
 		http.Error(w, "Invalid SAMLRequest XML", http.StatusBadRequest)
 		return
@@ -443,6 +452,7 @@ func (idp *IdentityProvider) PostBindingForm(acsURL string, response []byte, rel
 	}{
 		// The ACS URL comes from this identity provider's own registration,
 		// not from the request, so it is a trusted value.
+		// #nosec G203 -- acsURL was matched against the registered SP endpoint.
 		ACSUrl:       template.URL(acsURL),
 		SAMLResponse: base64.StdEncoding.EncodeToString(response),
 		RelayState:   relayState,

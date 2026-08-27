@@ -53,8 +53,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -291,6 +293,7 @@ type SubjectConfirmationData struct {
 }
 
 // ConfirmationMethodBearer is the bearer confirmation method used by web SSO.
+// #nosec G101 -- this is a public SAML protocol URN, not a credential.
 const ConfirmationMethodBearer = "urn:oasis:names:tc:SAML:2.0:cm:bearer"
 
 // NameID represents the user identifier.
@@ -393,10 +396,12 @@ type ServiceProvider struct {
 	factory      func() any
 	hooks        Hooks
 
-	verifier    SignatureVerifier
-	signer      Signer
-	replayCache ReplayCache
-	clock       domain.Clock
+	verifier           SignatureVerifier
+	signer             Signer
+	replayCache        ReplayCache
+	clock              domain.Clock
+	metadataHTTPClient HTTPDoer
+	metadataURLPolicy  MetadataURLPolicy
 
 	// autoProvision allows a successful assertion for an unknown NameID to
 	// create an identity. Off by default.
@@ -405,6 +410,28 @@ type ServiceProvider struct {
 
 // SPOption configures a [ServiceProvider].
 type SPOption func(*ServiceProvider)
+
+// HTTPDoer is the minimal HTTP client contract used for metadata retrieval.
+type HTTPDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+// MetadataURLPolicy validates an IdP metadata URL before any request is made.
+type MetadataURLPolicy func(*url.URL) error
+
+const maxMetadataBytes = 2 << 20
+
+// WithMetadataHTTPClient supplies the client used to retrieve IdP metadata.
+// Its redirect policy remains the caller's responsibility.
+func WithMetadataHTTPClient(client HTTPDoer) SPOption {
+	return func(sp *ServiceProvider) { sp.metadataHTTPClient = client }
+}
+
+// WithMetadataURLPolicy replaces the default public-HTTPS metadata policy.
+// This is useful for deployments with an explicitly trusted private IdP.
+func WithMetadataURLPolicy(policy MetadataURLPolicy) SPOption {
+	return func(sp *ServiceProvider) { sp.metadataURLPolicy = policy }
+}
 
 // WithSignatureVerifier replaces the signature verifier.
 //
@@ -469,6 +496,17 @@ func NewServiceProvider(
 	}
 
 	sp.clock = domain.ClockOrDefault(sp.clock)
+	if sp.metadataURLPolicy == nil {
+		sp.metadataURLPolicy = publicMetadataURL
+	}
+	if sp.metadataHTTPClient == nil {
+		sp.metadataHTTPClient = &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+				return sp.metadataURLPolicy(req.URL)
+			},
+		}
+	}
 	if sp.verifier == nil {
 		// Signature verification is the only thing authenticating an
 		// assertion, so it is on by default and must be opted out of
@@ -495,15 +533,32 @@ func (sp *ServiceProvider) RegisterIdP(idp *IdPConfig) {
 
 // RegisterIdPFromMetadata registers an IdP by fetching its metadata.
 func (sp *ServiceProvider) RegisterIdPFromMetadata(ctx context.Context, id, metadataURL string) error {
-	resp, err := http.Get(metadataURL)
+	parsed, err := url.Parse(metadataURL)
 	if err != nil {
-		return fmt.Errorf("failed to fetch IdP metadata: %w", err)
+		return fmt.Errorf("saml: parse IdP metadata URL: %w", err)
+	}
+	if err := sp.metadataURLPolicy(parsed); err != nil {
+		return fmt.Errorf("saml: IdP metadata URL refused: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return fmt.Errorf("saml: create IdP metadata request: %w", err)
+	}
+	resp, err := sp.metadataHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("saml: fetch IdP metadata: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("saml: fetch IdP metadata: unexpected HTTP status %d", resp.StatusCode)
+	}
 
-	metadata, err := io.ReadAll(resp.Body)
+	metadata, err := io.ReadAll(io.LimitReader(resp.Body, maxMetadataBytes+1))
 	if err != nil {
-		return err
+		return fmt.Errorf("saml: read IdP metadata: %w", err)
+	}
+	if len(metadata) > maxMetadataBytes {
+		return fmt.Errorf("saml: IdP metadata exceeds %d bytes", maxMetadataBytes)
 	}
 
 	idp, err := ParseIdPMetadata(id, metadata)
@@ -512,6 +567,23 @@ func (sp *ServiceProvider) RegisterIdPFromMetadata(ctx context.Context, id, meta
 	}
 
 	sp.RegisterIdP(idp)
+	return nil
+}
+
+func publicMetadataURL(u *url.URL) error {
+	if u.Scheme != "https" {
+		return fmt.Errorf("HTTPS is required")
+	}
+	if u.Hostname() == "" || u.User != nil {
+		return fmt.Errorf("URL must contain a host and no credentials")
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return fmt.Errorf("local hosts are not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()) {
+		return fmt.Errorf("private or local IP addresses are not allowed")
+	}
 	return nil
 }
 
