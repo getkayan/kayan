@@ -282,15 +282,12 @@ func (s *JWTStrategy) Validate(ctx context.Context, sessionID any) (*identity.Se
 	}
 
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
-		// Distributed revocation check
-		if s.revocation != nil {
-			revoked, err := s.revocation.IsRevoked(ctx, tokenString)
-			if err != nil {
-				return nil, fmt.Errorf("revocation check failed: %w", err)
-			}
-			if revoked {
-				return nil, fmt.Errorf("session revoked")
-			}
+		// Distributed revocation check, keyed on the session rather than on
+		// the token string. A session has at least two tokens -- the access
+		// token and the refresh token -- and they are different strings, so
+		// revoking by string ends one and leaves the other working.
+		if err := s.checkRevoked(ctx, claims.SessionID); err != nil {
+			return nil, err
 		}
 		return &identity.Session{
 			ID:         tokenString,
@@ -327,7 +324,27 @@ func (s *JWTStrategy) Refresh(ctx context.Context, refreshToken string) (*identi
 	}
 
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
-		// Issue new AT and new RT (Rotation)
+		// A revoked session must not be refreshable. Checking only in Validate
+		// meant logout stopped the access token while the refresh token kept
+		// minting replacements until it expired on its own.
+		if err := s.checkRevoked(ctx, claims.SessionID); err != nil {
+			return nil, err
+		}
+
+		// Rotation: the spent session is revoked before the replacement is
+		// issued, so presenting the same refresh token twice fails. Without
+		// this the old token stays live alongside the new one and rotation
+		// prevents nothing.
+		if s.revocation != nil && claims.SessionID != "" {
+			expiry := time.Now().Add(s.config.RefreshExpiry)
+			if claims.ExpiresAt != nil {
+				expiry = claims.ExpiresAt.Time
+			}
+			if err := s.revocation.Revoke(ctx, claims.SessionID, expiry); err != nil {
+				return nil, fmt.Errorf("revoke spent refresh token: %w", err)
+			}
+		}
+
 		newSessionID := uuid.New().String()
 		return s.Create(ctx, newSessionID, claims.Subject)
 	}
@@ -355,9 +372,38 @@ func (s *JWTStrategy) Delete(ctx context.Context, sessionID any) error {
 		if !ok || !token.Valid {
 			return fmt.Errorf("invalid token")
 		}
-		return s.revocation.Revoke(ctx, tokenString, claims.ExpiresAt.Time)
+		// Revoke the session, not the token string, so the refresh token for
+		// the same session dies with it.
+		if claims.SessionID == "" {
+			return fmt.Errorf("session: token carries no session id, so it cannot be revoked")
+		}
+		return s.revocation.Revoke(ctx, claims.SessionID, claims.ExpiresAt.Time)
 	}
-	// Stateless, nothing to delete on server side.
+	// Without a revocation store there is nowhere to record the logout, and a
+	// signed JWT stays valid until it expires. Returning nil here reported a
+	// successful logout that had not happened: the caller cleared its cookie,
+	// the user believed they were signed out, and anyone holding the token
+	// still had a live session. Say so instead.
+	return fmt.Errorf("session: logout requires a revocation store; " +
+		"configure one with WithRevocationStore, or the token stays valid until it expires")
+}
+
+// checkRevoked reports whether the session behind a token has been revoked.
+//
+// It is a no-op when no revocation store is configured, which keeps stateless
+// verification working for deployments that accept it. Delete is the operation
+// that refuses to pretend in that configuration.
+func (s *JWTStrategy) checkRevoked(ctx context.Context, sessionID string) error {
+	if s.revocation == nil || sessionID == "" {
+		return nil
+	}
+	revoked, err := s.revocation.IsRevoked(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("revocation check failed: %w", err)
+	}
+	if revoked {
+		return fmt.Errorf("session revoked")
+	}
 	return nil
 }
 
