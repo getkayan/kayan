@@ -89,7 +89,9 @@ func (s *RedisLockoutStore) Lock(ctx context.Context, identifier string, duratio
 	}
 
 	// Clear the failure count on lock
-	s.ClearFailures(ctx, identifier)
+	if err := s.ClearFailures(ctx, identifier); err != nil {
+		return fmt.Errorf("redis: clear failures after lockout: %w", err)
+	}
 
 	return nil
 }

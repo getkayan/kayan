@@ -81,7 +81,9 @@ func (s *RedisWebAuthnSessionStore) GetSession(ctx context.Context, sessionID st
 	}
 
 	var expiresAt int64
-	fmt.Sscanf(result["expires_at"], "%d", &expiresAt)
+	if _, err := fmt.Sscanf(result["expires_at"], "%d", &expiresAt); err != nil {
+		return nil, fmt.Errorf("redis: decode WebAuthn expiry: %w", err)
+	}
 
 	data := &flow.WebAuthnSessionData{
 		Challenge:        result["challenge"],
