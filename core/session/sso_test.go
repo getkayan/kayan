@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,6 +29,84 @@ func TestSSOManager_CreateSession(t *testing.T) {
 	}
 	if session.AppSessions[0].AppID != "app-web" {
 		t.Errorf("expected app 'app-web', got %q", session.AppSessions[0].AppID)
+	}
+}
+
+func TestSSOManager_ConcurrentJoinsAreNotLost(t *testing.T) {
+	store := NewMemorySSOStore()
+	mgr := NewSSOManager(store)
+	ctx := context.Background()
+	session, err := mgr.CreateSession(ctx, "user-1", "app-0")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	const joins = 64
+	var wg sync.WaitGroup
+	errs := make(chan error, joins)
+	for i := 1; i <= joins; i++ {
+		wg.Add(1)
+		go func(app int) {
+			defer wg.Done()
+			_, err := mgr.JoinSession(ctx, session.ID, fmt.Sprintf("app-%d", app))
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("JoinSession: %v", err)
+		}
+	}
+
+	got, err := mgr.GetSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if len(got.AppSessions) != joins+1 {
+		t.Fatalf("app sessions = %d, want %d", len(got.AppSessions), joins+1)
+	}
+}
+
+func TestSSOManager_ConcurrentCreateUsesOneActiveSession(t *testing.T) {
+	store := NewMemorySSOStore()
+	mgr := NewSSOManager(store)
+	ctx := context.Background()
+
+	const creates = 32
+	ids := make(chan string, creates)
+	var wg sync.WaitGroup
+	for i := 0; i < creates; i++ {
+		wg.Add(1)
+		go func(app int) {
+			defer wg.Done()
+			session, err := mgr.CreateSession(ctx, "user-1", fmt.Sprintf("app-%d", app))
+			if err != nil {
+				t.Errorf("CreateSession: %v", err)
+				return
+			}
+			ids <- session.ID
+		}(i)
+	}
+	wg.Wait()
+	close(ids)
+
+	var want string
+	for id := range ids {
+		if want == "" {
+			want = id
+		}
+		if id != want {
+			t.Errorf("created multiple active sessions: %q and %q", want, id)
+		}
+	}
+	got, err := mgr.GetSessionByIdentity(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("GetSessionByIdentity: %v", err)
+	}
+	if len(got.AppSessions) != creates {
+		t.Fatalf("app sessions = %d, want %d", len(got.AppSessions), creates)
 	}
 }
 

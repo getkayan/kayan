@@ -69,6 +69,7 @@ import (
 type Repository struct {
 	*IdentityRepository
 	*SessionRepository
+	*SSORepository
 	db *gorm.DB
 }
 
@@ -77,6 +78,7 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{
 		IdentityRepository: NewIdentityRepository(db),
 		SessionRepository:  NewSessionRepository(db),
+		SSORepository:      NewSSORepository(db),
 		db:                 db,
 	}
 }
@@ -106,6 +108,8 @@ func (r *Repository) AutoMigrateDev(models ...any) error {
 		&gormIdentity{},
 		&gormCredential{},
 		&gormSession{},
+		&gormSSOSession{},
+		&gormAppSession{},
 		&gormAuditEvent{},
 		&gormAuthToken{},
 		&gormRelationTuple{},
