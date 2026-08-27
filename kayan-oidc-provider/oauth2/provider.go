@@ -530,16 +530,28 @@ func (p *Provider) verifyPKCE(challenge, method, verifier string) bool {
 
 // GenerateAccessToken generates a signed JWT access token for a user.
 func (p *Provider) GenerateAccessToken(clientID string, identityID string, scopes []string) (string, error) {
+	now := p.clock.Now()
 	claims := jwt.MapClaims{
 		"iss": p.issuer,
 		"sub": identityID,
 		"aud": clientID,
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
-		"iat": time.Now().Unix(),
+		"exp": now.Add(1 * time.Hour).Unix(),
+		"iat": now.Unix(),
 		"jti": uuid.New().String(),
 		"scp": scopes,
 	}
 
+	// A key provider carries the algorithm with each key, so rotation and
+	// non-RSA keys both work. Signing with the construction key while JWKS
+	// published from the provider meant the two disagreed the moment anyone
+	// rotated: relying parties fetched the advertised set and could not verify
+	// a single token, with nothing failing on this side to say why.
+	if p.keyProvider != nil {
+		signer := keys.NewJWTSigner(p.keyProvider)
+		return signer.Sign(context.Background(), claims, nil)
+	}
+
+	// Fall back to the single key the provider was constructed with.
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = p.keyID
 
@@ -612,6 +624,28 @@ func (p *Provider) authenticate(ctx context.Context, clientID, clientSecret, gra
 // Introspect validates a token and returns its metadata.
 func (p *Provider) Introspect(ctx context.Context, tokenString string) (*IntrospectionResponse, error) {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		// Resolve by kid so a token signed before a rotation still verifies.
+		// Verifying against the construction key alone reported tokens the
+		// provider had just issued as inactive, because the active key is the
+		// one the key provider holds, not the one passed to NewProvider.
+		if p.keyProvider != nil {
+			kid, _ := t.Header["kid"].(string)
+			if kid == "" {
+				return nil, fmt.Errorf("%w: token has no kid", keys.ErrKeyNotFound)
+			}
+			key, err := p.keyProvider.ByKID(ctx, kid)
+			if err != nil {
+				return nil, err
+			}
+			// A kid names a key, it does not vouch for one. An unknown kid
+			// resolves to nothing and the token is rejected rather than
+			// trusted on its own say-so.
+			if key.Method.Alg() != t.Method.Alg() {
+				return nil, fmt.Errorf("%w: token alg %q does not match key %q",
+					keys.ErrInvalidKey, t.Method.Alg(), key.Method.Alg())
+			}
+			return key.Public, nil
+		}
 		return verificationKey(p.signingKey), nil
 	})
 
