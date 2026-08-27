@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-observability, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-observability, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     permissions:
       contents: read
       security-events: write

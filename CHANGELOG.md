@@ -58,6 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LoginManager.ReloadStrategies` returns an error naming any strategy that
   failed to rebuild, rather than logging to stderr and keeping the previous
   definition live.
+- `core/telemetry`, `core/logger`, and `core/config` moved to the optional
+  `kayan-observability` module. Their APIs are unchanged; update the import
+  path. This drops `core` from 265 transitive dependencies to 53 by removing
+  the OpenTelemetry SDK, its exporters, zap, and viper from every consumer's
+  build.
 
 See [the pre-1.0 migration notes](docs/reference/pre-1.0-migration.md) for the
 upgrade path. These changes are not published as a stable 1.0 release yet.

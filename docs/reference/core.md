@@ -5299,189 +5299,25 @@ The full report names your dependencies and their latencies. It is an internal
 diagnostic — serving it unauthenticated tells an attacker your infrastructure
 topology.
 
-### `core/telemetry`
+### Observability: telemetry, logging, and configuration
 
-```go
-import "github.com/getkayan/kayan/core/telemetry"
-```
-
-OpenTelemetry tracing and metrics.
-
-```go
-type Config struct {
-    ServiceName    string
-    ServiceVersion string
-    Environment    string
-    OTLPEndpoint   string
-    InsecureOTLP   bool
-    SamplingRate   float64
-    Enabled        bool
-}
-
-func DefaultConfig() Config
-
-type Provider struct { /* unexported fields */ }
-
-func NewProvider(cfg Config) (*Provider, error)
-
-func (p *Provider) Tracer() trace.Tracer
-func (p *Provider) Meter() metric.Meter
-func (p *Provider) Shutdown(ctx context.Context) error
-```
-
-`InsecureOTLP` allows plaintext OTLP transport and is for local development only.
-Traces carry identity IDs, session IDs, and client IPs; shipping them
-unencrypted puts that on the wire for anyone on the path.
-
-`SamplingRate` between 0.0 and 1.0. Full sampling on a busy authentication
-service is expensive at the collector, but be aware that sampling loses the
-individual failed login you wanted to investigate — sample traces, and rely on
-metrics and the audit trail for completeness.
-
-**Call `Shutdown` on exit** or buffered spans are lost.
-
-```go
-func (p *Provider) RecordLogin(ctx context.Context, strategy string, success bool, tenant string)
-func (p *Provider) RecordRegistration(ctx context.Context, strategy string, success bool, tenant string)
-func (p *Provider) RecordMFA(ctx context.Context, mfaType string, success bool)
-func (p *Provider) RecordRateLimit(ctx context.Context, action string, key string)
-func (p *Provider) RecordLockout(ctx context.Context, action string)
-func (p *Provider) RecordAuthDuration(ctx context.Context, strategy string, duration time.Duration)
-func (p *Provider) SessionCreated(ctx context.Context, tenant string)
-func (p *Provider) SessionDestroyed(ctx context.Context, tenant string)
-```
-
-Pre-defined metrics: `kayan.login.total`, `kayan.registration.total`,
-`kayan.mfa.total`, `kayan.rate_limit.total`, `kayan.lockout.total`,
-`kayan.auth.duration`, `kayan.sessions.active`.
-
-Note that `RecordRateLimit` takes a `key`. If your key is an email address or an
-IP, it becomes a metric label — high-cardinality, which will overwhelm a
-Prometheus backend, and personal data in a system that was not designed to hold
-it. Pass a bucketed or hashed value.
-
-```go
-func (p *Provider) StartSpan(ctx context.Context, name string, opts SpanOptions) (context.Context, trace.Span)
-func (p *Provider) SpanLogin(ctx context.Context, identifier, strategy string) (context.Context, trace.Span)
-func (p *Provider) SpanRegistration(ctx context.Context, strategy string) (context.Context, trace.Span)
-func (p *Provider) SpanMFA(ctx context.Context, mfaType, identityID string) (context.Context, trace.Span)
-func (p *Provider) SpanOIDC(ctx context.Context, provider string) (context.Context, trace.Span)
-func (p *Provider) SpanSAML(ctx context.Context, idpID string) (context.Context, trace.Span)
-func (p *Provider) SpanWebAuthn(ctx context.Context, operation string) (context.Context, trace.Span)
-func (p *Provider) SpanSessionCreate(ctx context.Context, identityID string) (context.Context, trace.Span)
-func (p *Provider) SpanSessionValidate(ctx context.Context, sessionID string) (context.Context, trace.Span)
-func (p *Provider) SpanSessionRefresh(ctx context.Context, sessionID string) (context.Context, trace.Span)
-func (p *Provider) SpanPolicyCheck(ctx context.Context, action, resource string) (context.Context, trace.Span)
-func (p *Provider) SpanRateLimit(ctx context.Context, key string) (context.Context, trace.Span)
-
-type SpanOptions struct {
-    TenantID   string
-    IdentityID string
-    Strategy   string
-    SessionID  string
-    IPAddress  string
-    UserAgent  string
-}
-
-func AddSpanEvent(span trace.Span, name string, attrs ...attribute.KeyValue)
-func SetSpanError(span trace.Span, err error)
-func SetSpanSuccess(span trace.Span)
-func EndSpan(span trace.Span, err error)
-
-const (
-    AttrIdentityID = "kayan.identity.id"
-    AttrTenantID   = "kayan.tenant.id"
-    AttrStrategy   = "kayan.auth.strategy"
-    AttrSessionID  = "kayan.session.id"
-    AttrIPAddress  = "kayan.client.ip"
-    AttrUserAgent  = "kayan.client.user_agent"
-)
-```
-
-`EndSpan` ends a span and records the error if there is one — the common
-`defer` pattern in a single call.
-
-Never put a password, a token, or a raw API key into a span attribute. A trace
-backend is generally less protected than your database and retains data for a
-long time.
-
-### `core/logger`
-
-```go
-import "github.com/getkayan/kayan/core/logger"
-```
-
-```go
-var Log *zap.Logger
-
-func InitLogger(level string)
-```
-
-A thin wrapper over zap with a package-level logger. Levels are `debug`, `info`,
-`warn`, `error`, configured through `InitLogger` or the `LOG_LEVEL` environment
-variable.
-
-```go
-logger.InitLogger("info")
-
-logger.Log.Info("user logged in",
-    zap.String("user_id", userID),
-    zap.String("ip", clientIP),
-)
-```
-
-`Log` is nil until `InitLogger` runs, so call it early in `main`.
-
-Being a package-level variable, it is shared process-wide and cannot carry
-per-request context. For request-scoped fields, keep your own logger in the
-context. And the usual rule applies with more force in an IAM system: passwords,
-tokens, secrets, and API keys do not belong in log fields, and neither does a
-struct that contains one — `zap.Any` on a credential-bearing struct will happily
-serialize it.
-
-### `core/config`
-
-```go
-import "github.com/getkayan/kayan/core/config"
-```
-
-```go
-type Config struct {
-    DBType          string                  `mapstructure:"DB_TYPE"` // sqlite, postgres, mysql
-    DSN             string                  `mapstructure:"DSN"`
-    SkipAutoMigrate bool                    `mapstructure:"SKIP_AUTO_MIGRATE"`
-    LogLevel        string                  `mapstructure:"LOG_LEVEL"`
-    OIDCProviders   map[string]OIDCProvider `mapstructure:"OIDC_PROVIDERS"`
-}
-
-type OIDCProvider struct {
-    Issuer       string `mapstructure:"issuer"`
-    ClientID     string `mapstructure:"client_id"`
-    ClientSecret string `mapstructure:"client_secret"`
-    RedirectURL  string `mapstructure:"redirect_url"`
-}
-
-func LoadConfig() (*Config, error)
-```
-
-Environment-based configuration loaded through Viper, with development defaults:
-`DB_TYPE` defaults to `sqlite`, `DSN` to `kayan.db`, `LOG_LEVEL` to `info`.
-
-OIDC providers are configured by prefix:
+`telemetry`, `logger`, and `config` are no longer part of `core`. They live in
+the optional `kayan-observability` module:
 
 ```
-OIDC_PROVIDERS_GOOGLE_ISSUER=https://accounts.google.com
-OIDC_PROVIDERS_GOOGLE_CLIENT_ID=your-client-id
-OIDC_PROVIDERS_GOOGLE_CLIENT_SECRET=your-secret
+github.com/getkayan/kayan/kayan-observability/telemetry
+github.com/getkayan/kayan/kayan-observability/logger
+github.com/getkayan/kayan/kayan-observability/config
 ```
 
-This struct holds two secrets — the DSN, which usually embeds a database
-password, and every provider's `ClientSecret`. Logging a `*Config`, dumping it
-into an error message, or exposing it from a debug endpoint discloses both.
+They moved because `core` is what every consumer compiles. Between them they
+pulled the OpenTelemetry SDK, its gRPC and Prometheus exporters, zap, and viper
+into the dependency graph of every deployment -- including the ones that never
+called them -- taking `core` from 53 transitive dependencies to 265. Nothing in
+`core` imported any of the three.
 
-`SkipAutoMigrate` should be true in production. Automatic migration on startup
-means a deploy silently alters your schema, and a rolled-back binary meets a
-schema it does not expect.
+Their APIs are unchanged; only the import path moved. See
+[configuration](configuration.md) for the settings surface.
 
 ### `core/admin`
 

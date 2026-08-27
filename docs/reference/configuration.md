@@ -2,9 +2,9 @@
 
 This page documents the configuration surfaces that exist directly in the repository. Many deployments will wrap these values inside a broader host application configuration system.
 
-## core/config
+## kayan-observability/config
 
-`core/config.LoadConfig()` currently supports these environment variables:
+`kayan-observability/config.LoadConfig()` currently supports these environment variables:
 
 | Variable | Type | Default | Purpose |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ Keep this configuration near your secret-loading layer so keys are never hardcod
 
 ## Telemetry Configuration
 
-`core/telemetry.Config` includes:
+`kayan-observability/telemetry.Config` includes:
 
 - `ServiceName`
 - `ServiceVersion`

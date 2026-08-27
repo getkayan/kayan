@@ -32,8 +32,9 @@ stable until their evidence gates pass:
 | `kayan-saml` | Independent security review and published multi-vendor interoperability evidence |
 | `kayan-scim` and `kayan-scim/gormstore` | Multi-valued storage mapping policy and SCIM interoperability evidence |
 | `kayan-ldap` | TLS/bind interoperability evidence against supported directories |
-| `core/admin`, `core/compliance`, `core/config`, `core/consent` | Behavioral-contract review and production adoption evidence |
-| `core/health`, `core/logger`, `core/telemetry` | Backend interoperability and operational-contract review |
+| `core/admin`, `core/compliance`, `core/consent` | Behavioral-contract review and production adoption evidence |
+| `kayan-observability/*` | Backend interoperability and operational-contract review |
+| `core/health` | Operational-contract review |
 
 Experimental packages may change before 1.0, but each change must be deliberate:
 update the API baseline, changelog, migration notes, capability matrix, and

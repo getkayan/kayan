@@ -7,6 +7,7 @@ modules=(
   "core|github.com/getkayan/kayan/core"
   "kayan-gorm|github.com/getkayan/kayan/kayan-gorm"
   "kayan-ldap|github.com/getkayan/kayan/kayan-ldap"
+  "kayan-observability|github.com/getkayan/kayan/kayan-observability"
   "kayan-oidc-provider|github.com/getkayan/kayan/kayan-oidc-provider"
   "kayan-redis|github.com/getkayan/kayan/kayan-redis"
   "kayan-saml|github.com/getkayan/kayan/kayan-saml"

@@ -32,7 +32,7 @@ The default dispatcher supports sync or async fan-out and predefined event topic
 
 ## Config
 
-`core/config` loads environment-based configuration with Viper. Its current default surface includes:
+`kayan-observability/config` loads environment-based configuration with Viper. Its current default surface includes:
 
 - `DB_TYPE`
 - `DSN`
@@ -70,7 +70,7 @@ This package is intentionally supportive rather than all-encompassing. It gives 
 
 ## Logger
 
-`core/logger` standardizes structured logging around zap. Use it as the base logger for Kayan-adjacent services when you want consistent fields and log levels.
+`kayan-observability/logger` standardizes structured logging around zap. Use it as the base logger for Kayan-adjacent services when you want consistent fields and log levels.
 
 Operational guidance:
 
@@ -80,7 +80,7 @@ Operational guidance:
 
 ## Telemetry
 
-`core/telemetry` adds OpenTelemetry traces and Prometheus-compatible metrics.
+`kayan-observability/telemetry` adds OpenTelemetry traces and Prometheus-compatible metrics.
 
 Predefined metric families cover:
 

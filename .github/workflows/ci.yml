@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-observability, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -75,7 +75,7 @@ jobs:
           set -euo pipefail
           imports="$(go list -deps ./... | grep '^github.com/getkayan/kayan/' || true)"
           status=0
-          for module in kayan-gorm kayan-ldap kayan-oidc-provider kayan-redis kayan-saml kayan-scim kayan-testing; do
+          for module in kayan-gorm kayan-ldap kayan-observability kayan-oidc-provider kayan-redis kayan-saml kayan-scim kayan-testing; do
             if echo "${imports}" | grep -q "^github.com/getkayan/kayan/${module}"; then
               echo "ERROR: core/ must not import ${module}/"
               echo "${imports}" | grep "^github.com/getkayan/kayan/${module}"
@@ -83,6 +83,29 @@ jobs:
             fi
           done
           exit "${status}"
+
+      # core is what every consumer compiles. A package added here that drags a
+      # large dependency tree is paid for by everyone, including deployments
+      # that never call it -- which is how the OpenTelemetry SDK, viper, and zap
+      # came to sit in core's graph for code nothing imported, taking it from
+      # 53 transitive dependencies to 265.
+      #
+      # The ceiling is the durable half of that fix. Extracting the packages was
+      # a one-time correction; this is what stops it happening again, and it
+      # fails loudly with the number rather than leaving someone to notice.
+      - name: core dependency ceiling
+        working-directory: core
+        run: |
+          set -euo pipefail
+          ceiling=90
+          count="$(go list -deps ./... | grep -c '\.' )"
+          echo "core resolves ${count} transitive dependencies (ceiling ${ceiling})"
+          if [ "${count}" -gt "${ceiling}" ]; then
+            echo "ERROR: core's dependency graph grew past the ceiling."
+            echo "Either the new dependency belongs in an optional module, or the"
+            echo "ceiling needs raising deliberately in this workflow."
+            exit 1
+          fi
 
       - name: core/identity must have zero internal deps
         working-directory: core
@@ -114,7 +137,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: ['.', core, kayan-gorm, kayan-ldap, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
+        module: ['.', core, kayan-gorm, kayan-ldap, kayan-observability, kayan-oidc-provider, kayan-redis, kayan-saml, kayan-scim, kayan-testing]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

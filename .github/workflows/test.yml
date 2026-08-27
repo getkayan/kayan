@@ -54,6 +54,10 @@ jobs:
         working-directory: kayan-ldap
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
+      - name: Run kayan-observability Tests
+        working-directory: kayan-observability
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
@@ -64,6 +68,7 @@ jobs:
             core/coverage.out,kayan-gorm/coverage.out,kayan-redis/coverage.out,
             kayan-scim/coverage.out,kayan-saml/coverage.out,
             kayan-oidc-provider/coverage.out,kayan-ldap/coverage.out,
+            kayan-observability/coverage.out,
             kayan-testing/coverage.out
           flags: unittests
           name: codecov-umbrella

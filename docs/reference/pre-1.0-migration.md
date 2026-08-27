@@ -24,6 +24,23 @@ and HTTP dependencies in `core`. The reviewed API snapshots in
   observable and the client store is not required to implement audit storage.
 - SAML metadata retrieval defaults to public HTTPS URLs. Private IdP metadata
   endpoints require an explicit `WithMetadataURLPolicy` opt-in.
+- `core/telemetry`, `core/logger`, and `core/config` moved to the optional
+  `kayan-observability` module. Only the import path changes:
+
+  ```go
+  // before
+  import "github.com/getkayan/kayan/core/telemetry"
+  // after
+  import "github.com/getkayan/kayan/kayan-observability/telemetry"
+  ```
+
+  `core` is what every consumer compiles, and these three pulled the
+  OpenTelemetry SDK, its gRPC and Prometheus exporters, zap, and viper into
+  every deployment's dependency graph -- including deployments that never
+  called them. Nothing in `core` imported any of the three. Moving them takes
+  `core` from 265 transitive dependencies to 53, and a CI ceiling now fails the
+  build if that grows back.
+
 - `flow.OIDCManager`, `flow.NewOIDCManager`, `flow.ClaimMapper`,
   `flow.OIDCProviderData`, and `gormstore.NewDefaultOIDCManager` are removed.
   Use `flow.NewKayanOIDCStrategy` instead.

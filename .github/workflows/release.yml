@@ -29,6 +29,7 @@ jobs:
           - core
           - kayan-gorm
           - kayan-ldap
+          - kayan-observability
           - kayan-oidc-provider
           - kayan-redis
           - kayan-saml
@@ -65,7 +66,7 @@ jobs:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          for module in core kayan-gorm kayan-ldap kayan-oidc-provider \
+          for module in core kayan-gorm kayan-ldap kayan-observability kayan-oidc-provider \
                         kayan-redis kayan-saml kayan-scim kayan-testing; do
             tag="${module}/${RELEASE_VERSION}"
             if git rev-parse --verify --quiet "refs/tags/${tag}"; then
@@ -101,7 +102,7 @@ jobs:
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
           mkdir -p sbom
           cyclonedx-gomod mod -json -licenses -output "sbom/root.cdx.json" "."
-          for module in core kayan-gorm kayan-ldap kayan-oidc-provider \
+          for module in core kayan-gorm kayan-ldap kayan-observability kayan-oidc-provider \
                         kayan-redis kayan-saml kayan-scim kayan-testing; do
             cyclonedx-gomod mod -json -licenses -output "sbom/${module}.cdx.json" "./${module}"
           done
