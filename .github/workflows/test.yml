@@ -184,8 +184,13 @@ jobs:
             echo "no fuzz targets in ${PWD}"
             exit 0
           fi
+          # -fuzz takes exactly one package. Passing ./... works only while a
+          # module happens to hold a single package, and kayan-scim has two, so
+          # every fuzz run there failed with "cannot use -fuzz flag with
+          # multiple packages" rather than fuzzing anything.
           for target in ${targets}; do
-            echo "::group::${target}"
-            go test -run "^$" -fuzz "^${target}$" -fuzztime 30s ./... || exit 1
+            pkg="$(grep -rl "func ${target}(" . --include='*_test.go' | head -1 | xargs dirname)"
+            echo "::group::${target} (${pkg})"
+            go test -run "^$" -fuzz "^${target}$" -fuzztime 30s "${pkg}" || exit 1
             echo "::endgroup::"
           done
