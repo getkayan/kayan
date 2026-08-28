@@ -87,6 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- Pushed authorization requests (RFC 9126) via `oauth2.WithPushedRequests`.
+  The pushed parameters are used alone -- query parameters cannot override
+  them -- a `request_uri` is single-use and bound to the client that pushed it,
+  and only the URN form is accepted. `oauth2.WithRequirePushedRequests` refuses
+  plain authorization requests, as FAPI 2.0 requires.
+  `oidc.WithPushedRequestSupport` makes discovery advertise the endpoint only
+  where it is served.
 - Passkeys: `WebAuthnStrategy.BeginDiscoverableLogin` and
   `FinishDiscoverableLogin` sign a user in with no identifier, resolving the
   identity from the asserted user handle through the new

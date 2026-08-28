@@ -76,6 +76,11 @@ type Provider struct {
 	requirePKCE  bool
 	allowPlainCC bool
 
+	// Pushed authorization requests (RFC 9126).
+	pushedRequests   PushedRequestStore
+	pushedRequestTTL time.Duration
+	requirePAR       bool
+
 	// private_key_jwt client authentication.
 	assertionStore       ClientAssertionStore
 	clientKeys           ClientKeyResolver

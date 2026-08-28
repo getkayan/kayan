@@ -67,7 +67,13 @@ acceptable reference.
 ## Deferred beyond 1.0
 
 The first stable release does not include OAuth device authorization, token
-exchange, DPoP, dynamic client registration, or SCIM bulk.
+exchange, DPoP, dynamic client registration, request objects (RFC 9101), or
+SCIM bulk.
+
+Pushed authorization requests are implemented. `request_uri` accepts only the
+`urn:ietf:params:oauth:request_uri:` form; a URL there is the RFC 9101
+fetch-the-request-object feature, and resolving one would make the
+authorization endpoint retrieve attacker-chosen addresses.
 Unsupported capabilities must not be advertised by discovery metadata.
 
 `private_key_jwt` is implemented. `client_secret_jwt` is not, and will not be:

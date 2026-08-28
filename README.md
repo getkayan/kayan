@@ -33,8 +33,9 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 >   `client_secret_basic`, `client_secret_post`, `none`, and `private_key_jwt`
 >   (single-use `jti` required, so it needs a `ClientAssertionStore`). No
 >   `client_secret_jwt` -- it needs the secret in recoverable form and Kayan
->   stores only a hash. No device code, token exchange, DPoP, or dynamic
->   client registration.
+>   stores only a hash. Pushed authorization requests (RFC 9126) are supported
+>   and can be required. No device code, token exchange, DPoP, request objects
+>   (RFC 9101), or dynamic client registration.
 > - **SCIM** (`kayan-scim`) — no bulk operations. Sorting and ETag concurrency
 >   need storage implementing `SortableScimStorage` and
 >   `ConditionalScimStorage`; without them `sortBy` and `If-Match` are refused

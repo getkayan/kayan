@@ -46,14 +46,34 @@ type AuthorizeRequest struct {
 //	    // the vulnerability.
 //	}
 func (p *Provider) ParseAuthorizeRequest(ctx context.Context, values url.Values) (*AuthorizeRequest, error) {
+	// A request_uri is resolved first and replaces the query entirely. The
+	// pushed parameters are used alone (RFC 9126 section 4): merging in
+	// whatever else arrived on the authorization URL would let anyone holding
+	// a victim's request_uri append their own redirect_uri.
+	resolved, err := p.resolvePushedRequest(ctx, values)
+	if err != nil {
+		return nil, err
+	}
+	return p.parseAuthorizeParameters(ctx, resolved)
+}
+
+// parseAuthorizeParameters validates authorization request parameters that
+// have already been resolved.
+//
+// It is separate from [Provider.ParseAuthorizeRequest] so the pushed
+// authorization request endpoint can validate what a client lodges. Going
+// through the public entry point would apply the require-PAR gate to the push
+// itself, and a pushed request carries no request_uri -- so enabling the
+// requirement would refuse every attempt to satisfy it.
+func (p *Provider) parseAuthorizeParameters(ctx context.Context, values url.Values) (*AuthorizeRequest, error) {
 	clientID := values.Get("client_id")
 	if clientID == "" {
 		return nil, ErrInvalidRequest.WithDescription("client_id is required")
 	}
 
-	client, err := p.clientStore.GetClient(ctx, clientID)
-	if err != nil {
-		return nil, ErrInvalidClient.WithDescription("unknown client").WithCause(err)
+	client, clientErr := p.clientStore.GetClient(ctx, clientID)
+	if clientErr != nil {
+		return nil, ErrInvalidClient.WithDescription("unknown client").WithCause(clientErr)
 	}
 	// A store that reports a miss as (nil, nil) is a shape the interface
 	// tolerates. Without this guard the next line dereferences nil, and this

@@ -65,7 +65,14 @@ type Discovery struct {
 	// none, since a provider that lists a class it cannot produce sends
 	// relying parties acr_values it will always answer differently.
 	ACRValuesSupported []string `json:"acr_values_supported,omitempty"`
-	ClaimsSupported    []string `json:"claims_supported"`
+
+	// PushedAuthorizationRequestEndpoint and RequirePushedAuthorizationRequests
+	// advertise RFC 9126 support. Both are omitted when the endpoint is not
+	// served, since a client that reads the endpoint and pushes to it would
+	// receive a 404 mid-flow.
+	PushedAuthorizationRequestEndpoint string   `json:"pushed_authorization_request_endpoint,omitempty"`
+	RequirePushedAuthorizationRequests bool     `json:"require_pushed_authorization_requests,omitempty"`
+	ClaimsSupported                    []string `json:"claims_supported"`
 }
 
 type Server struct {
@@ -80,6 +87,14 @@ type Server struct {
 	clock                   domain.Clock
 	allowPlainCodeChallenge bool
 	authMethods             ClientAuthMethodSource
+	par                     PushedRequestSource
+}
+
+// PushedRequestSource reports whether a provider serves pushed authorization
+// requests. [oauth2.Provider] implements it.
+type PushedRequestSource interface {
+	SupportsPushedRequests() bool
+	RequiresPushedRequests() bool
 }
 
 // ClientAuthMethodSource reports which client authentication methods a token
@@ -105,6 +120,17 @@ type ServerOption func(*Server)
 // parties configured from the metadata would never use it.
 func WithClientAuthMethods(src ClientAuthMethodSource) ServerOption {
 	return func(s *Server) { s.authMethods = src }
+}
+
+// WithPushedRequestSupport lets discovery advertise the RFC 9126 endpoint
+// according to what the provider actually serves.
+//
+// Pass the [oauth2.Provider]. Without it the endpoint is never advertised,
+// even when [Endpoints.PushedAuthorizationRequest] is set -- advertising an
+// endpoint the provider would refuse sends clients into a flow they cannot
+// complete, and this package has shipped that mistake before.
+func WithPushedRequestSupport(src PushedRequestSource) ServerOption {
+	return func(s *Server) { s.par = src }
 }
 
 // WithServerKeyProvider supplies the signing keys, so discovery can advertise

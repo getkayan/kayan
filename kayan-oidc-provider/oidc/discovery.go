@@ -21,6 +21,10 @@ type Endpoints struct {
 	Introspection string
 	Revocation    string
 	EndSession    string
+
+	// PushedAuthorizationRequest is the RFC 9126 endpoint. It is advertised
+	// only when the provider can serve it; see [WithPushedRequestSupport].
+	PushedAuthorizationRequest string
 }
 
 // DiscoveryOptions describes what a deployment supports.
@@ -95,8 +99,10 @@ func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Dis
 			oauth2.GrantClientCredentials,
 		}),
 
-		TokenEndpointAuthMethodsSupported: s.tokenEndpointAuthMethods(),
-		ACRValuesSupported:                opts.ACRValues,
+		TokenEndpointAuthMethodsSupported:  s.tokenEndpointAuthMethods(),
+		ACRValuesSupported:                 opts.ACRValues,
+		PushedAuthorizationRequestEndpoint: s.pushedAuthorizationEndpoint(opts),
+		RequirePushedAuthorizationRequests: s.par != nil && s.par.RequiresPushedRequests(),
 	}
 
 	// Advertise the algorithms the configured keys actually sign with.
@@ -168,4 +174,21 @@ func (s *Server) tokenEndpointAuthMethods() []string {
 		oauth2.AuthMethodClientSecretPost,
 		oauth2.AuthMethodNone,
 	}
+}
+
+// pushedAuthorizationEndpoint returns the PAR endpoint to advertise.
+//
+// It is omitted unless the provider actually serves one. A client that reads
+// the endpoint from discovery and pushes to it would otherwise meet a 404
+// halfway through a flow it cannot restart, and enabling
+// require_pushed_authorization_requests without the endpoint would advertise a
+// provider that refuses every authorization request.
+func (s *Server) pushedAuthorizationEndpoint(opts DiscoveryOptions) string {
+	if opts.Endpoints.PushedAuthorizationRequest == "" {
+		return ""
+	}
+	if s.par == nil || !s.par.SupportsPushedRequests() {
+		return ""
+	}
+	return opts.Endpoints.PushedAuthorizationRequest
 }
