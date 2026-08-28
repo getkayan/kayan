@@ -87,6 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `oauth2.ClientStore` implementations may report an unknown client as
+  `(nil, nil)`. `ParseAuthorizeRequest`, `GenerateAuthCode`, and
+  `ValidateClient` dereferenced the result, so such a store turned any request
+  naming an unregistered `client_id` into a panic in the caller's handler.
 - `flow.ErrLDAPAmbiguousUser` refuses a login whose username matched more than
   one directory entry. The strategy took `entries[0]`, so a duplicate `uid`
   anywhere under the base DN meant the password was checked against whichever

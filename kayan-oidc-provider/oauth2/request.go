@@ -49,6 +49,13 @@ func (p *Provider) ParseAuthorizeRequest(ctx context.Context, values url.Values)
 	if err != nil {
 		return nil, ErrInvalidClient.WithDescription("unknown client").WithCause(err)
 	}
+	// A store that reports a miss as (nil, nil) is a shape the interface
+	// tolerates. Without this guard the next line dereferences nil, and this
+	// parser runs on an unauthenticated query string, so any request naming a
+	// client id that does not exist would panic in the caller's handler.
+	if client == nil {
+		return nil, ErrInvalidClient.WithDescription("unknown client")
+	}
 
 	redirectURI := values.Get("redirect_uri")
 	if redirectURI == "" {

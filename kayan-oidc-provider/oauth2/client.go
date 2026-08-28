@@ -114,6 +114,14 @@ func (c *Client) AllowsGrantType(grant string) bool {
 
 // ClientStore defines the interface for managing OAuth2 clients.
 type ClientStore interface {
+	// GetClient returns the registered client with the given id.
+	//
+	// An unknown id should be reported as an error. Returning (nil, nil) is
+	// tolerated -- every caller in this package treats it as an unknown
+	// client -- because a store built on a driver that reports a miss as an
+	// empty result rather than an error is an easy thing to write, and the
+	// alternative was a nil dereference inside a parser reachable from any
+	// query string.
 	GetClient(ctx context.Context, id string) (*Client, error)
 	CreateClient(ctx context.Context, client *Client) error
 	DeleteClient(ctx context.Context, id string) error

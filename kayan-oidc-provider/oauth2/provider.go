@@ -206,6 +206,12 @@ func (p *Provider) GenerateAuthCode(ctx context.Context, clientID, identityID, r
 	if err != nil {
 		return "", ErrInvalidClient.WithDescription("unknown client").WithCause(err)
 	}
+	// Refusing here matters more than avoiding the panic: the redirect
+	// allowlist below is the only thing stopping this endpoint from being an
+	// open redirector, and a nil client has no allowlist to check against.
+	if client == nil {
+		return "", ErrInvalidClient.WithDescription("unknown client")
+	}
 
 	// Without this the authorization endpoint is an open redirector: an
 	// attacker sends the victim through a legitimate authorization request and
@@ -577,6 +583,15 @@ func (p *Provider) ValidateClient(ctx context.Context, clientID, clientSecret st
 			_ = p.hasher.Compare(clientSecret, dummyBcryptHash)
 		}
 		return nil, ErrInvalidClient.WithDescription("client authentication failed").WithCause(err)
+	}
+	// Same treatment as an error, including the timing work above, so a store
+	// that reports a miss this way does not become a client-enumeration oracle
+	// distinguishable by response time.
+	if client == nil {
+		if clientSecret != "" {
+			_ = p.hasher.Compare(clientSecret, dummyBcryptHash)
+		}
+		return nil, ErrInvalidClient.WithDescription("client authentication failed")
 	}
 
 	if client.IsPublic() {
