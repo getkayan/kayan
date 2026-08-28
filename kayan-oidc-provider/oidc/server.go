@@ -73,10 +73,33 @@ type Server struct {
 	clients                 oauth2.ClientStore
 	clock                   domain.Clock
 	allowPlainCodeChallenge bool
+	authMethods             ClientAuthMethodSource
+}
+
+// ClientAuthMethodSource reports which client authentication methods a token
+// endpoint can serve. [oauth2.Provider] implements it.
+//
+// Discovery uses it so the advertised list is derived from the provider's
+// configuration rather than restated here, where the two would drift: a
+// deployment that enables private_key_jwt and forgets to update the metadata
+// is invisible until a relying party fails against it.
+type ClientAuthMethodSource interface {
+	TokenEndpointAuthMethods() []string
 }
 
 // ServerOption configures a [Server].
 type ServerOption func(*Server)
+
+// WithClientAuthMethods lets discovery advertise the client authentication
+// methods the token endpoint actually serves.
+//
+// Pass the [oauth2.Provider] that serves the token endpoint. Without it,
+// discovery advertises only the three methods every provider supports, so a
+// deployment with private_key_jwt enabled would not announce it and relying
+// parties configured from the metadata would never use it.
+func WithClientAuthMethods(src ClientAuthMethodSource) ServerOption {
+	return func(s *Server) { s.authMethods = src }
+}
 
 // WithServerKeyProvider supplies the signing keys, so discovery can advertise
 // the algorithms actually in use and JWKS can publish them.

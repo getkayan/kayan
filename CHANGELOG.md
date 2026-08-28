@@ -87,6 +87,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `private_key_jwt` client authentication (RFC 7523, OIDC Core section 9), via
+  `oauth2.WithClientAssertions`. Assertions are single-use: a
+  `ClientAssertionStore` records spent `jti` values, and without one the method
+  refuses every request rather than degrading to a replayable bearer
+  credential. `oauth2.WithClientKeyResolver` serves keys from a registered
+  `jwks_uri`; `oauth2.Client.JWKS` holds them inline.
+  `oidc.WithClientAuthMethods` makes discovery advertise the methods the
+  provider can actually serve.
 - `keys.ParseJWKS`, `keys.JWKS.Find`, and `keys.JWK.PublicKey` read a key set
   somebody else published -- the inverse of `keys.BuildJWKS`. An `oct` key is
   refused with `keys.ErrSymmetricJWK` rather than returned as a public key, RSA

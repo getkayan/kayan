@@ -86,11 +86,7 @@ func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Dis
 			oauth2.GrantClientCredentials,
 		}),
 
-		TokenEndpointAuthMethodsSupported: []string{
-			oauth2.AuthMethodClientSecretBasic,
-			oauth2.AuthMethodClientSecretPost,
-			oauth2.AuthMethodNone,
-		},
+		TokenEndpointAuthMethodsSupported: s.tokenEndpointAuthMethods(),
 	}
 
 	// Advertise the algorithms the configured keys actually sign with.
@@ -145,4 +141,21 @@ func defaultTo(value, fallback []string) []string {
 		return value
 	}
 	return fallback
+}
+
+// tokenEndpointAuthMethods returns the client authentication methods to
+// advertise.
+//
+// Without a configured source this is the set every provider serves.
+// private_key_jwt is added only when the provider reports it, since a provider
+// built without a client assertion store rejects every assertion.
+func (s *Server) tokenEndpointAuthMethods() []string {
+	if s.authMethods != nil {
+		return s.authMethods.TokenEndpointAuthMethods()
+	}
+	return []string{
+		oauth2.AuthMethodClientSecretBasic,
+		oauth2.AuthMethodClientSecretPost,
+		oauth2.AuthMethodNone,
+	}
 }

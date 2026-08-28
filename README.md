@@ -29,8 +29,12 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 >   does not walk the relation graph, so it can omit access that `Check` allows.
 >   `Check` is the authoritative answer.
 > - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code`,
->   `refresh_token`, and `client_credentials`. No device code, token exchange,
->   DPoP, `private_key_jwt`, or dynamic client registration.
+>   `refresh_token`, and `client_credentials`. Client authentication covers
+>   `client_secret_basic`, `client_secret_post`, `none`, and `private_key_jwt`
+>   (single-use `jti` required, so it needs a `ClientAssertionStore`). No
+>   `client_secret_jwt` -- it needs the secret in recoverable form and Kayan
+>   stores only a hash. No device code, token exchange, DPoP, or dynamic
+>   client registration.
 > - **SCIM** (`kayan-scim`) — no bulk operations. Value filters
 >   (`emails[type eq "work"]`) work in PATCH, and parse in list queries, but
 >   the GORM store rejects them with `ErrFilterUnsupported` rather than

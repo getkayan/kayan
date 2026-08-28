@@ -59,8 +59,15 @@ tenants. The library does not own the type and cannot add the field to it.
 ## Deferred beyond 1.0
 
 The first stable release does not include OAuth device authorization, token
-exchange, DPoP, `private_key_jwt`, dynamic client registration, or SCIM bulk.
+exchange, DPoP, dynamic client registration, or SCIM bulk.
 Unsupported capabilities must not be advertised by discovery metadata.
+
+`private_key_jwt` is implemented. `client_secret_jwt` is not, and will not be:
+signing an assertion with the client secret requires the provider to hold that
+secret in a recoverable form, and Kayan stores only a one-way hash.
+Discovery derives `token_endpoint_auth_methods_supported` from the provider's
+configuration through `oidc.WithClientAuthMethods`, so a deployment without a
+`ClientAssertionStore` does not advertise a method it would refuse.
 
 ## The 1.0 gate
 

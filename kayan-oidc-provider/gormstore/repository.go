@@ -139,6 +139,9 @@ type gormClient struct {
 	AppName                 string
 	TokenEndpointAuthMethod string
 	BackChannelLogoutURI    string
+	// JWKS holds the client's registered public keys for private_key_jwt.
+	// It is a JWKS document, not a secret: only public halves belong here.
+	JWKS []byte `gorm:"type:text"`
 }
 
 func (gormClient) TableName() string { return "oauth2_clients" }
@@ -156,6 +159,7 @@ func toCoreClient(gc *gormClient) *oauth2.Client {
 		AppName:                 gc.AppName,
 		TokenEndpointAuthMethod: gc.TokenEndpointAuthMethod,
 		BackChannelLogoutURI:    gc.BackChannelLogoutURI,
+		JWKS:                    gc.JWKS,
 	}
 }
 
@@ -172,6 +176,7 @@ func fromCoreClient(c *oauth2.Client) *gormClient {
 		AppName:                 c.AppName,
 		TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
 		BackChannelLogoutURI:    c.BackChannelLogoutURI,
+		JWKS:                    c.JWKS,
 	}
 }
 

@@ -2,6 +2,7 @@ package oauth2
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -43,6 +44,19 @@ type Client struct {
 	// [AuthMethodClientSecretBasic] when empty, so a client is confidential
 	// unless it says otherwise.
 	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method"`
+
+	// JWKS holds this client's public keys, as a JSON Web Key Set document.
+	//
+	// It is read only when TokenEndpointAuthMethod is
+	// [AuthMethodPrivateKeyJWT]. Registering keys does not by itself enable
+	// assertion authentication: a client authenticates the one way its
+	// registration declares, so a JWKS on a client_secret_basic registration
+	// is inert rather than a second credential nobody configured.
+	//
+	// Supply keys from a registered jwks_uri with [WithClientKeyResolver]
+	// instead. Kayan makes no outbound requests, so fetching that document is
+	// the application's.
+	JWKS json.RawMessage `json:"jwks,omitempty"`
 
 	BackChannelLogoutURI string `json:"back_channel_logout_uri"`
 

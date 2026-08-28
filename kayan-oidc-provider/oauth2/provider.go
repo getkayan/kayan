@@ -75,6 +75,12 @@ type Provider struct {
 	clock        domain.Clock
 	requirePKCE  bool
 	allowPlainCC bool
+
+	// private_key_jwt client authentication.
+	assertionStore       ClientAssertionStore
+	clientKeys           ClientKeyResolver
+	tokenEndpointURL     string
+	maxAssertionLifetime time.Duration
 }
 
 // WithKeyProvider supplies the signing keys used for tokens and published in
@@ -594,6 +600,16 @@ func (p *Provider) ValidateClient(ctx context.Context, clientID, clientSecret st
 		return nil, ErrInvalidClient.WithDescription("client authentication failed")
 	}
 
+	// A client registered for private_key_jwt authenticates with an assertion
+	// and nothing else. Without this a leftover SecretHash -- from a
+	// registration that was migrated to asymmetric authentication rather than
+	// recreated -- stays a working credential, so the migration that was
+	// supposed to remove the shared secret from the deployment silently keeps
+	// it valid.
+	if client.TokenEndpointAuthMethod == AuthMethodPrivateKeyJWT {
+		return nil, ErrInvalidClient.WithDescription("client authentication failed")
+	}
+
 	if client.IsPublic() {
 		// A public client has no secret. Presenting one means the caller is
 		// confused about the registration, so refuse rather than ignore it.
@@ -624,9 +640,38 @@ func (p *Provider) ValidateClient(ctx context.Context, clientID, clientSecret st
 // gives the unknown-client path the same work as a real verification.
 const dummyBcryptHash = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.QGxuAyxRkiSVJ5wZ5aVXo0nSFQPBpBu"
 
+// TokenEndpointAuthMethods reports the client authentication methods this
+// provider can actually serve.
+//
+// It is derived from configuration rather than declared, so discovery cannot
+// advertise a method the provider would refuse. private_key_jwt appears only
+// when a [ClientAssertionStore] was supplied, because without one every
+// assertion is rejected.
+func (p *Provider) TokenEndpointAuthMethods() []string {
+	methods := []string{AuthMethodClientSecretBasic, AuthMethodClientSecretPost, AuthMethodNone}
+	if p.assertionStore != nil {
+		methods = append(methods, AuthMethodPrivateKeyJWT)
+	}
+	return methods
+}
+
 // authenticate resolves and authenticates the client for a token request.
 func (p *Provider) authenticate(ctx context.Context, clientID, clientSecret, grantType string) (*Client, error) {
-	client, err := p.ValidateClient(ctx, clientID, clientSecret)
+	return p.authenticateWith(ctx, clientCreds{id: clientID, secret: clientSecret}, grantType)
+}
+
+// authenticateWith authenticates whichever credential the request carried and
+// checks the client may use the grant.
+func (p *Provider) authenticateWith(ctx context.Context, creds clientCreds, grantType string) (*Client, error) {
+	var (
+		client *Client
+		err    error
+	)
+	if creds.assertion != "" || creds.assertionType != "" {
+		client, err = p.authenticateAssertion(ctx, creds.id, creds.assertionType, creds.assertion)
+	} else {
+		client, err = p.ValidateClient(ctx, creds.id, creds.secret)
+	}
 	if err != nil {
 		return nil, err
 	}

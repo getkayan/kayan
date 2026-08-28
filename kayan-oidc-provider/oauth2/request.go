@@ -150,12 +150,12 @@ func (p *Provider) ParseTokenRequest(ctx context.Context, values url.Values, aut
 		return nil, ErrInvalidRequest.WithDescription("grant_type is required")
 	}
 
-	clientID, clientSecret, err := clientCredentials(values, authorization)
+	creds, err := clientCredentials(values, authorization)
 	if err != nil {
 		return nil, err
 	}
 
-	client, err := p.authenticate(ctx, clientID, clientSecret, grantType)
+	client, err := p.authenticateWith(ctx, creds, grantType)
 	if err != nil {
 		return nil, err
 	}
@@ -198,21 +198,32 @@ func (p *Provider) ParseTokenRequest(ctx context.Context, values url.Values, aut
 
 // clientCredentials extracts client credentials from the Authorization header
 // or the request body.
-func clientCredentials(values url.Values, authorization string) (id, secret string, err error) {
+func clientCredentials(values url.Values, authorization string) (clientCreds, error) {
+	assertion := values.Get("client_assertion")
+	assertionType := values.Get("client_assertion_type")
+
 	if authorization != "" {
+		// Presenting a secret and an assertion together is not a client that
+		// supports both; it is a request trying two credentials to see which
+		// one the endpoint honours. RFC 6749 section 2.3 permits exactly one
+		// authentication method per request.
+		if assertion != "" || assertionType != "" {
+			return clientCreds{}, ErrInvalidClient.WithDescription("more than one client authentication method was used")
+		}
+
 		const prefix = "Basic "
 		if !strings.HasPrefix(authorization, prefix) {
-			return "", "", ErrInvalidClient.WithDescription("unsupported authorization scheme")
+			return clientCreds{}, ErrInvalidClient.WithDescription("unsupported authorization scheme")
 		}
 
 		decoded, decodeErr := base64.StdEncoding.DecodeString(strings.TrimPrefix(authorization, prefix))
 		if decodeErr != nil {
-			return "", "", ErrInvalidClient.WithDescription("malformed authorization header")
+			return clientCreds{}, ErrInvalidClient.WithDescription("malformed authorization header")
 		}
 
 		id, secret, found := strings.Cut(string(decoded), ":")
 		if !found {
-			return "", "", ErrInvalidClient.WithDescription("malformed authorization header")
+			return clientCreds{}, ErrInvalidClient.WithDescription("malformed authorization header")
 		}
 
 		// RFC 6749 section 2.3.1 requires the credentials be form-urlencoded
@@ -221,16 +232,39 @@ func clientCredentials(values url.Values, authorization string) (id, secret stri
 		decodedID, idErr := url.QueryUnescape(id)
 		decodedSecret, secretErr := url.QueryUnescape(secret)
 		if idErr != nil || secretErr != nil {
-			return "", "", ErrInvalidClient.WithDescription("malformed authorization header")
+			return clientCreds{}, ErrInvalidClient.WithDescription("malformed authorization header")
 		}
-		return decodedID, decodedSecret, nil
+		return clientCreds{id: decodedID, secret: decodedSecret}, nil
 	}
 
-	id = values.Get("client_id")
-	if id == "" {
-		return "", "", ErrInvalidClient.WithDescription("client authentication is required")
+	id := values.Get("client_id")
+
+	if assertionType != "" || assertion != "" {
+		if values.Get("client_secret") != "" {
+			return clientCreds{}, ErrInvalidClient.WithDescription("more than one client authentication method was used")
+		}
+		if assertion == "" {
+			return clientCreds{}, ErrInvalidClient.WithDescription("client_assertion is required")
+		}
+		// client_id is optional here: the assertion names its own issuer, and
+		// that is the identity the request is authenticated as.
+		return clientCreds{id: id, assertion: assertion, assertionType: assertionType}, nil
 	}
-	return id, values.Get("client_secret"), nil
+
+	if id == "" {
+		return clientCreds{}, ErrInvalidClient.WithDescription("client authentication is required")
+	}
+	return clientCreds{id: id, secret: values.Get("client_secret")}, nil
+}
+
+// clientCreds is whatever the token endpoint received to authenticate the
+// client, in exactly one of its two shapes.
+type clientCreds struct {
+	id     string
+	secret string
+
+	assertion     string
+	assertionType string
 }
 
 // checkScopes reports whether every requested scope was granted to the client.
