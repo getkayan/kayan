@@ -87,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `ldapstore.WithStartTLS` connects on the plaintext port and upgrades before
+  any bind. Directories that publish 389 with StartTLS and never publish 636
+  were previously unreachable, with no workaround inside the library.
 - `kayan-oidc-provider/gormstore` persists the authorization code's `Nonce`.
   It was silently dropped, so every deployment on this adapter issued ID
   tokens with no nonce claim and lost the binding between a sign-in and the

@@ -54,6 +54,7 @@ const DefaultTimeout = 10 * time.Second
 // It implements [flow.LDAPDialer]. The zero value is not usable; call
 // [NewDialer].
 type Dialer struct {
+	startTLS  bool
 	tlsConfig *tls.Config
 	timeout   time.Duration
 }
@@ -105,6 +106,21 @@ func WithInsecureSkipVerify() DialerOption {
 	}
 }
 
+// WithStartTLS connects in the clear and upgrades the connection with StartTLS
+// before anything else is sent.
+//
+// Directories commonly publish port 389 with StartTLS and do not publish 636
+// at all, which implicit LDAPS requires. Without this, those directories are
+// unreachable and there is no workaround inside the library.
+//
+// The transport is still encrypted and the certificate is still verified: the
+// difference is when the handshake happens, not whether it does. A connection
+// whose upgrade fails is closed rather than returned, so no caller can be
+// handed a plaintext connection to bind over.
+func WithStartTLS() DialerOption {
+	return func(d *Dialer) { d.startTLS = true }
+}
+
 // NewDialer returns a Dialer that requires TLS 1.2 or better and verifies the
 // server certificate against the platform roots.
 func NewDialer(opts ...DialerOption) *Dialer {
@@ -133,11 +149,18 @@ func (d *Dialer) DialTLS(ctx context.Context, addr string) (flow.LDAPConn, error
 		return nil, errors.New("ldapstore: empty address")
 	}
 
-	conn, err := ldap.DialURL(
-		"ldaps://"+addr,
+	scheme := "ldaps://"
+	dialOpts := []ldap.DialOpt{
 		ldap.DialWithTLSConfig(d.tlsConfig),
 		ldap.DialWithDialer(&net.Dialer{Timeout: d.timeout}),
-	)
+	}
+	if d.startTLS {
+		// The plaintext scheme is only the starting point; the upgrade below
+		// completes before this function returns a connection to anyone.
+		scheme = "ldap://"
+	}
+
+	conn, err := ldap.DialURL(scheme+addr, dialOpts...)
 	if err != nil {
 		// The address is safe to report; anything the server said may quote
 		// credentials back, so it is not interpolated here.
@@ -145,6 +168,25 @@ func (d *Dialer) DialTLS(ctx context.Context, addr string) (flow.LDAPConn, error
 	}
 
 	conn.SetTimeout(d.timeout)
+
+	if d.startTLS {
+		// Upgraded here, before the connection is returned and therefore
+		// before any caller can bind on it. A bind over the plaintext leg puts
+		// the service account's password, and then the end user's, on the wire
+		// in the clear -- so a failed upgrade closes the connection rather
+		// than returning one that looks usable.
+		if err := conn.StartTLS(d.tlsConfig); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("ldapstore: StartTLS upgrade to %s failed: %w", addr, err)
+		}
+		if state, ok := conn.TLSConnectionState(); !ok || !state.HandshakeComplete {
+			// Belt to the error check above: a StartTLS that reports success
+			// without a completed handshake would leave the caller binding in
+			// the clear while believing the transport is encrypted.
+			_ = conn.Close()
+			return nil, fmt.Errorf("ldapstore: StartTLS to %s did not complete a handshake", addr)
+		}
+	}
 
 	c := &Conn{conn: conn, timeout: d.timeout}
 	c.watch(ctx)
