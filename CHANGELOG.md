@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `flow.LDAPConfig.FailoverAddrs` tries additional directory servers when the
+  primary is unreachable. Failover happens only on a connection or search
+  fault: a rejected bind is an answer, and retrying it across the estate would
+  spend one failed-login count per replica. An exhausted estate reports every
+  host it tried.
 - `ServiceProvider.SignedMetadata` and `IdentityProvider.SignedMetadata`
   produce metadata with an enveloped XML-DSig signature and an optional
   `validUntil`. Without a signer they return `ErrNoMetadataSigner` rather than

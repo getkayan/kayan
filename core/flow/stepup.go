@@ -84,9 +84,9 @@ type StepUpStore interface {
 //	// After re-authentication succeeds
 //	mgr.RecordStepUp(ctx, "session-123", flow.StepUpPassword)
 type StepUpManager struct {
-	store          StepUpStore
-	policy         StepUpPolicy
-	recencyWindow  time.Duration
+	store         StepUpStore
+	policy        StepUpPolicy
+	recencyWindow time.Duration
 }
 
 // StepUpManagerOption configures a StepUpManager.

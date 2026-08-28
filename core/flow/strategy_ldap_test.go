@@ -58,9 +58,23 @@ func (c *mockLDAPConn) Close() error {
 type mockLDAPDialer struct {
 	conn    *mockLDAPConn
 	dialErr error
+
+	// perAddr lets a test model an estate: one replica down, another serving.
+	perAddr map[string]*mockLDAPConn
+	// dialed records every address tried, in order, which is the only way to
+	// see whether a failure moved on to the next host.
+	dialed []string
 }
 
 func (d *mockLDAPDialer) DialTLS(ctx context.Context, addr string) (LDAPConn, error) {
+	d.dialed = append(d.dialed, addr)
+	if d.perAddr != nil {
+		conn, ok := d.perAddr[addr]
+		if !ok {
+			return nil, errors.New("connection refused")
+		}
+		return conn, nil
+	}
 	if d.dialErr != nil {
 		return nil, d.dialErr
 	}

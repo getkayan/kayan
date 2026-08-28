@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/getkayan/kayan/core/identity"
 )
@@ -54,6 +55,18 @@ type LDAPEntry struct {
 type LDAPConfig struct {
 	// Addr is the LDAP server address (host:port), e.g. "ldap.example.com:636".
 	Addr string
+
+	// FailoverAddrs are additional servers to try when Addr is unreachable,
+	// in order. Directory estates run several replicas, and a strategy that
+	// knows one address makes any single host's maintenance window an
+	// authentication outage.
+	//
+	// Failover happens only on a connection or search failure. A rejected bind
+	// is an answer, not an outage: retrying it against every replica turns one
+	// wrong password into one failed-login count per host, so a user who
+	// mistypes twice is locked out of a directory configured for three
+	// attempts.
+	FailoverAddrs []string
 	// BaseDN is the base distinguished name for user searches, e.g. "ou=users,dc=example,dc=com".
 	BaseDN string
 	// UsernameAttribute is the LDAP attribute used for user search, e.g. "uid" or "sAMAccountName".
@@ -104,30 +117,10 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 	// caller acts on stable, while the cause is what an operator needs to tell
 	// an unreachable directory from a rejected password -- and discarding it
 	// left them with neither.
-	conn, err := s.dialer.DialTLS(ctx, s.config.Addr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrLDAPConnectionFailed, err)
+	conn, entries, err := s.lookup(ctx, username)
+	if conn != nil {
+		defer conn.Close()
 	}
-	defer conn.Close()
-
-	// Step 1: bind as service account to search for the user DN.
-	//
-	// A failure here is the service account's, not the end user's: a rotated
-	// or mistyped service password rejects every login in the deployment.
-	if err := conn.Bind(s.config.ServiceAccountDN, s.config.ServiceAccountPassword); err != nil {
-		return nil, fmt.Errorf("%w: service account bind: %v", ErrLDAPConnectionFailed, err)
-	}
-
-	filter := fmt.Sprintf("(%s=%s)", s.config.UsernameAttribute, escapeLDAPFilter(username))
-	entries, err := conn.Search(LDAPSearchRequest{
-		BaseDN: s.config.BaseDN,
-		Filter: filter,
-		// Two is every answer this question has: none, exactly one, or more
-		// than one. Asking for two is what makes the ambiguity check below
-		// cheap and, on a filter that unexpectedly matches broadly, stops the
-		// directory streaming its whole subtree into memory.
-		SizeLimit: 2,
-	})
 	// A truncated result is not a failure -- it is the ambiguity answer,
 	// arriving as an error because the directory stopped early. Checking it
 	// before ErrLDAPSearchFailed keeps a second match from being reported as
@@ -139,8 +132,12 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 	// answers. Collapsing them reported a directory outage, a wrong base DN,
 	// and a size-limit refusal as "this user does not exist", so every login
 	// failed with the user blamed and no signal to the operator.
+	//
+	// lookup has already wrapped its own failures with the right sentinel, so
+	// this passes them through rather than relabelling a connection failure as
+	// a search failure.
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrLDAPSearchFailed, err)
+		return nil, err
 	}
 	if len(entries) == 0 {
 		return nil, ErrLDAPUserNotFound
@@ -172,6 +169,96 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 
 	// Step 3: map LDAP attributes to a Kayan identity.
 	return s.mapEntry(entries[0]), nil
+}
+
+// lookup connects to the directory and finds the user, trying each configured
+// address in turn.
+//
+// It returns the live connection so the caller can bind the user on it: the
+// bind has to happen against the same server the search answered, or the DN
+// that was found may not exist on the host that checks the password.
+//
+// Only connection-level failures move to the next address. A rejected bind or
+// an answered search is a result, and retrying either across the estate turns
+// one wrong password into one failed-login count per replica -- a user who
+// mistypes twice is locked out of a directory configured for three attempts,
+// and nothing in the logs explains the arithmetic.
+func (s *LDAPStrategy) lookup(ctx context.Context, username string) (LDAPConn, []LDAPEntry, error) {
+	filter := fmt.Sprintf("(%s=%s)", s.config.UsernameAttribute, escapeLDAPFilter(username))
+	request := LDAPSearchRequest{
+		BaseDN: s.config.BaseDN,
+		Filter: filter,
+		// Two is every answer this question has: none, exactly one, or more
+		// than one. Asking for two is what makes the ambiguity check cheap
+		// and, on a filter that unexpectedly matches broadly, stops the
+		// directory streaming its whole subtree into memory.
+		SizeLimit: 2,
+	}
+
+	var failures []string
+	// The sentinel reflects the kind of the last failure seen. A directory
+	// that answered "search failed" is a different problem from one that never
+	// answered at all, and collapsing every exhausted-estate case into
+	// "connection failed" would undo that distinction for the single-server
+	// deployment, which is most of them.
+	lastKind := ErrLDAPConnectionFailed
+
+	for _, addr := range s.addresses() {
+		conn, err := s.dialer.DialTLS(ctx, addr)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", addr, err))
+			lastKind = ErrLDAPConnectionFailed
+			continue
+		}
+
+		// Step 1: bind as service account to search for the user DN.
+		//
+		// A failure here is the service account's, not the end user's: a
+		// rotated or mistyped service password rejects every login in the
+		// deployment. It is treated as a fault of this host rather than a
+		// verdict, since a replica that has not caught up with a password
+		// rotation is exactly the case failover should survive.
+		if err := conn.Bind(s.config.ServiceAccountDN, s.config.ServiceAccountPassword); err != nil {
+			_ = conn.Close()
+			failures = append(failures, fmt.Sprintf("%s: service account bind: %v", addr, err))
+			lastKind = ErrLDAPConnectionFailed
+			continue
+		}
+
+		entries, err := conn.Search(request)
+		if errors.Is(err, ErrLDAPResultTruncated) {
+			// An answer, not a fault: the directory found more than asked
+			// for. Every replica would say the same.
+			return conn, entries, err
+		}
+		if err != nil {
+			_ = conn.Close()
+			failures = append(failures, fmt.Sprintf("%s: search: %v", addr, err))
+			lastKind = ErrLDAPSearchFailed
+			continue
+		}
+		return conn, entries, nil
+	}
+
+	// Every address is named. An operator reading "connection failed" against
+	// a three-replica estate cannot tell one host down from all three, and the
+	// two call for very different responses.
+	if len(failures) == 0 {
+		// No address was configured at all. Reporting it as an unreachable
+		// directory would send an operator looking at the network.
+		return nil, nil, fmt.Errorf("%w: no directory address is configured", ErrLDAPConnectionFailed)
+	}
+	return nil, nil, fmt.Errorf("%w: %s", lastKind, strings.Join(failures, "; "))
+}
+
+// addresses returns the directory addresses to try, in order.
+func (s *LDAPStrategy) addresses() []string {
+	addrs := make([]string, 0, 1+len(s.config.FailoverAddrs))
+	if s.config.Addr != "" {
+		addrs = append(addrs, s.config.Addr)
+	}
+	addrs = append(addrs, s.config.FailoverAddrs...)
+	return addrs
 }
 
 // mapEntry converts an LDAP entry into a Kayan identity via the factory.
