@@ -24,6 +24,21 @@ jobs:
       - name: Reject incompatible exported API changes
         run: bash scripts/check-api.sh
 
+  module-isolation:
+    name: Modules build from their own go.mod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # go.work is gitignored, so contributors build in workspace mode and CI
+      # does not. This job names that divergence instead of letting it surface
+      # as an unrelated-looking test failure.
+      - name: Build every module with GOWORK=off
+        run: bash scripts/check-modules.sh
+
   coverage-floors:
     name: Coverage floors
     runs-on: ubuntu-latest

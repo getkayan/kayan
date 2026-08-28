@@ -143,6 +143,16 @@ cd core && go test -race ./...
 cd kayan-gorm && go test -race ./...
 ```
 
+`go.work` is gitignored, so your machine builds in workspace mode and CI builds
+each module from its own `go.mod`. The two disagree: a dependency reachable
+through `go.work.sum` satisfies a local build while the module's own `go.sum`
+has no entry for it. Three modules were unbuildable in CI for exactly this
+reason while every local check passed.
+
+```bash
+bash scripts/check-modules.sh   # GOWORK=off build of every module
+```
+
 ### Committing and pushing
 
 **Every change ships as its own commit, pushed when it is done.** One feature
