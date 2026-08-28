@@ -48,6 +48,15 @@ type WebAuthnSessionData struct {
 	AllowedCredIDs   [][]byte  `json:"allowed_cred_ids,omitempty"`
 	UserVerification string    `json:"user_verification"`
 	ExpiresAt        time.Time `json:"expires_at"`
+
+	// Discoverable marks a ceremony begun with no identifier.
+	//
+	// It is recorded rather than inferred from an empty UserID because the two
+	// flows must not be interchangeable: an identifier-based session names a
+	// user and constrains the allowed credentials, and finishing it through
+	// the discoverable path would discard both and let the assertion nominate
+	// its own subject.
+	Discoverable bool `json:"discoverable,omitempty"`
 }
 
 // WebAuthnConfig holds configuration for WebAuthn.
@@ -63,6 +72,32 @@ type WebAuthnConfig struct {
 	// domain.SystemClock. Tests drive a ceremony to the exact expiry boundary
 	// by supplying a fake.
 	Clock domain.Clock
+
+	// AuthenticatorSelection constrains what kind of authenticator may be
+	// registered. Nil leaves it to the browser's defaults, which do not
+	// produce a discoverable credential.
+	//
+	// Use [PasskeyAuthenticatorSelection] for passkeys. Without a resident
+	// key there is nothing to find in a usernameless ceremony, so
+	// [WebAuthnStrategy.BeginDiscoverableLogin] has nothing to work with.
+	AuthenticatorSelection *protocol.AuthenticatorSelection
+
+	// AttestationPreference is the attestation conveyance requested at
+	// registration. Empty means the library default, which is "none".
+	//
+	// Ask for attestation only if the deployment actually verifies it.
+	// Requesting "direct" and then not checking the statement collects a
+	// certificate chain, shows the user a consent prompt on some platforms,
+	// and proves nothing -- while looking, in a configuration review, exactly
+	// like a deployment that enforces authenticator provenance.
+	AttestationPreference protocol.ConveyancePreference
+
+	// DiscoverableUserVerification overrides the user-verification
+	// requirement for usernameless login. Empty means required.
+	//
+	// Lowering it makes a passkey sign-in prove possession of an
+	// authenticator and nothing about who holds it.
+	DiscoverableUserVerification protocol.UserVerificationRequirement
 
 	// Hooks for customizing behavior
 	Hooks WebAuthnHooks
@@ -84,6 +119,16 @@ type WebAuthnHooks struct {
 	// AfterFinishRegistration is called after credential is created.
 	// Receives the new credential for additional processing.
 	AfterFinishRegistration func(ctx context.Context, ident any, cred *identity.Credential) error
+
+	// DiscoverableUserLoader resolves the identity behind a passkey.
+	//
+	// rawID is the credential the authenticator presented and userHandle is
+	// the user it says the credential belongs to. Return the identity whose ID
+	// equals userHandle; returning any other identity authenticates the wrong
+	// person with a valid signature, and the strategy checks for exactly that.
+	//
+	// Without it [WebAuthnStrategy.BeginDiscoverableLogin] refuses to start.
+	DiscoverableUserLoader func(ctx context.Context, rawID, userHandle []byte) (any, error)
 
 	// BeforeBeginLogin is called before starting login ceremony.
 	BeforeBeginLogin func(ctx context.Context, identifier string) error
@@ -149,6 +194,10 @@ type WebAuthnStrategy struct {
 	// already serving ceremonies.
 	mu    sync.RWMutex
 	hooks WebAuthnHooks
+
+	// config keeps the ceremony preferences, which webauthn.WebAuthn does not
+	// expose back once built.
+	config WebAuthnConfig
 
 	// sessionStore stores pending registration/login sessions
 	// In production, use Redis or database
@@ -263,6 +312,7 @@ func NewWebAuthnStrategy(
 	return &WebAuthnStrategy{
 		repo:         repo,
 		webAuthn:     wa,
+		config:       config,
 		factory:      factory,
 		sessionStore: sessionStore,
 		sessionTTL:   sessionTTL,
@@ -321,7 +371,7 @@ func (s *WebAuthnStrategy) BeginRegistration(
 		credentials: existingCreds,
 	}
 
-	options, session, err := s.webAuthn.BeginRegistration(user)
+	options, session, err := s.webAuthn.BeginRegistration(user, s.registrationOptions()...)
 	if err != nil {
 		return nil, "", fmt.Errorf("webauthn: begin registration failed: %w", err)
 	}

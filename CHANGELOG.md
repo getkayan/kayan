@@ -87,6 +87,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- Passkeys: `WebAuthnStrategy.BeginDiscoverableLogin` and
+  `FinishDiscoverableLogin` sign a user in with no identifier, resolving the
+  identity from the asserted user handle through the new
+  `DiscoverableUserLoader` hook. The handle is compared against the resolved
+  identity's ID -- a loader that returns anyone else is refused with
+  `ErrUserHandleMismatch`. User verification is required unless overridden.
+- `WebAuthnConfig.AuthenticatorSelection` and `.AttestationPreference`
+  configure the registration ceremony; `flow.PasskeyAuthenticatorSelection`
+  returns the discoverable-credential-with-user-verification criteria.
 - `flow.LDAPConfig.FailoverAddrs` tries additional directory servers when the
   primary is unreachable. Failover happens only on a connection or search
   fault: a rejected bind is an answer, and retrying it across the estate would
