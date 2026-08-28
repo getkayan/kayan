@@ -102,7 +102,13 @@ func (r *ScimRepository) ListScimUsers(ctx context.Context, filter string, start
 		return nil, 0, err
 	}
 
-	rows, err := query.Offset(startIndex - 1).Limit(count).Rows()
+	// OFFSET and LIMIT without ORDER BY sample an unordered set. SQL
+	// guarantees no order without one, and in practice the order shifts as
+	// rows are inserted, updated, or the planner picks a different index. A
+	// connector paging a directory then sees some users twice and never sees
+	// others -- and has no way to detect it, because each page looks well
+	// formed. Ordering by the primary key makes the window stable.
+	rows, err := query.Order("id").Offset(startIndex - 1).Limit(count).Rows()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -194,8 +200,10 @@ func (r *ScimRepository) ListScimGroups(ctx context.Context, filter string, star
 		return nil, 0, err
 	}
 
+	// Ordered for the same reason as ListScimUsers: an unordered OFFSET is
+	// not a page, it is a sample.
 	var groups []gormGroup
-	if err := query.Offset(startIndex - 1).Limit(count).Find(&groups).Error; err != nil {
+	if err := query.Order("id").Offset(startIndex - 1).Limit(count).Find(&groups).Error; err != nil {
 		return nil, 0, err
 	}
 

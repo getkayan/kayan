@@ -87,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- SCIM list results are ordered by id. Paged listing used `OFFSET`/`LIMIT` with
+  no `ORDER BY`, so a client paging a directory could receive some resources
+  twice and never receive others, with every page looking well formed.
 - SCIM responses carry a populated `meta`. Every response previously shipped an
   empty one, so a connector had no `resourceType`, no `location`, and no
   `lastModified` to sync against. `created`/`lastModified`/`version` come from
