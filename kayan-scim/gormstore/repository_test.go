@@ -11,6 +11,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// user is the caller-owned identity model these tests map onto. GetID and
+// SetID are what let the mapper carry a resource id through, without which
+// every created user lands with an empty primary key.
+type user struct {
+	ID    string `gorm:"primaryKey"`
+	Email string
+}
+
+func (u *user) GetID() any  { return u.ID }
+func (u *user) SetID(v any) { u.ID, _ = v.(string) }
+
 func newTestRepo(t *testing.T) *ScimRepository {
 	t.Helper()
 
@@ -33,10 +44,6 @@ func newTestRepo(t *testing.T) *ScimRepository {
 	}
 	pool.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = pool.Close() })
-	type user struct {
-		ID    string `gorm:"primaryKey"`
-		Email string
-	}
 	if err := db.AutoMigrate(&user{}); err != nil {
 		t.Fatalf("migrate user model: %v", err)
 	}

@@ -85,8 +85,8 @@ type SchemaAttribute struct {
 // ServiceProviderConfig returns Kayan's transport-neutral discovery resource.
 // The host may append its authentication schemes and documentation URI.
 //
-// etag is reported as unsupported. Use [Manager.ServiceProviderConfig], which
-// asks the configured storage: a client that reads etag: true starts sending
+// etag and sort are reported as unsupported. Use
+// [Manager.ServiceProviderConfig], which asks the configured storage: a client that reads etag: true starts sending
 // If-Match and expects 412 on a conflict, and against storage that cannot
 // compare and swap every one of those requests would be answered as though the
 // precondition held.
@@ -187,5 +187,6 @@ func attribute(name, valueType string, multiValued, required bool, mutability, r
 func (m *Manager) ServiceProviderConfig(maxResults int) ServiceProviderConfiguration {
 	config := ServiceProviderConfig(maxResults)
 	config.ETag = SupportedFeature{Supported: m.SupportsConditionalWrites()}
+	config.Sort = SupportedFeature{Supported: m.SupportsSorting()}
 	return config
 }

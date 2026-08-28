@@ -213,3 +213,65 @@ func TestNormalizeETagValueRefusesAList(t *testing.T) {
 		t.Errorf("NormalizeETagValue = %q, want 1", got)
 	}
 }
+
+// TestSortWithoutSupportIsAnError.
+//
+// Returning storage order to a client that asked for userName order is the
+// wrong-answer-that-looks-right case: the client cannot tell it apart from a
+// directory that happens to be stored that way, and it will page through the
+// result trusting an order that is not there.
+func TestSortWithoutSupportIsAnError(t *testing.T) {
+	manager := NewManager(&noConditionalStorage{}, metaMapper(false, ""))
+
+	if manager.SupportsSorting() {
+		t.Error("a store with no sorting support reported that it has it")
+	}
+	if manager.ServiceProviderConfig(100).Sort.Supported {
+		t.Error("discovery advertised sort support against a store that has none")
+	}
+
+	_, err := manager.ListUsersSorted(context.Background(), ListOptions{
+		StartIndex: 1, Count: 10, SortBy: "userName",
+	})
+	if err != ErrSortUnsupported {
+		t.Errorf("error = %v, want ErrSortUnsupported", err)
+	}
+}
+
+// TestUnsortedListingNeedsNoSortSupport. A deployment whose storage cannot
+// sort must still be able to list, or adding the capability would be a
+// prerequisite for the ordinary path.
+func TestUnsortedListingNeedsNoSortSupport(t *testing.T) {
+	manager := NewManager(&listOnlyStorage{}, metaMapper(false, ""))
+
+	resp, err := manager.ListUsersSorted(context.Background(), ListOptions{StartIndex: 1, Count: 10})
+	if err != nil {
+		t.Fatalf("ListUsersSorted with no SortBy: %v", err)
+	}
+	if resp.StartIndex != 1 {
+		t.Errorf("startIndex = %d, want 1", resp.StartIndex)
+	}
+}
+
+// TestSortOrderDefaultsToAscending. RFC 7644 section 3.4.2.3 makes ascending
+// the default; treating an unrecognised value as descending would silently
+// reverse what a client asked for.
+func TestSortOrderDefaultsToAscending(t *testing.T) {
+	for _, order := range []string{"", "ascending", "ASCENDING", "nonsense"} {
+		if (ListOptions{SortOrder: order}).Descending() {
+			t.Errorf("SortOrder %q was read as descending", order)
+		}
+	}
+	for _, order := range []string{"descending", "DESCENDING", "Descending"} {
+		if !(ListOptions{SortOrder: order}).Descending() {
+			t.Errorf("SortOrder %q was not read as descending", order)
+		}
+	}
+}
+
+// listOnlyStorage implements just enough of ScimStorage for a list call.
+type listOnlyStorage struct{ ScimStorage }
+
+func (listOnlyStorage) ListScimUsers(context.Context, string, int, int) ([]*User, int, error) {
+	return nil, 0, nil
+}

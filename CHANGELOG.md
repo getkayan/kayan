@@ -87,6 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- SCIM sorting: `Manager.ListUsersSorted`/`ListGroupsSorted` take a
+  `ListOptions` carrying `sortBy`/`sortOrder`, backed by the optional
+  `SortableScimStorage`. Storage that cannot sort returns `ErrSortUnsupported`
+  rather than an arbitrary order, `sortBy` resolves through the deployment's
+  attribute mapping (never into the SQL directly), and a non-unique sort column
+  gets the primary key as a tiebreaker so paging stays stable.
 - SCIM list results are ordered by id. Paged listing used `OFFSET`/`LIMIT` with
   no `ORDER BY`, so a client paging a directory could receive some resources
   twice and never receive others, with every page looking well formed.
