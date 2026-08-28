@@ -45,6 +45,27 @@ var (
 	// problem.
 	ErrLDAPSearchFailed = errors.New("ldap: user search failed")
 
+	// ErrLDAPAmbiguousUser reports that the username matched more than one
+	// directory entry.
+	//
+	// LDAP does not enforce attribute uniqueness. OpenLDAP has no unique
+	// constraint unless the uniqueness overlay is configured, and a subtree
+	// search spans every OU under the base DN, so two entries sharing a uid is
+	// a configuration a directory will happily hold. Authenticating against
+	// whichever one the server listed first makes the answer depend on the
+	// replica that served the search.
+	ErrLDAPAmbiguousUser = errors.New("ldap: username matched more than one directory entry")
+
+	// ErrLDAPResultTruncated reports that the directory returned fewer entries
+	// than matched the filter, because a size limit stopped it.
+	//
+	// It is returned alongside the partial entries so a caller can tell a
+	// complete small result from a truncated large one. Active Directory
+	// applies MaxPageSize (1000 by default) to any search that does not carry
+	// the paged-results control, so this is reachable on a real directory
+	// rather than only on a misconfigured one.
+	ErrLDAPResultTruncated = errors.New("ldap: search result was truncated by a size limit")
+
 	// WebAuthn errors.
 	ErrWebAuthnClonedCredential = errors.New("webauthn: authenticator signature counter went backwards; credential may be cloned")
 

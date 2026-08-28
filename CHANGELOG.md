@@ -87,6 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `flow.ErrLDAPAmbiguousUser` refuses a login whose username matched more than
+  one directory entry. The strategy took `entries[0]`, so a duplicate `uid`
+  anywhere under the base DN meant the password was checked against whichever
+  DN the server listed first. LDAP enforces no uniqueness by default.
+- `flow.LDAPSearchRequest.SizeLimit` and `flow.ErrLDAPResultTruncated` report a
+  search the directory cut short instead of returning a shortened result that
+  reads as complete. Active Directory truncates at `MaxPageSize` (1000).
 - `flow.ErrLDAPSearchFailed` distinguishes a directory search that failed from
   one that matched nobody. They were collapsed, so an outage, a mistyped base
   DN, or a size-limit refusal all reported as `ErrLDAPUserNotFound`. LDAP

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/getkayan/kayan/core/identity"
@@ -31,6 +32,16 @@ type LDAPSearchRequest struct {
 	BaseDN     string
 	Filter     string // e.g. "(uid=alice)"
 	Attributes []string
+
+	// SizeLimit caps the entries the directory may return. Zero leaves the
+	// directory's own limit in force.
+	//
+	// A search that hits the limit must report [ErrLDAPResultTruncated] along
+	// with the entries it did get, never a short result that reads as
+	// complete. The distinction is the whole point of the field: a caller that
+	// asked "is this username unique?" and silently received the first page of
+	// a larger answer would conclude yes.
+	SizeLimit int
 }
 
 // LDAPEntry is a single LDAP directory entry returned by Search.
@@ -111,7 +122,19 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 	entries, err := conn.Search(LDAPSearchRequest{
 		BaseDN: s.config.BaseDN,
 		Filter: filter,
+		// Two is every answer this question has: none, exactly one, or more
+		// than one. Asking for two is what makes the ambiguity check below
+		// cheap and, on a filter that unexpectedly matches broadly, stops the
+		// directory streaming its whole subtree into memory.
+		SizeLimit: 2,
 	})
+	// A truncated result is not a failure -- it is the ambiguity answer,
+	// arriving as an error because the directory stopped early. Checking it
+	// before ErrLDAPSearchFailed keeps a second match from being reported as
+	// an outage.
+	if errors.Is(err, ErrLDAPResultTruncated) {
+		return nil, fmt.Errorf("%w: %q under %q", ErrLDAPAmbiguousUser, username, s.config.BaseDN)
+	}
 	// A search that failed and a search that found nobody are different
 	// answers. Collapsing them reported a directory outage, a wrong base DN,
 	// and a size-limit refusal as "this user does not exist", so every login
@@ -121,6 +144,16 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 	}
 	if len(entries) == 0 {
 		return nil, ErrLDAPUserNotFound
+	}
+	// Taking entries[0] made authentication depend on directory ordering. Two
+	// entries sharing the username -- which no directory forbids by default,
+	// and which a writable OU anywhere under the base DN is enough to create
+	// -- meant the password was checked against whichever DN the server
+	// listed first. That is a bind the operator never intended, and it can
+	// succeed. There is no safe way to choose between them, so refuse.
+	if len(entries) > 1 {
+		return nil, fmt.Errorf("%w: %q matched %d entries under %q",
+			ErrLDAPAmbiguousUser, username, len(entries), s.config.BaseDN)
 	}
 
 	userDN := entries[0].DN

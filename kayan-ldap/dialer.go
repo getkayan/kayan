@@ -197,10 +197,24 @@ func (d *Dialer) DialTLS(ctx context.Context, addr string) (flow.LDAPConn, error
 //
 // It implements [flow.LDAPConn].
 type Conn struct {
-	conn    *ldap.Conn
+	conn    ldapClient
 	timeout time.Duration
 	done    chan struct{}
 }
+
+// ldapClient is the slice of *ldap.Conn this package uses.
+//
+// It exists so the result unpacking below -- which has to tell a truncated
+// search from a failed one by inspecting the directory's own result code --
+// can be tested against a server that returns that code, without standing up
+// a directory that holds more entries than its own page size.
+type ldapClient interface {
+	Bind(username, password string) error
+	Search(req *ldap.SearchRequest) (*ldap.SearchResult, error)
+	Close() error
+}
+
+var _ ldapClient = (*ldap.Conn)(nil)
 
 var _ flow.LDAPConn = (*Conn)(nil)
 
@@ -243,12 +257,21 @@ func (c *Conn) Bind(dn, password string) error {
 }
 
 // Search executes an LDAP search.
+//
+// A result the directory cut short is reported as [flow.ErrLDAPResultTruncated]
+// wrapping the server's own error, returned together with the entries that did
+// arrive. Returning them silently would be the dangerous shape: a caller
+// asking whether a username is unique would read a one-entry answer as proof
+// of uniqueness when the directory had simply stopped counting. Active
+// Directory enforces MaxPageSize -- 1000 by default -- on any search without
+// the paged-results control, so this is the ordinary behaviour of a real
+// directory, not an error case.
 func (c *Conn) Search(req flow.LDAPSearchRequest) ([]flow.LDAPEntry, error) {
 	search := ldap.NewSearchRequest(
 		req.BaseDN,
 		ldap.ScopeWholeSubtree,
 		ldap.NeverDerefAliases,
-		0, // no size limit; the directory's own limit applies
+		req.SizeLimit, // zero leaves the directory's own limit in force
 		int(c.timeout.Seconds()),
 		false,
 		req.Filter,
@@ -257,8 +280,17 @@ func (c *Conn) Search(req flow.LDAPSearchRequest) ([]flow.LDAPEntry, error) {
 	)
 
 	result, err := c.conn.Search(search)
-	if err != nil {
+	// A size-limit refusal carries entries. Every other error is a failure
+	// whose partial result means nothing, so only this one is unpacked.
+	truncated := ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded) ||
+		errors.Is(err, ldap.ErrSizeLimitExceeded)
+	if err != nil && !truncated {
 		return nil, fmt.Errorf("ldapstore: search: %w", err)
+	}
+	if result == nil {
+		// Defensive: a truncation reported with no result at all would
+		// otherwise panic below, inside a path reachable from any login.
+		return nil, fmt.Errorf("ldapstore: search: %w: %v", flow.ErrLDAPResultTruncated, err)
 	}
 
 	entries := make([]flow.LDAPEntry, 0, len(result.Entries))
@@ -268,6 +300,10 @@ func (c *Conn) Search(req flow.LDAPSearchRequest) ([]flow.LDAPEntry, error) {
 			attrs[a.Name] = a.Values
 		}
 		entries = append(entries, flow.LDAPEntry{DN: e.DN, Attributes: attrs})
+	}
+	if truncated {
+		return entries, fmt.Errorf("ldapstore: search returned %d entries and stopped: %w: %v",
+			len(entries), flow.ErrLDAPResultTruncated, err)
 	}
 	return entries, nil
 }

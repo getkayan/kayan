@@ -20,6 +20,11 @@ type mockLDAPConn struct {
 	// outage, a wrong base DN, or a size-limit refusal reaches the strategy.
 	searchErr error
 	closed    bool
+
+	// lastSearch records what the strategy asked for. Whether the request
+	// carries a size limit is not observable from the returned entries, and
+	// it is the part that stops a broad filter streaming a whole subtree.
+	lastSearch LDAPSearchRequest
 }
 
 func (c *mockLDAPConn) Bind(dn, password string) error {
@@ -31,9 +36,16 @@ func (c *mockLDAPConn) Bind(dn, password string) error {
 	return nil
 }
 
+// Search models a real directory: it enforces the requested size limit and
+// reports the truncation rather than returning a short result that reads as
+// complete.
 func (c *mockLDAPConn) Search(req LDAPSearchRequest) ([]LDAPEntry, error) {
+	c.lastSearch = req
 	if c.searchErr != nil {
 		return nil, c.searchErr
+	}
+	if req.SizeLimit > 0 && len(c.entries) > req.SizeLimit {
+		return c.entries[:req.SizeLimit], fmt.Errorf("mock: %w", ErrLDAPResultTruncated)
 	}
 	return c.entries, nil
 }
@@ -288,5 +300,117 @@ func TestLDAPServiceAccountFailureIsNotTheUsersFault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "service account") {
 		t.Errorf("error = %v, want it to name the service account bind", err)
+	}
+}
+
+// TestLDAPDuplicateUsernameIsRefused is the central test for the ambiguity
+// fix.
+//
+// The strategy took entries[0] from the search result. LDAP enforces no
+// uniqueness on uid or sAMAccountName -- OpenLDAP has no unique constraint
+// unless the uniqueness overlay is configured -- and a subtree search spans
+// every OU beneath the base DN. So a second entry carrying the victim's
+// username, in any OU the attacker can write to, put the attacker's DN into
+// the result set. Whichever entry the server listed first is the DN the
+// password was then checked against, which meant an attacker's own password
+// could authenticate a login for the victim's username, and which entry won
+// depended on the replica that served the search.
+func TestLDAPDuplicateUsernameIsRefused(t *testing.T) {
+	conn := &mockLDAPConn{entries: []LDAPEntry{
+		{DN: "uid=alice,ou=contractors,dc=example,dc=com",
+			Attributes: map[string][]string{"mail": {"attacker@evil.test"}}},
+		{DN: "uid=alice,ou=staff,dc=example,dc=com",
+			Attributes: map[string][]string{"mail": {"alice@example.com"}}},
+	}}
+	strategy := NewLDAPStrategy(&mockLDAPDialer{conn: conn},
+		defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	ident, err := strategy.Authenticate(context.Background(), "alice", "password")
+
+	if err == nil {
+		t.Fatal("authenticated against one of two entries sharing the username")
+	}
+	if ident != nil {
+		t.Error("an identity was returned for an ambiguous username; a caller " +
+			"reading only the identity would mint a session for it")
+	}
+	if !errors.Is(err, ErrLDAPAmbiguousUser) {
+		t.Errorf("error = %v, want ErrLDAPAmbiguousUser", err)
+	}
+
+	// The user bind must never have been attempted. Reaching it means a DN was
+	// chosen, and choosing is the defect.
+	for _, bind := range conn.binds {
+		if strings.HasPrefix(bind, "uid=alice,") {
+			t.Errorf("bound as %q; the strategy picked a DN out of an ambiguous result", bind)
+		}
+	}
+}
+
+// TestLDAPTruncatedResultIsAmbiguousNotAnOutage covers the same defect arriving
+// as an error instead of a list.
+//
+// Active Directory applies MaxPageSize -- 1000 by default -- to a search
+// without the paged-results control, and the strategy caps its own search at
+// two entries. Either way a third match reaches the strategy as a truncation,
+// which is evidence of ambiguity, not of a broken directory.
+func TestLDAPTruncatedResultIsAmbiguousNotAnOutage(t *testing.T) {
+	conn := &mockLDAPConn{entries: []LDAPEntry{
+		{DN: "uid=alice,ou=a,dc=example,dc=com"},
+		{DN: "uid=alice,ou=b,dc=example,dc=com"},
+		{DN: "uid=alice,ou=c,dc=example,dc=com"},
+	}}
+	strategy := NewLDAPStrategy(&mockLDAPDialer{conn: conn},
+		defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	_, err := strategy.Authenticate(context.Background(), "alice", "password")
+	if !errors.Is(err, ErrLDAPAmbiguousUser) {
+		t.Errorf("error = %v, want ErrLDAPAmbiguousUser", err)
+	}
+	if errors.Is(err, ErrLDAPSearchFailed) {
+		t.Error("a truncated result was reported as a search failure, which hides " +
+			"a duplicate username behind what looks like an outage")
+	}
+}
+
+// TestLDAPSearchIsSizeLimited proves the request carries the cap. Without it
+// a filter that unexpectedly matches broadly -- a wildcard username attribute,
+// a base DN pointed at the directory root -- streams the whole subtree into
+// memory before anything rejects it.
+func TestLDAPSearchIsSizeLimited(t *testing.T) {
+	conn := &mockLDAPConn{entries: []LDAPEntry{{DN: "uid=alice,ou=staff,dc=example,dc=com"}}}
+	strategy := NewLDAPStrategy(&mockLDAPDialer{conn: conn},
+		defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	if _, err := strategy.Authenticate(context.Background(), "alice", "password"); err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if conn.lastSearch.SizeLimit != 2 {
+		t.Errorf("SizeLimit = %d, want 2: enough to detect a second match, "+
+			"not enough to pull a subtree", conn.lastSearch.SizeLimit)
+	}
+}
+
+// TestLDAPSingleMatchStillAuthenticates keeps the fix from being a blanket
+// refusal. The ordinary case -- one entry, correct password -- must still
+// succeed, or the test above would pass against a strategy that rejects
+// everything.
+func TestLDAPSingleMatchStillAuthenticates(t *testing.T) {
+	conn := &mockLDAPConn{entries: []LDAPEntry{
+		{DN: "uid=alice,ou=staff,dc=example,dc=com",
+			Attributes: map[string][]string{"mail": {"alice@example.com"}}},
+	}}
+	strategy := NewLDAPStrategy(&mockLDAPDialer{conn: conn},
+		defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	ident, err := strategy.Authenticate(context.Background(), "alice", "password")
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if ident == nil {
+		t.Fatal("Authenticate() returned no identity for a single exact match")
+	}
+	if len(conn.binds) != 2 {
+		t.Errorf("binds = %v, want the service account bind then the user bind", conn.binds)
 	}
 }
