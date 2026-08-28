@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
@@ -180,6 +181,80 @@ func (sp *ServiceProvider) ProcessLogoutRequest(ctx context.Context, samlRequest
 
 	var req LogoutRequest
 	if err := xml.Unmarshal(verified.XML, &req); err != nil {
+		return nil, fmt.Errorf("saml: parse verified LogoutRequest: %w", err)
+	}
+	if req.NameID.Value == "" {
+		return nil, fmt.Errorf("saml: LogoutRequest names no subject")
+	}
+
+	return &LogoutInstruction{
+		RequestID:    req.ID,
+		IdPID:        idpID,
+		NameID:       req.NameID.Value,
+		SessionIndex: req.SessionIndex,
+	}, nil
+}
+
+// ProcessRedirectLogoutRequest verifies a LogoutRequest that arrived over the
+// HTTP-Redirect binding and reports whose session to end.
+//
+// It takes the raw query string rather than parsed values because the
+// signature covers the octets exactly as they arrived: decoding and
+// re-encoding a value usually round-trips unchanged, and where it does not the
+// signature fails for a reason nobody can see. A caller has this as
+// r.URL.RawQuery.
+//
+// [ProcessLogoutRequest] handles the POST binding, where the signature is
+// enveloped in the document. The two bindings carry their signatures in
+// different places, so they cannot share one verification path -- and until
+// this existed, a service provider advertising a Redirect binding for single
+// logout rejected every redirect-bound request it received.
+//
+// The signature is mandatory here for the same reason it is on the POST
+// binding: a LogoutRequest ends sessions, so an unauthenticated one is a
+// denial of service anybody can aim at a named user.
+func (sp *ServiceProvider) ProcessRedirectLogoutRequest(ctx context.Context, rawQuery string) (*LogoutInstruction, error) {
+	encoded, ok := rawQueryValue(rawQuery, "SAMLRequest")
+	if !ok || encoded == "" {
+		return nil, fmt.Errorf("saml: query carries no SAMLRequest")
+	}
+	unescaped, err := url.QueryUnescape(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("saml: decode SAMLRequest: %w", err)
+	}
+
+	requestBytes, err := decodeSAMLMessage(unescaped)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parsed once only to select a certificate. Nothing from this parse is
+	// trusted; the message is re-parsed below, after the signature over it
+	// verifies.
+	var claimed LogoutRequest
+	if err := xml.Unmarshal(requestBytes, &claimed); err != nil {
+		return nil, fmt.Errorf("saml: parse LogoutRequest: %w", err)
+	}
+
+	idpID, idp := sp.idpByEntityID(claimed.Issuer.Value)
+	if idp == nil {
+		return nil, fmt.Errorf("saml: no identity provider registered for issuer %q", claimed.Issuer.Value)
+	}
+
+	var certs []*x509.Certificate
+	if idp.Certificate != nil {
+		certs = append(certs, idp.Certificate)
+	}
+	certs = append(certs, idp.ExtraCertificates...)
+
+	if err := VerifyRedirectSignature(rawQuery, certs); err != nil {
+		return nil, err
+	}
+
+	// Re-parsed from the verified bytes, so nothing read below came from the
+	// untrusted parse above.
+	var req LogoutRequest
+	if err := xml.Unmarshal(requestBytes, &req); err != nil {
 		return nil, fmt.Errorf("saml: parse verified LogoutRequest: %w", err)
 	}
 	if req.NameID.Value == "" {

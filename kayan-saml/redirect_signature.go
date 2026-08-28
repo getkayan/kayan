@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -188,4 +189,140 @@ func redirectURL(
 
 	parsed.RawQuery = query.String()
 	return parsed.String(), nil
+}
+
+// ErrNoRedirectSignature reports a redirect-binding message carrying no
+// detached signature.
+var ErrNoRedirectSignature = errors.New("saml: redirect message carries no signature")
+
+// VerifyRedirectSignature checks the detached signature on a redirect-binding
+// query against a set of certificates.
+//
+// The redirect binding puts its signature in the URL rather than in the
+// document, so the enveloped XML-DSig verifier cannot check it: a redirect
+// message is DEFLATE-compressed and has no XML for a signature to live in.
+// Without this, a service provider advertising a Redirect binding for single
+// logout rejects every redirect-bound LogoutRequest it receives with
+// ErrUnsigned -- an advertised capability that cannot work.
+//
+// Any of certs verifying is enough, which is what lets an identity provider
+// roll its signing key over: during the overlap it publishes both, and either
+// may have signed the message in hand.
+func VerifyRedirectSignature(rawQuery string, certs []*x509.Certificate) error {
+	if len(certs) == 0 {
+		return errors.New("saml: no certificates configured for this issuer")
+	}
+
+	encodedSig, ok := rawQueryValue(rawQuery, "Signature")
+	if !ok || encodedSig == "" {
+		return ErrNoRedirectSignature
+	}
+	rawSigAlg, ok := rawQueryValue(rawQuery, "SigAlg")
+	if !ok || rawSigAlg == "" {
+		return fmt.Errorf("%w: no SigAlg parameter", ErrNoRedirectSignature)
+	}
+
+	sigAlg, err := url.QueryUnescape(rawSigAlg)
+	if err != nil {
+		return fmt.Errorf("saml: decode SigAlg: %w", err)
+	}
+
+	var hash crypto.Hash
+	switch sigAlg {
+	case SigAlgRSASHA256:
+		hash = crypto.SHA256
+	case SigAlgRSASHA512:
+		hash = crypto.SHA512
+	default:
+		// RSA-SHA1 lands here deliberately. Accepting it on the reading side
+		// would let an identity provider downgrade the algorithm unilaterally,
+		// which is the whole value of refusing it on the writing side.
+		return fmt.Errorf("%w: SigAlg %q", ErrUnsupportedAlgorithm, sigAlg)
+	}
+
+	unescaped, err := url.QueryUnescape(encodedSig)
+	if err != nil {
+		return fmt.Errorf("saml: decode Signature: %w", err)
+	}
+	signature, err := base64.StdEncoding.DecodeString(unescaped)
+	if err != nil {
+		return fmt.Errorf("saml: Signature is not valid base64: %w", err)
+	}
+
+	octets, err := redirectVerificationOctets(rawQuery)
+	if err != nil {
+		return err
+	}
+
+	hasher := hash.New()
+	hasher.Write(octets)
+	digest := hasher.Sum(nil)
+
+	for _, cert := range certs {
+		pub, ok := cert.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			continue
+		}
+		if err := rsa.VerifyPKCS1v15(pub, hash, digest, signature); err == nil {
+			return nil
+		}
+	}
+	return errors.New("saml: redirect signature does not verify against any configured certificate")
+}
+
+// redirectVerificationOctets rebuilds the octet string a redirect signature
+// covers, from the raw query as received.
+//
+// It reassembles from the raw parameter values in the order the specification
+// fixes, rather than taking everything before "&Signature=". Signature is
+// usually last, but a sender that places it elsewhere would otherwise produce
+// a verification failure that looks like a bad key -- and the values must stay
+// exactly as they arrived, since re-encoding a decoded value can differ from
+// the octets that were signed.
+func redirectVerificationOctets(rawQuery string) ([]byte, error) {
+	var b strings.Builder
+
+	messageParam := "SAMLRequest"
+	message, ok := rawQueryValue(rawQuery, messageParam)
+	if !ok {
+		messageParam = "SAMLResponse"
+		message, ok = rawQueryValue(rawQuery, messageParam)
+	}
+	if !ok {
+		return nil, errors.New("saml: query carries neither SAMLRequest nor SAMLResponse")
+	}
+
+	b.WriteString(messageParam)
+	b.WriteString("=")
+	b.WriteString(message)
+
+	if relayState, ok := rawQueryValue(rawQuery, "RelayState"); ok {
+		b.WriteString("&RelayState=")
+		b.WriteString(relayState)
+	}
+
+	sigAlg, _ := rawQueryValue(rawQuery, "SigAlg")
+	b.WriteString("&SigAlg=")
+	b.WriteString(sigAlg)
+
+	return []byte(b.String()), nil
+}
+
+// rawQueryValue returns the still-encoded value of a parameter.
+//
+// url.Values would decode, and the signature covers the encoded octets: a
+// value that survives a decode/encode round trip unchanged is common but not
+// guaranteed, and where it differs the signature fails for a reason nobody
+// can see.
+func rawQueryValue(rawQuery, name string) (string, bool) {
+	for _, pair := range strings.Split(rawQuery, "&") {
+		eq := strings.Index(pair, "=")
+		if eq < 0 {
+			continue
+		}
+		if pair[:eq] == name {
+			return pair[eq+1:], true
+		}
+	}
+	return "", false
 }

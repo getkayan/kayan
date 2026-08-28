@@ -87,6 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `saml.ServiceProvider.ProcessRedirectLogoutRequest` verifies a LogoutRequest
+  that arrived over the HTTP-Redirect binding, which the metadata document
+  already advertised but no code path could check. `saml.VerifyRedirectSignature`
+  is exported for callers verifying other redirect-bound messages.
 - Outgoing SAML `AuthnRequest` messages are signed when `Config.SignRequests`
   is set, through the new `saml.RedirectSigner` seam and
   `saml.WithRedirectSigner`. Previously the flag was read only to populate
