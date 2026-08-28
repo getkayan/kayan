@@ -89,15 +89,22 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 		return nil, ErrLDAPInvalidCredentials
 	}
 
+	// Every failure below wraps its cause. The sentinel keeps the decision the
+	// caller acts on stable, while the cause is what an operator needs to tell
+	// an unreachable directory from a rejected password -- and discarding it
+	// left them with neither.
 	conn, err := s.dialer.DialTLS(ctx, s.config.Addr)
 	if err != nil {
-		return nil, ErrLDAPConnectionFailed
+		return nil, fmt.Errorf("%w: %v", ErrLDAPConnectionFailed, err)
 	}
 	defer conn.Close()
 
 	// Step 1: bind as service account to search for the user DN.
+	//
+	// A failure here is the service account's, not the end user's: a rotated
+	// or mistyped service password rejects every login in the deployment.
 	if err := conn.Bind(s.config.ServiceAccountDN, s.config.ServiceAccountPassword); err != nil {
-		return nil, ErrLDAPConnectionFailed
+		return nil, fmt.Errorf("%w: service account bind: %v", ErrLDAPConnectionFailed, err)
 	}
 
 	filter := fmt.Sprintf("(%s=%s)", s.config.UsernameAttribute, escapeLDAPFilter(username))
@@ -105,15 +112,29 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 		BaseDN: s.config.BaseDN,
 		Filter: filter,
 	})
-	if err != nil || len(entries) == 0 {
+	// A search that failed and a search that found nobody are different
+	// answers. Collapsing them reported a directory outage, a wrong base DN,
+	// and a size-limit refusal as "this user does not exist", so every login
+	// failed with the user blamed and no signal to the operator.
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrLDAPSearchFailed, err)
+	}
+	if len(entries) == 0 {
 		return nil, ErrLDAPUserNotFound
 	}
 
 	userDN := entries[0].DN
 
 	// Step 2: re-bind as the user to verify their password.
+	//
+	// The cause is wrapped but the sentinel stays ErrLDAPInvalidCredentials.
+	// Telling a rejected password from a connection that dropped mid-bind
+	// needs the directory's result code, and core/flow cannot read one without
+	// importing an LDAP library -- which the LDAPConn seam exists to avoid. So
+	// a caller reading the sentinel is told the safe thing, and an operator
+	// reading the wrapped cause can still see a network error for what it is.
 	if err := conn.Bind(userDN, password); err != nil {
-		return nil, ErrLDAPInvalidCredentials
+		return nil, fmt.Errorf("%w: %v", ErrLDAPInvalidCredentials, err)
 	}
 
 	// Step 3: map LDAP attributes to a Kayan identity.

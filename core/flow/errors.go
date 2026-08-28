@@ -34,6 +34,17 @@ var (
 	ErrLDAPUserNotFound       = errors.New("ldap: user not found")
 	ErrLDAPConnectionFailed   = errors.New("ldap: connection failed")
 
+	// ErrLDAPSearchFailed reports that the directory refused or could not
+	// complete the user search.
+	//
+	// It is distinct from ErrLDAPUserNotFound on purpose. Reporting a failed
+	// search as "no such user" turns a directory outage, a mistyped base DN,
+	// or a size-limit refusal into an authentication failure that looks like
+	// the user's fault: every login is rejected, the user sees invalid
+	// credentials, and nothing anywhere reports that the directory is the
+	// problem.
+	ErrLDAPSearchFailed = errors.New("ldap: user search failed")
+
 	// WebAuthn errors.
 	ErrWebAuthnClonedCredential = errors.New("webauthn: authenticator signature counter went backwards; credential may be cloned")
 

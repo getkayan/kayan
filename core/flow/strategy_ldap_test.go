@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/getkayan/kayan/core/identity"
@@ -15,7 +16,10 @@ type mockLDAPConn struct {
 	binds   []string // DN:password pairs recorded
 	entries []LDAPEntry
 	bindErr map[string]error // DN → error
-	closed  bool
+	// searchErr makes the directory refuse the search, which is how an
+	// outage, a wrong base DN, or a size-limit refusal reaches the strategy.
+	searchErr error
+	closed    bool
 }
 
 func (c *mockLDAPConn) Bind(dn, password string) error {
@@ -28,6 +32,9 @@ func (c *mockLDAPConn) Bind(dn, password string) error {
 }
 
 func (c *mockLDAPConn) Search(req LDAPSearchRequest) ([]LDAPEntry, error) {
+	if c.searchErr != nil {
+		return nil, c.searchErr
+	}
 	return c.entries, nil
 }
 
@@ -201,3 +208,85 @@ func (m *mockIdentity) GetID() any                { return m.id }
 func (m *mockIdentity) SetID(v any)               { m.id = fmt.Sprintf("%v", v) }
 func (m *mockIdentity) GetTraits() identity.JSON  { return m.traits }
 func (m *mockIdentity) SetTraits(t identity.JSON) { m.traits = t }
+
+// TestLDAPSearchFailureIsNotReportedAsUserNotFound covers a wrong answer that
+// looked exactly like a right one.
+//
+// The strategy collapsed `err != nil || len(entries) == 0` into
+// ErrLDAPUserNotFound, so a directory outage, a mistyped base DN, or Active
+// Directory refusing an over-large result all arrived at the application as
+// "this user does not exist". Every login in the deployment then failed, the
+// user was told their credentials were wrong, and nothing reported that the
+// directory was the problem.
+func TestLDAPSearchFailureIsNotReportedAsUserNotFound(t *testing.T) {
+	outage := errors.New("directory unavailable")
+	dialer := &mockLDAPDialer{conn: &mockLDAPConn{searchErr: outage}}
+	strategy := NewLDAPStrategy(dialer, defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	_, err := strategy.Authenticate(context.Background(), "alice", "password")
+
+	if errors.Is(err, ErrLDAPUserNotFound) {
+		t.Error("a failed search was reported as a missing user, which blames the " +
+			"end user for a directory fault")
+	}
+	if !errors.Is(err, ErrLDAPSearchFailed) {
+		t.Errorf("error = %v, want ErrLDAPSearchFailed", err)
+	}
+	if !strings.Contains(err.Error(), "directory unavailable") {
+		t.Errorf("error = %v, want it to carry the underlying cause", err)
+	}
+}
+
+// TestLDAPEmptyResultIsStillUserNotFound keeps the distinction meaningful in
+// the other direction: a search that ran and matched nobody is a real
+// not-found, not a failure.
+func TestLDAPEmptyResultIsStillUserNotFound(t *testing.T) {
+	dialer := &mockLDAPDialer{conn: &mockLDAPConn{entries: nil}}
+	strategy := NewLDAPStrategy(dialer, defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	_, err := strategy.Authenticate(context.Background(), "nobody", "password")
+	if !errors.Is(err, ErrLDAPUserNotFound) {
+		t.Errorf("error = %v, want ErrLDAPUserNotFound", err)
+	}
+	if errors.Is(err, ErrLDAPSearchFailed) {
+		t.Error("an empty result was reported as a search failure")
+	}
+}
+
+// TestLDAPFailureCausesSurvive covers the diagnosis path. Each sentinel keeps
+// the decision stable for the caller while carrying what an operator needs.
+func TestLDAPFailureCausesSurvive(t *testing.T) {
+	dialFault := errors.New("connection refused")
+	dialer := &mockLDAPDialer{dialErr: dialFault}
+	strategy := NewLDAPStrategy(dialer, defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	_, err := strategy.Authenticate(context.Background(), "alice", "password")
+	if !errors.Is(err, ErrLDAPConnectionFailed) {
+		t.Fatalf("error = %v, want ErrLDAPConnectionFailed", err)
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("error = %v, want it to carry the dial failure", err)
+	}
+}
+
+// TestLDAPServiceAccountFailureIsNotTheUsersFault covers a misconfiguration
+// that rejects every login in the deployment. It must not read as a problem
+// with the credentials the end user supplied.
+func TestLDAPServiceAccountFailureIsNotTheUsersFault(t *testing.T) {
+	rejected := errors.New("service bind rejected")
+	conn := &mockLDAPConn{bindErr: map[string]error{"cn=svc,dc=example,dc=com": rejected}}
+	strategy := NewLDAPStrategy(&mockLDAPDialer{conn: conn},
+		defaultLDAPConfig(), func() any { return &identity.Identity{} })
+
+	_, err := strategy.Authenticate(context.Background(), "alice", "password")
+	if errors.Is(err, ErrLDAPInvalidCredentials) {
+		t.Error("a rejected service-account bind was reported as the end user's " +
+			"credentials being wrong")
+	}
+	if !errors.Is(err, ErrLDAPConnectionFailed) {
+		t.Errorf("error = %v, want ErrLDAPConnectionFailed", err)
+	}
+	if !strings.Contains(err.Error(), "service account") {
+		t.Errorf("error = %v, want it to name the service account bind", err)
+	}
+}

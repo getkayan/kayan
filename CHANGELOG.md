@@ -87,6 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `flow.ErrLDAPSearchFailed` distinguishes a directory search that failed from
+  one that matched nobody. They were collapsed, so an outage, a mistyped base
+  DN, or a size-limit refusal all reported as `ErrLDAPUserNotFound`. LDAP
+  failures now wrap their cause.
 - `ldapstore.WithStartTLS` connects on the plaintext port and upgrades before
   any bind. Directories that publish 389 with StartTLS and never publish 636
   were previously unreachable, with no workaround inside the library.
