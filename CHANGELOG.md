@@ -87,6 +87,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- SCIM responses carry a populated `meta`. Every response previously shipped an
+  empty one, so a connector had no `resourceType`, no `location`, and no
+  `lastModified` to sync against. `created`/`lastModified`/`version` come from
+  the caller's own model through `MapperConfig.MetaMappings`, and
+  `MapperConfig.ResourceBaseURL` builds `location`. Unmapped members are
+  omitted rather than invented.
+- SCIM conditional writes: `Manager.UpdateUserIfMatch`, `DeleteUserIfMatch`,
+  `UpdateGroupIfMatch`, `DeleteGroupIfMatch`, backed by the optional
+  `ConditionalScimStorage`. Storage that cannot compare and swap returns
+  `ErrConditionalUnsupported` rather than falling back to a read-check-write,
+  and `Manager.ServiceProviderConfig` advertises `etag` only where it works.
 - The GORM OAuth 2.0 store now persists `Client.PostLogoutRedirectURIs`. It had
   no column, so the allowlist read back empty and RP-initiated logout refused
   every redirect target a deployment had registered.

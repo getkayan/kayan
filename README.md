@@ -35,7 +35,10 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 >   `client_secret_jwt` -- it needs the secret in recoverable form and Kayan
 >   stores only a hash. No device code, token exchange, DPoP, or dynamic
 >   client registration.
-> - **SCIM** (`kayan-scim`) — no bulk operations. Value filters
+> - **SCIM** (`kayan-scim`) — no bulk operations, no sorting. ETag concurrency
+>   needs storage that implements `ConditionalScimStorage`; without it
+>   `If-Match` is refused rather than ignored, and discovery reports
+>   `etag: false`. Value filters
 >   (`emails[type eq "work"]`) work in PATCH, and parse in list queries, but
 >   the GORM store rejects them with `ErrFilterUnsupported` rather than
 >   over-returning rows, because a value filter needs a multi-valued storage

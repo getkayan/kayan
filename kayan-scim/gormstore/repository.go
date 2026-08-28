@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	scim "github.com/getkayan/kayan/kayan-scim"
 	"github.com/google/uuid"
@@ -135,6 +136,7 @@ func (r *ScimRepository) CreateScimGroup(ctx context.Context, group *scim.Group)
 	g := &gormGroup{
 		ID:          group.ID,
 		DisplayName: group.DisplayName,
+		Version:     1,
 	}
 	return r.db.WithContext(ctx).Create(g).Error
 }
@@ -148,15 +150,26 @@ func (r *ScimRepository) GetScimGroup(ctx context.Context, id string) (*scim.Gro
 		DisplayName: g.DisplayName,
 	}
 	res.ID = g.ID
+	scim.ApplyGroupMeta(res, r.mapper.Config().ResourceBaseURL, g.CreatedAt, g.UpdatedAt, g.Version)
 	return res, nil
 }
 
 func (r *ScimRepository) UpdateScimGroup(ctx context.Context, group *scim.Group) error {
-	g := &gormGroup{
-		ID:          group.ID,
-		DisplayName: group.DisplayName,
+	// The version advances on an unconditional write too. A client that read
+	// the group, then had it changed underneath by this path, must not find
+	// its stale ETag still matching.
+	result := r.db.WithContext(ctx).Model(&gormGroup{}).Where("id = ?", group.ID).
+		Updates(map[string]any{
+			"display_name": group.DisplayName,
+			"version":      gorm.Expr("version + 1"),
+		})
+	if result.Error != nil {
+		return result.Error
 	}
-	return r.db.WithContext(ctx).Save(g).Error
+	if result.RowsAffected == 0 {
+		return scim.ErrNotFound
+	}
+	return nil
 }
 
 func (r *ScimRepository) DeleteScimGroup(ctx context.Context, id string) error {
@@ -192,6 +205,7 @@ func (r *ScimRepository) ListScimGroups(ctx context.Context, filter string, star
 			DisplayName: g.DisplayName,
 		}
 		group.ID = g.ID
+		scim.ApplyGroupMeta(group, r.mapper.Config().ResourceBaseURL, g.CreatedAt, g.UpdatedAt, g.Version)
 		res[i] = group
 	}
 	return res, int(total), nil
@@ -209,6 +223,16 @@ func (r *ScimRepository) getIdentityModel(ctx context.Context, id string) (any, 
 type gormGroup struct {
 	ID          string `gorm:"primaryKey"`
 	DisplayName string `gorm:"uniqueIndex"`
+	// CreatedAt and UpdatedAt back meta.created and meta.lastModified. GORM
+	// maintains both by name. A provisioning connector compares lastModified
+	// to decide what changed since its last sync, so without them every cycle
+	// either re-reads everything or concludes nothing moved.
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	// Version is the optimistic-concurrency counter behind meta.version. It is
+	// incremented inside the same UPDATE that checks it, so two overlapping
+	// membership edits cannot both succeed against the same starting state.
+	Version uint64 `gorm:"not null;default:1"`
 }
 
 func (gormGroup) TableName() string { return "scim_groups" }

@@ -2,6 +2,8 @@ package gormstore
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	scim "github.com/getkayan/kayan/kayan-scim"
@@ -12,10 +14,25 @@ import (
 func newTestRepo(t *testing.T) *ScimRepository {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// A bare ":memory:" DSN gives every pooled connection its own empty
+	// database, so anything concurrent finds no tables. A named shared-cache
+	// database is one database; capping the pool at a single connection keeps
+	// SQLite's writer lock from turning contention into SQLITE_BUSY.
+	//
+	// Capping the pool does not weaken a concurrency test: statements from
+	// different goroutines still interleave on that connection, so a
+	// read-then-write would still race.
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	pool.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = pool.Close() })
 	type user struct {
 		ID    string `gorm:"primaryKey"`
 		Email string

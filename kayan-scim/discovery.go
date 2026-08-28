@@ -84,6 +84,12 @@ type SchemaAttribute struct {
 
 // ServiceProviderConfig returns Kayan's transport-neutral discovery resource.
 // The host may append its authentication schemes and documentation URI.
+//
+// etag is reported as unsupported. Use [Manager.ServiceProviderConfig], which
+// asks the configured storage: a client that reads etag: true starts sending
+// If-Match and expects 412 on a conflict, and against storage that cannot
+// compare and swap every one of those requests would be answered as though the
+// precondition held.
 func ServiceProviderConfig(maxResults int) ServiceProviderConfiguration {
 	if maxResults <= 0 {
 		maxResults = 100
@@ -169,4 +175,17 @@ func groupSchemaDefinition() SchemaDefinition {
 
 func attribute(name, valueType string, multiValued, required bool, mutability, returned, uniqueness string) SchemaAttribute {
 	return SchemaAttribute{Name: name, Type: valueType, MultiValued: multiValued, Required: required, Mutability: mutability, Returned: returned, Uniqueness: uniqueness}
+}
+
+// ServiceProviderConfig returns the discovery resource for this deployment,
+// with the features the configured storage can actually serve.
+//
+// Advertising a capability that is not implemented is an interoperability bug
+// that surfaces inside the client, where it is hard to diagnose -- and for
+// etag it is worse than that: the client sends If-Match believing its update
+// is guarded, and the update it is guarding against still happens.
+func (m *Manager) ServiceProviderConfig(maxResults int) ServiceProviderConfiguration {
+	config := ServiceProviderConfig(maxResults)
+	config.ETag = SupportedFeature{Supported: m.SupportsConditionalWrites()}
+	return config
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/getkayan/kayan/core/identity"
 )
@@ -22,6 +23,29 @@ type MapperConfig struct {
 	// TraitMappings maps SCIM field paths to keys in the Traits JSON.
 	// Example: "name.givenName" -> "first_name"
 	TraitMappings map[string]string
+
+	// MetaMappings maps SCIM meta members to struct field names on the
+	// caller's model: [MetaCreated], [MetaLastModified], and [MetaVersion].
+	//
+	//	MetaMappings: map[string]string{
+	//	    scim.MetaCreated:      "CreatedAt",
+	//	    scim.MetaLastModified: "UpdatedAt",
+	//	}
+	//
+	// They are mappings rather than library-owned columns because BYOS means
+	// this package does not own the identity struct and cannot add fields to
+	// it. An unmapped member is omitted from the response rather than
+	// invented: a lastModified filled with the current time would tell a
+	// provisioning connector that every resource changed on every sync.
+	MetaMappings map[string]string
+
+	// ResourceBaseURL is the SCIM service root, used to build meta.location.
+	// For example "https://api.example.com/scim/v2".
+	//
+	// Kayan has no router and cannot discover the URL it is served under, so
+	// without this the member is omitted. Guessing would put an address in the
+	// response that resolves nowhere.
+	ResourceBaseURL string
 }
 
 func NewMapper(factory func() any, config MapperConfig) *Mapper {
@@ -30,6 +54,9 @@ func NewMapper(factory func() any, config MapperConfig) *Mapper {
 	}
 	if config.TraitMappings == nil {
 		config.TraitMappings = make(map[string]string)
+	}
+	if config.MetaMappings == nil {
+		config.MetaMappings = make(map[string]string)
 	}
 	return &Mapper{
 		factory: factory,
@@ -117,7 +144,40 @@ func (m *Mapper) FromModel(model any) (*User, error) {
 		}
 	}
 
+	// 3. Fill in meta. It is derived last so the version, when no version
+	// field is mapped, hashes the fully populated resource.
+	m.applyUserMeta(user, model)
+
 	return user, nil
+}
+
+// applyUserMeta fills in user.Meta from the model and the mapper config.
+func (m *Mapper) applyUserMeta(user *User, model any) {
+	var created, lastModified time.Time
+	if field, ok := m.config.MetaMappings[MetaCreated]; ok {
+		if when, present := asTime(m.getField(model, field)); present {
+			created = when
+		}
+	}
+	if field, ok := m.config.MetaMappings[MetaLastModified]; ok {
+		if when, present := asTime(m.getField(model, field)); present {
+			lastModified = when
+		}
+	}
+
+	version := ""
+	if field, ok := m.config.MetaMappings[MetaVersion]; ok {
+		version = asVersion(m.getField(model, field))
+	}
+	if version == "" {
+		// No mapped version: hash the resource. Good enough to answer "has
+		// this changed?", and deliberately not used for compare-and-swap --
+		// see deriveVersion.
+		version = deriveVersion(user)
+	}
+
+	applyMeta(&user.Meta, ResourceTypeUser, user.ID, m.config.ResourceBaseURL,
+		created, lastModified, version)
 }
 
 // getScimValue extracts a value from SCIM struct using basic path (e.g. "name.givenName")
