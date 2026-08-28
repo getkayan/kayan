@@ -322,6 +322,11 @@ type AuthnContext struct {
 // Subject contains the NameID.
 type Subject struct {
 	NameID NameID `xml:"urn:oasis:names:tc:SAML:2.0:assertion NameID"`
+
+	// EncryptedID carries the name identifier when the identity provider
+	// encrypts it. It is resolved into NameID after the assertion's signature
+	// has been verified, never before.
+	EncryptedID *EncryptedID `xml:"urn:oasis:names:tc:SAML:2.0:assertion EncryptedID"`
 	// SubjectConfirmations bind the assertion to a recipient and a moment in
 	// time. Without them a captured assertion can be delivered to any endpoint.
 	SubjectConfirmations []SubjectConfirmation `xml:"urn:oasis:names:tc:SAML:2.0:assertion SubjectConfirmation"`
@@ -1024,6 +1029,14 @@ func (sp *ServiceProvider) ProcessResponse(ctx context.Context, samlResponse, re
 	}
 
 	if err := validateAssertion(ctx, assertion, envelopeForValidation, opts, sp.clock, sp.replayCache); err != nil {
+		return nil, err
+	}
+
+	// Resolved from the verified assertion, so the ciphertext being decrypted
+	// is one the identity provider signed. Doing it earlier would decrypt
+	// something nobody had vouched for, and would rewrite the document before
+	// the signature over it was checked.
+	if err := resolveEncryptedID(ctx, &assertion.Subject, sp.decrypter); err != nil {
 		return nil, err
 	}
 

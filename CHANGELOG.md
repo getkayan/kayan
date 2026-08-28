@@ -87,6 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- SAML `EncryptedID` is resolved in assertions and logout requests, after the
+  signature has been verified. Without a decrypter it is refused with
+  `ErrNoDecrypter`; a subject carrying both a `NameID` and an `EncryptedID` is
+  refused with `ErrAmbiguousNameID`.
 - Pushed authorization requests (RFC 9126) via `oauth2.WithPushedRequests`.
   The pushed parameters are used alone -- query parameters cannot override
   them -- a `request_uri` is single-use and bound to the client that pushed it,

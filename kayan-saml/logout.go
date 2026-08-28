@@ -24,6 +24,12 @@ type LogoutRequest struct {
 	Issuer       Issuer    `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
 	NameID       NameID    `xml:"urn:oasis:names:tc:SAML:2.0:assertion NameID"`
 
+	// EncryptedID carries the subject when the identity provider encrypts it.
+	// A federation that encrypts assertion name identifiers encrypts logout
+	// ones too, and a service provider that could read the first but not the
+	// second would authenticate users it can never sign out.
+	EncryptedID *EncryptedID `xml:"urn:oasis:names:tc:SAML:2.0:assertion EncryptedID"`
+
 	// SessionIndex names the single session to end. Omitted, the request
 	// covers every session the subject holds with the recipient.
 	SessionIndex string `xml:"urn:oasis:names:tc:SAML:2.0:protocol SessionIndex,omitempty"`
@@ -183,8 +189,8 @@ func (sp *ServiceProvider) ProcessLogoutRequest(ctx context.Context, samlRequest
 	if err := xml.Unmarshal(verified.XML, &req); err != nil {
 		return nil, fmt.Errorf("saml: parse verified LogoutRequest: %w", err)
 	}
-	if req.NameID.Value == "" {
-		return nil, fmt.Errorf("saml: LogoutRequest names no subject")
+	if err := resolveLogoutSubject(ctx, &req, sp.decrypter); err != nil {
+		return nil, err
 	}
 
 	return &LogoutInstruction{
@@ -193,6 +199,40 @@ func (sp *ServiceProvider) ProcessLogoutRequest(ctx context.Context, samlRequest
 		NameID:       req.NameID.Value,
 		SessionIndex: req.SessionIndex,
 	}, nil
+}
+
+// resolveLogoutSubject fills in a LogoutRequest's NameID, decrypting an
+// EncryptedID if that is how the subject arrived.
+//
+// It runs on the verified request, for the same reason the assertion path
+// does: the signature covers the ciphertext, so decrypting afterwards yields a
+// name the identity provider actually asserted.
+//
+// Getting the subject wrong here ends the wrong user's session. That is a
+// denial of service rather than a takeover, but it is one an attacker can aim.
+func resolveLogoutSubject(ctx context.Context, req *LogoutRequest, decrypter Decrypter) error {
+	if req.EncryptedID != nil {
+		if req.NameID.Value != "" {
+			return ErrAmbiguousNameID
+		}
+		if decrypter == nil {
+			return fmt.Errorf("%w: the LogoutRequest carries an EncryptedID", ErrNoDecrypter)
+		}
+		plaintext, err := decrypter.Decrypt(ctx, req.EncryptedID.Raw)
+		if err != nil {
+			return err
+		}
+		var nameID NameID
+		if err := xml.Unmarshal(plaintext, &nameID); err != nil {
+			return fmt.Errorf("%w: %v", ErrEncryptedIDUnreadable, err)
+		}
+		req.NameID = nameID
+	}
+
+	if req.NameID.Value == "" {
+		return fmt.Errorf("saml: LogoutRequest names no subject")
+	}
+	return nil
 }
 
 // ProcessRedirectLogoutRequest verifies a LogoutRequest that arrived over the
@@ -257,8 +297,8 @@ func (sp *ServiceProvider) ProcessRedirectLogoutRequest(ctx context.Context, raw
 	if err := xml.Unmarshal(requestBytes, &req); err != nil {
 		return nil, fmt.Errorf("saml: parse verified LogoutRequest: %w", err)
 	}
-	if req.NameID.Value == "" {
-		return nil, fmt.Errorf("saml: LogoutRequest names no subject")
+	if err := resolveLogoutSubject(ctx, &req, sp.decrypter); err != nil {
+		return nil, err
 	}
 
 	return &LogoutInstruction{
