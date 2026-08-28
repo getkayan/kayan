@@ -87,6 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `ServiceProvider.SignedMetadata` and `IdentityProvider.SignedMetadata`
+  produce metadata with an enveloped XML-DSig signature and an optional
+  `validUntil`. Without a signer they return `ErrNoMetadataSigner` rather than
+  the unsigned document. `EntityDescriptor` now carries a stable `ID` in both
+  the signed and unsigned renderings, so a signature has something to reference
+  and consecutive fetches are byte-identical.
 - OIDC `max_age` and `acr_values` are parsed, carried on the authorization
   code, and enforced. A code cannot be issued for a `max_age` request without
   an authentication time, `Exchange` refuses a code whose authentication has
