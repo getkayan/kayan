@@ -144,3 +144,61 @@ func TestOAuth2RefreshToken(t *testing.T) {
 		t.Fatal("expected error after refresh token delete")
 	}
 }
+
+// TestAuthCodeRoundTripsEveryField covers a field that was silently dropped.
+//
+// gormAuthCode did not map Nonce, so every GORM deployment stored an
+// authorization code, read it back with an empty nonce, and issued an ID token
+// carrying no nonce claim. That is the binding between a sign-in and the token
+// it produces (OIDC Core 15.5.2): without it, a token captured from one
+// sign-in can be replayed into another, and a relying party that checks the
+// nonce it sent sees a mismatch it cannot explain.
+//
+// The assertion is over the whole struct rather than the nonce alone. The
+// defect was not that somebody mis-typed a field, it was that a field added to
+// the core type never reached the adapter -- and a nonce-only test would not
+// catch the next one.
+func TestAuthCodeRoundTripsEveryField(t *testing.T) {
+	repo := setupRepo(t)
+	ctx := context.Background()
+
+	want := &oauth2.AuthCode{
+		Code:                "code-1",
+		ClientID:            "client-1",
+		IdentityID:          "user-1",
+		RedirectURI:         "https://rp.example.test/callback",
+		Scopes:              []string{"openid", "profile"},
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
+		Nonce:               "n-0S6_WzA2Mj",
+		ExpiresAt:           time.Now().Add(10 * time.Minute).UTC().Truncate(time.Second),
+	}
+
+	if err := repo.SaveAuthCode(ctx, want); err != nil {
+		t.Fatalf("SaveAuthCode: %v", err)
+	}
+	got, err := repo.GetAuthCode(ctx, "code-1")
+	if err != nil {
+		t.Fatalf("GetAuthCode: %v", err)
+	}
+
+	if got.Nonce != want.Nonce {
+		t.Errorf("Nonce = %q, want %q: the ID token this code produces would carry "+
+			"no nonce, losing its binding to the sign-in", got.Nonce, want.Nonce)
+	}
+	if got.Code != want.Code || got.ClientID != want.ClientID || got.IdentityID != want.IdentityID {
+		t.Errorf("identity fields did not survive: %+v", got)
+	}
+	if got.RedirectURI != want.RedirectURI {
+		t.Errorf("RedirectURI = %q, want %q", got.RedirectURI, want.RedirectURI)
+	}
+	if got.CodeChallenge != want.CodeChallenge || got.CodeChallengeMethod != want.CodeChallengeMethod {
+		t.Errorf("PKCE fields did not survive: %+v", got)
+	}
+	if len(got.Scopes) != len(want.Scopes) {
+		t.Errorf("Scopes = %v, want %v", got.Scopes, want.Scopes)
+	}
+	if !got.ExpiresAt.Equal(want.ExpiresAt) {
+		t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, want.ExpiresAt)
+	}
+}

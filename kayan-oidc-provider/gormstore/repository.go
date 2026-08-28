@@ -183,7 +183,11 @@ type gormAuthCode struct {
 	Scopes              []string `gorm:"type:text;serializer:json"`
 	CodeChallenge       string
 	CodeChallengeMethod string
-	ExpiresAt           time.Time `gorm:"index"`
+	// Nonce binds the ID token issued from this code to the authorization
+	// request that produced it. Dropping it here silently removed that
+	// binding for every deployment on this adapter.
+	Nonce     string
+	ExpiresAt time.Time `gorm:"index"`
 }
 
 func (gormAuthCode) TableName() string { return "oauth2_auth_codes" }
@@ -200,6 +204,7 @@ func toCoreAuthCode(gc *gormAuthCode) *oauth2.AuthCode {
 		Scopes:              gc.Scopes,
 		CodeChallenge:       gc.CodeChallenge,
 		CodeChallengeMethod: gc.CodeChallengeMethod,
+		Nonce:               gc.Nonce,
 		ExpiresAt:           gc.ExpiresAt,
 	}
 }
@@ -216,6 +221,7 @@ func fromCoreAuthCode(c *oauth2.AuthCode) *gormAuthCode {
 		Scopes:              c.Scopes,
 		CodeChallenge:       c.CodeChallenge,
 		CodeChallengeMethod: c.CodeChallengeMethod,
+		Nonce:               c.Nonce,
 		ExpiresAt:           c.ExpiresAt,
 	}
 }

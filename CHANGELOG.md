@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `kayan-oidc-provider/gormstore` persists the authorization code's `Nonce`.
+  It was silently dropped, so every deployment on this adapter issued ID
+  tokens with no nonce claim and lost the binding between a sign-in and the
+  token it produced. Existing deployments pick up the column on the next
+  `AutoMigrate`; codes issued before the upgrade carry no nonce.
 - `oidc.Server.ParseEndSessionRequest` implements RP-initiated logout, which
   discovery already advertised with nothing behind it. `oauth2.Client` gains
   `PostLogoutRedirectURIs`, and `oidc.WithClientStore` supplies the store the
