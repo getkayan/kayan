@@ -157,6 +157,18 @@ type Session struct {
 	CreateTime time.Time
 	ExpiresAt  time.Time
 	ReturnURL  string
+
+	// ForceAuthn records that this request demanded a fresh authentication.
+	//
+	// It is kept here rather than re-derived from configuration because the
+	// same identity provider serves ordinary logins and step-ups, and the
+	// response can only be judged against what this particular request asked
+	// for.
+	ForceAuthn bool
+
+	// RequestedAuthnContexts records the authentication context class
+	// references this request would accept. An empty list enforces nothing.
+	RequestedAuthnContexts []string
 }
 
 // SessionStore interface for SAML session persistence.
@@ -206,15 +218,29 @@ type Hooks struct {
 
 // AuthnRequest represents a SAML authentication request.
 type AuthnRequest struct {
-	XMLName                     xml.Name      `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
-	ID                          string        `xml:"ID,attr"`
-	Version                     string        `xml:"Version,attr"`
-	IssueInstant                time.Time     `xml:"IssueInstant,attr"`
-	Destination                 string        `xml:"Destination,attr"`
-	AssertionConsumerServiceURL string        `xml:"AssertionConsumerServiceURL,attr"`
-	ProtocolBinding             string        `xml:"ProtocolBinding,attr"`
-	Issuer                      Issuer        `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
-	NameIDPolicy                *NameIDPolicy `xml:"urn:oasis:names:tc:SAML:2.0:protocol NameIDPolicy,omitempty"`
+	XMLName                     xml.Name  `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
+	ID                          string    `xml:"ID,attr"`
+	Version                     string    `xml:"Version,attr"`
+	IssueInstant                time.Time `xml:"IssueInstant,attr"`
+	Destination                 string    `xml:"Destination,attr"`
+	AssertionConsumerServiceURL string    `xml:"AssertionConsumerServiceURL,attr"`
+	ProtocolBinding             string    `xml:"ProtocolBinding,attr"`
+	Issuer                      Issuer    `xml:"urn:oasis:names:tc:SAML:2.0:assertion Issuer"`
+
+	// ForceAuthn asks the identity provider to reauthenticate the subject
+	// rather than answer from an existing session (SAML 2.0 Core, 3.4.1).
+	// Omitted when false, which is the protocol default.
+	ForceAuthn bool `xml:"ForceAuthn,attr,omitempty"`
+
+	// IsPassive asks the identity provider not to take visible control of the
+	// user interface.
+	IsPassive bool `xml:"IsPassive,attr,omitempty"`
+
+	NameIDPolicy *NameIDPolicy `xml:"urn:oasis:names:tc:SAML:2.0:protocol NameIDPolicy,omitempty"`
+
+	// RequestedAuthnContext asks for a particular kind of authentication.
+	// What comes back is checked against it; see [LoginOptions].
+	RequestedAuthnContext *RequestedAuthnContext `xml:"urn:oasis:names:tc:SAML:2.0:protocol RequestedAuthnContext,omitempty"`
 }
 
 // Issuer represents the SAML issuer element.
@@ -668,6 +694,18 @@ func (sp *ServiceProvider) GetIdP(id string) (*IdPConfig, bool) {
 // InitiateLogin starts the SAML authentication flow.
 // Returns the redirect URL to the IdP.
 func (sp *ServiceProvider) InitiateLogin(ctx context.Context, idpID string, returnURL string) (string, error) {
+	return sp.InitiateLoginWith(ctx, idpID, returnURL, LoginOptions{})
+}
+
+// InitiateLoginWith starts the SAML authentication flow with per-login
+// authentication options, and returns the redirect URL to the IdP.
+//
+// Use it for a step-up: ForceAuthn to demand a fresh authentication,
+// RequestedAuthnContexts to demand a particular kind. Both are enforced when
+// the response comes back -- an identity provider is free to ignore either,
+// and a service provider that does not check cannot tell an honoured request
+// from an ignored one.
+func (sp *ServiceProvider) InitiateLoginWith(ctx context.Context, idpID string, returnURL string, options LoginOptions) (string, error) {
 	idp, ok := sp.GetIdP(idpID)
 	if !ok {
 		return "", fmt.Errorf("saml: identity provider %q is not configured", idpID)
@@ -697,6 +735,11 @@ func (sp *ServiceProvider) InitiateLogin(ctx context.Context, idpID string, retu
 		}
 	}
 
+	// Applied before the BeforeAuthnRequest hook, so a deployment can still
+	// override them, and recorded on the session below so the response is
+	// judged against what was actually sent.
+	options.applyTo(req)
+
 	// Resolve the signer before anything is persisted. A refused login must
 	// not leave a pending session behind: that would let an unauthenticated
 	// caller fill the session store by repeatedly asking for a login the
@@ -724,9 +767,19 @@ func (sp *ServiceProvider) InitiateLogin(ctx context.Context, idpID string, retu
 		ID:         requestID,
 		RequestID:  req.ID,
 		IdPID:      idpID,
+		RelayState: options.RelayState,
 		ReturnURL:  returnURL,
-		CreateTime: time.Now(),
-		ExpiresAt:  time.Now().Add(sp.config.SessionTTL),
+		CreateTime: sp.clock.Now(),
+		ExpiresAt:  sp.clock.Now().Add(sp.config.SessionTTL),
+		// Read from the request rather than the options, so a
+		// BeforeAuthnRequest hook that adjusted either one is what gets
+		// enforced. Recording the intent instead of what was sent would let a
+		// hook that cleared ForceAuthn leave the response check demanding it,
+		// or -- worse -- a hook that set it leave the check absent.
+		ForceAuthn: req.ForceAuthn,
+	}
+	if req.RequestedAuthnContext != nil {
+		session.RequestedAuthnContexts = append([]string(nil), req.RequestedAuthnContext.AuthnContextClassRef...)
 	}
 
 	if err := sp.sessionStore.Save(ctx, session); err != nil {
@@ -972,6 +1025,14 @@ func (sp *ServiceProvider) ProcessResponse(ctx context.Context, samlResponse, re
 
 	if err := validateAssertion(ctx, assertion, envelopeForValidation, opts, sp.clock, sp.replayCache); err != nil {
 		return nil, err
+	}
+
+	// Enforced against the signature-verified assertion. An AuthnStatement
+	// read anywhere else says whatever the sender wanted it to say.
+	if session != nil {
+		if err := enforceAuthnOptions(assertion, session, session.CreateTime, sp.config.ClockSkew); err != nil {
+			return nil, err
+		}
 	}
 
 	user := sp.extractUser(assertion, idp)

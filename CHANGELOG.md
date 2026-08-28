@@ -87,6 +87,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- SAML step-up: `ServiceProvider.InitiateLoginWith` sends `ForceAuthn`,
+  `IsPassive`, and `RequestedAuthnContext`, and the response is checked against
+  what was asked. An assertion whose `AuthnContextClassRef` was not requested is
+  refused with `ErrAuthnContextNotSatisfied`; one whose `AuthnInstant` predates
+  a `ForceAuthn` request is refused with `ErrStaleAuthentication`.
+- **Breaking:** `saml.Session` gained `ForceAuthn` and
+  `RequestedAuthnContexts`, so it is no longer comparable with `==`. A
+  `SessionStore` must persist both, or a step-up degrades to an ordinary login.
 - SCIM sorting: `Manager.ListUsersSorted`/`ListGroupsSorted` take a
   `ListOptions` carrying `sortBy`/`sortOrder`, backed by the optional
   `SortableScimStorage`. Storage that cannot sort returns `ErrSortUnsupported`

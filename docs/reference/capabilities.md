@@ -56,6 +56,14 @@ multi-tenant deployment must implement `tenant.Scoped` on that struct. A model
 that does not is invisible to the isolation callbacks and is read across
 tenants. The library does not own the type and cannot add the field to it.
 
+SAML step-up authentication is available through
+`ServiceProvider.InitiateLoginWith`. `RequestedAuthnContext` is enforced by
+exact membership in the list the request sent, not by the `Comparison`
+semantics: ranking an identity provider's proprietary class references is
+knowledge only the deployment has, and a library that guessed at the ordering
+would let assertions through that the deployment considers weaker. List every
+acceptable reference.
+
 ## Deferred beyond 1.0
 
 The first stable release does not include OAuth device authorization, token

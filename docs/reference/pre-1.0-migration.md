@@ -13,6 +13,10 @@ and HTTP dependencies in `core`. The reviewed API snapshots in
   modules. Applications import only the protocols and adapters they choose.
 - Storage contracts use consumer-owned models, `any`, and factories to support
   Bring Your Own Schema rather than prescribed database models.
+- `saml.Session` gained `RequestedAuthnContexts []string`, so the struct is no
+  longer comparable with `==`. A `SessionStore` implementation persisting the
+  new field is what makes `ForceAuthn` and `RequestedAuthnContext` enforceable:
+  a store that drops it silently turns a step-up back into an ordinary login.
 - `domain.TokenStore` requires atomic `ConsumeToken`; adapters must prevent two
   callers from successfully consuming the same transient credential.
 - `session.SSOStore` uses atomic create/join/leave/deactivate operations rather

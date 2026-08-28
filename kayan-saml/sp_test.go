@@ -21,6 +21,7 @@ import (
 
 type mockSessionStore struct {
 	sessions map[string]*Session
+	saved    []*Session
 }
 
 func newMockSessionStore() *mockSessionStore {
@@ -31,7 +32,18 @@ func newMockSessionStore() *mockSessionStore {
 
 func (m *mockSessionStore) Save(ctx context.Context, session *Session) error {
 	m.sessions[session.ID] = session
+	m.saved = append(m.saved, session)
 	return nil
+}
+
+// last returns the most recently saved session. Tests that check what a login
+// recorded need the session the code chose, not one they constructed.
+func (m *mockSessionStore) last(t testing.TB) *Session {
+	t.Helper()
+	if len(m.saved) == 0 {
+		t.Fatal("no session was saved")
+	}
+	return m.saved[len(m.saved)-1]
 }
 
 func (m *mockSessionStore) Get(ctx context.Context, id string) (*Session, error) {
