@@ -87,6 +87,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- SAML identity-provider single logout: `IdentityProvider.ProcessLogoutRequest`
+  verifies a service provider's signed LogoutRequest against that provider's
+  registered certificate, `BuildLogoutResponse` answers it, and
+  `BuildLogoutRequest`/`LogoutTargets` propagate an IdP-initiated logout. IdP
+  metadata already advertised the endpoint; nothing served it. An unsigned or
+  unverifiable request is refused.
+- `IdentityProvider.RegisterSP` now takes the write lock. It wrote the
+  registration map unlocked, so registering while another request looked one
+  up was a concurrent map write.
 - LDAP service accounts can authenticate with SASL EXTERNAL via
   `flow.LDAPConfig.ServiceAccountAuth`, taking their identity from the TLS
   client certificate instead of a stored password. A configured EXTERNAL bind

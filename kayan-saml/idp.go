@@ -116,8 +116,14 @@ type IdentityProvider struct {
 	sessionStore SessionStore
 	hooks        IdPHooks
 
-	signer Signer
-	clock  domain.Clock
+	signer   Signer
+	verifier SignatureVerifier
+	clock    domain.Clock
+
+	// decrypter opens an EncryptedID in a service provider's logout request.
+	// Nil is fine until a peer sends one, which is refused rather than
+	// silently yielding no subject.
+	decrypter Decrypter
 }
 
 // IdPOption configures an [IdentityProvider].
@@ -128,6 +134,12 @@ type IdPOption func(*IdentityProvider)
 // Implement [Signer] yourself to keep the private key in an HSM or KMS.
 func WithIdPSigner(s Signer) IdPOption {
 	return func(idp *IdentityProvider) { idp.signer = s }
+}
+
+// WithIdPDecrypter enables encrypted name identifiers in incoming logout
+// requests, for federations that encrypt subject identifiers.
+func WithIdPDecrypter(d Decrypter) IdPOption {
+	return func(idp *IdentityProvider) { idp.decrypter = d }
 }
 
 // WithIdPClock sets the clock used for assertion validity windows.
@@ -177,14 +189,26 @@ func (idp *IdentityProvider) SetHooks(hooks IdPHooks) {
 }
 
 // RegisterSP adds a Service Provider.
+//
+// The registration is indexed under both its ID and its EntityID, so a lookup
+// works with either. That means iterating the map yields each registration
+// twice; anything walking it must deduplicate.
+//
+// The write takes the lock. It did not, and a deployment registering a service
+// provider while another request looks one up -- which is what happens when
+// registrations are loaded from a database on demand -- is a concurrent map
+// write, which Go detects by crashing the process.
 func (idp *IdentityProvider) RegisterSP(sp *SPRegistration) {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
 	idp.sps[sp.ID] = sp
-	// Also index by EntityID for lookup
 	idp.sps[sp.EntityID] = sp
 }
 
-// GetSP retrieves a registered SP.
+// GetSP retrieves a registered SP by ID or EntityID.
 func (idp *IdentityProvider) GetSP(id string) (*SPRegistration, error) {
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
 	sp, ok := idp.sps[id]
 	if !ok {
 		return nil, fmt.Errorf("SP not found: %s", id)
