@@ -188,7 +188,7 @@ func (d *Dialer) DialTLS(ctx context.Context, addr string) (flow.LDAPConn, error
 		}
 	}
 
-	c := &Conn{conn: conn, timeout: d.timeout}
+	c := &Conn{conn: conn, timeout: d.timeout, hasClientCert: d.hasClientCertificate()}
 	c.watch(ctx)
 	return c, nil
 }
@@ -200,6 +200,10 @@ type Conn struct {
 	conn    ldapClient
 	timeout time.Duration
 	done    chan struct{}
+
+	// hasClientCert records whether this connection presented a client
+	// certificate, which is the entire basis of a SASL EXTERNAL identity.
+	hasClientCert bool
 }
 
 // ldapClient is the slice of *ldap.Conn this package uses.
@@ -210,6 +214,7 @@ type Conn struct {
 // a directory that holds more entries than its own page size.
 type ldapClient interface {
 	Bind(username, password string) error
+	ExternalBind() error
 	Search(req *ldap.SearchRequest) (*ldap.SearchResult, error)
 	Close() error
 }

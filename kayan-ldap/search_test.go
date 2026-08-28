@@ -19,6 +19,7 @@ type stubClient struct {
 }
 
 func (c *stubClient) Bind(username, password string) error { return nil }
+func (c *stubClient) ExternalBind() error                  { return nil }
 func (c *stubClient) Close() error                         { return nil }
 
 func (c *stubClient) Search(req *ldap.SearchRequest) (*ldap.SearchResult, error) {

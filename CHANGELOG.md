@@ -87,6 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- LDAP service accounts can authenticate with SASL EXTERNAL via
+  `flow.LDAPConfig.ServiceAccountAuth`, taking their identity from the TLS
+  client certificate instead of a stored password. A configured EXTERNAL bind
+  never falls back to a simple one, and `ldapstore` refuses it when no client
+  certificate is configured. `client_secret`-style mechanisms DIGEST-MD5 and
+  NTLM are deliberately not offered.
 - SAML `EncryptedID` is resolved in assertions and logout requests, after the
   signature has been verified. Without a decrypter it is refused with
   `ErrNoDecrypter`; a subject carrying both a `NameID` and an `EncryptedID` is

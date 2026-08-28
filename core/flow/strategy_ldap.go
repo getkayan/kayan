@@ -18,6 +18,38 @@ type LDAPDialer interface {
 	DialTLS(ctx context.Context, addr string) (LDAPConn, error)
 }
 
+// Service-account authentication methods for [LDAPConfig.ServiceAccountAuth].
+const (
+	// LDAPServiceAuthSimple binds the service account with a DN and password.
+	// This is the default.
+	LDAPServiceAuthSimple = ""
+
+	// LDAPServiceAuthExternal binds the service account with SASL EXTERNAL,
+	// taking its identity from the TLS client certificate (RFC 4422 appendix
+	// A).
+	//
+	// No service password exists to rotate, leak, or find in a configuration
+	// file. It requires a connection presenting a client certificate the
+	// directory maps to an account, which is why the dialer refuses it when
+	// none is configured: a SASL EXTERNAL bind over a connection with no
+	// client certificate is accepted by many directories as anonymous, and an
+	// anonymous search returns nothing -- so every login in the deployment
+	// fails as "user not found" while the bind reports success.
+	LDAPServiceAuthExternal = "external"
+)
+
+// LDAPExternalBinder is implemented by connections that can bind with SASL
+// EXTERNAL.
+//
+// It is an optional interface on [LDAPConn] rather than a method on it,
+// because a deployment using simple binds needs no such capability and an
+// adapter should not have to stub one.
+type LDAPExternalBinder interface {
+	// BindExternal authenticates the connection from its TLS client
+	// certificate.
+	BindExternal(ctx context.Context) error
+}
+
 // LDAPConn is a minimal interface over an active LDAP connection.
 type LDAPConn interface {
 	// Bind authenticates on the connection with dn and password.
@@ -75,6 +107,14 @@ type LDAPConfig struct {
 	ServiceAccountDN string
 	// ServiceAccountPassword is the service account's password. Never log this.
 	ServiceAccountPassword string
+
+	// ServiceAccountAuth selects how the service account authenticates:
+	// [LDAPServiceAuthSimple] (the default) or [LDAPServiceAuthExternal].
+	//
+	// It governs only the service-account bind. The end user is always
+	// verified by a simple bind with the password they supplied, because that
+	// is the credential being checked.
+	ServiceAccountAuth string
 	// TraitAttributes maps Kayan trait names to LDAP attribute names, e.g. {"email": "mail"}.
 	TraitAttributes map[string]string
 }
@@ -218,7 +258,7 @@ func (s *LDAPStrategy) lookup(ctx context.Context, username string) (LDAPConn, [
 		// deployment. It is treated as a fault of this host rather than a
 		// verdict, since a replica that has not caught up with a password
 		// rotation is exactly the case failover should survive.
-		if err := conn.Bind(s.config.ServiceAccountDN, s.config.ServiceAccountPassword); err != nil {
+		if err := s.bindServiceAccount(ctx, conn); err != nil {
 			_ = conn.Close()
 			failures = append(failures, fmt.Sprintf("%s: service account bind: %v", addr, err))
 			lastKind = ErrLDAPConnectionFailed
@@ -249,6 +289,24 @@ func (s *LDAPStrategy) lookup(ctx context.Context, username string) (LDAPConn, [
 		return nil, nil, fmt.Errorf("%w: no directory address is configured", ErrLDAPConnectionFailed)
 	}
 	return nil, nil, fmt.Errorf("%w: %s", lastKind, strings.Join(failures, "; "))
+}
+
+// bindServiceAccount authenticates the connection as the service account.
+//
+// A configured EXTERNAL bind against a connection that cannot perform one is
+// an error, never a fall back to a simple bind. Falling back would send the
+// service password over a connection the deployment had decided should carry
+// no password, and would do it silently.
+func (s *LDAPStrategy) bindServiceAccount(ctx context.Context, conn LDAPConn) error {
+	if s.config.ServiceAccountAuth == LDAPServiceAuthExternal {
+		binder, ok := conn.(LDAPExternalBinder)
+		if !ok {
+			return fmt.Errorf("the dialer does not support SASL EXTERNAL, which %q requires",
+				LDAPServiceAuthExternal)
+		}
+		return binder.BindExternal(ctx)
+	}
+	return conn.Bind(s.config.ServiceAccountDN, s.config.ServiceAccountPassword)
 }
 
 // addresses returns the directory addresses to try, in order.
