@@ -139,6 +139,11 @@ type gormClient struct {
 	AppName                 string
 	TokenEndpointAuthMethod string
 	BackChannelLogoutURI    string
+	// PostLogoutRedirectURIs is the allowlist RP-initiated logout checks a
+	// post_logout_redirect_uri against. Omitting the column did not weaken
+	// that check -- it emptied the allowlist, so every registered target was
+	// refused.
+	PostLogoutRedirectURIs []string `gorm:"type:text;serializer:json"`
 	// JWKS holds the client's registered public keys for private_key_jwt.
 	// It is a JWKS document, not a secret: only public halves belong here.
 	JWKS []byte `gorm:"type:text"`
@@ -159,6 +164,7 @@ func toCoreClient(gc *gormClient) *oauth2.Client {
 		AppName:                 gc.AppName,
 		TokenEndpointAuthMethod: gc.TokenEndpointAuthMethod,
 		BackChannelLogoutURI:    gc.BackChannelLogoutURI,
+		PostLogoutRedirectURIs:  gc.PostLogoutRedirectURIs,
 		JWKS:                    gc.JWKS,
 	}
 }
@@ -176,6 +182,7 @@ func fromCoreClient(c *oauth2.Client) *gormClient {
 		AppName:                 c.AppName,
 		TokenEndpointAuthMethod: c.TokenEndpointAuthMethod,
 		BackChannelLogoutURI:    c.BackChannelLogoutURI,
+		PostLogoutRedirectURIs:  c.PostLogoutRedirectURIs,
 		JWKS:                    c.JWKS,
 	}
 }

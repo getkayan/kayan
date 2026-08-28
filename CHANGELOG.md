@@ -87,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- The GORM OAuth 2.0 store now persists `Client.PostLogoutRedirectURIs`. It had
+  no column, so the allowlist read back empty and RP-initiated logout refused
+  every redirect target a deployment had registered.
 - `private_key_jwt` client authentication (RFC 7523, OIDC Core section 9), via
   `oauth2.WithClientAssertions`. Assertions are single-use: a
   `ClientAssertionStore` records spent `jti` values, and without one the method
