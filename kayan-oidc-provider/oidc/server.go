@@ -38,6 +38,7 @@ import (
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/identity"
 	"github.com/getkayan/kayan/core/keys"
+	"github.com/getkayan/kayan/kayan-oidc-provider/oauth2"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -69,6 +70,7 @@ type Server struct {
 	keyProvider             keys.Provider
 	claims                  ClaimsSource
 	introspector            TokenIntrospector
+	clients                 oauth2.ClientStore
 	clock                   domain.Clock
 	allowPlainCodeChallenge bool
 }

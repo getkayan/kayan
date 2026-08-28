@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `oidc.Server.ParseEndSessionRequest` implements RP-initiated logout, which
+  discovery already advertised with nothing behind it. `oauth2.Client` gains
+  `PostLogoutRedirectURIs`, and `oidc.WithClientStore` supplies the store the
+  allowlist is read from. `BuildDiscovery` now refuses to advertise an
+  end-session endpoint when no client store is configured.
 - `saml.ServiceProvider.ProcessRedirectLogoutRequest` verifies a LogoutRequest
   that arrived over the HTTP-Redirect binding, which the metadata document
   already advertised but no code path could check. `saml.VerifyRedirectSignature`

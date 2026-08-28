@@ -45,6 +45,28 @@ type Client struct {
 	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method"`
 
 	BackChannelLogoutURI string `json:"back_channel_logout_uri"`
+
+	// PostLogoutRedirectURIs is the allowlist this client may be redirected to
+	// after an RP-initiated logout. Like RedirectURIs it is matched exactly:
+	// a prefix or wildcard match turns the end-session endpoint into an open
+	// redirector on an authentication domain.
+	//
+	// An empty list denies every redirect, which is the safe reading of "this
+	// client registered none".
+	PostLogoutRedirectURIs []string `json:"post_logout_redirect_uris"`
+}
+
+// AllowsPostLogoutRedirectURI reports whether uri may be redirected to after
+// this client ends a session.
+//
+// The comparison is exact. An empty allowlist denies everything.
+func (c *Client) AllowsPostLogoutRedirectURI(uri string) bool {
+	for _, allowed := range c.PostLogoutRedirectURIs {
+		if allowed == uri {
+			return true
+		}
+	}
+	return false
 }
 
 // IsPublic reports whether the client authenticates with no secret.

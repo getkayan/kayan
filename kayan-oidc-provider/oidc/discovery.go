@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/getkayan/kayan/kayan-oidc-provider/oauth2"
@@ -51,6 +52,18 @@ type DiscoveryOptions struct {
 //	doc, err := server.BuildDiscovery(ctx, opts)
 //	json.NewEncoder(w).Encode(doc)
 func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Discovery, error) {
+	// RP-initiated logout validates post_logout_redirect_uri against the
+	// requesting client's allowlist, so without a client store the endpoint
+	// refuses every request that carries one. Advertising it anyway is the
+	// interoperability bug this function exists to prevent, in the direction
+	// that matters most: a relying party that trusts the metadata builds a
+	// logout flow the provider cannot complete.
+	if opts.Endpoints.EndSession != "" && s.clients == nil {
+		return Discovery{}, fmt.Errorf("oidc: an end-session endpoint is configured but no client "+
+			"store is: RP-initiated logout cannot validate a redirect target, so the endpoint "+
+			"must not be advertised (supply %s)", "WithClientStore")
+	}
+
 	doc := Discovery{
 		Issuer:                s.issuer,
 		AuthorizationEndpoint: opts.Endpoints.Authorization,
