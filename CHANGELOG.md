@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- `keys.ParseJWKS`, `keys.JWKS.Find`, and `keys.JWK.PublicKey` read a key set
+  somebody else published -- the inverse of `keys.BuildJWKS`. An `oct` key is
+  refused with `keys.ErrSymmetricJWK` rather than returned as a public key, RSA
+  moduli under 2048 bits and off-curve EC points are rejected, and a kid-less
+  lookup resolves only against a single-key set.
 - `oauth2.ClientStore` implementations may report an unknown client as
   `(nil, nil)`. `ParseAuthorizeRequest`, `GenerateAuthCode`, and
   `ValidateClient` dereferenced the result, so such a store turned any request
