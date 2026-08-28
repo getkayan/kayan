@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -58,7 +59,35 @@ type IDTokenRequest struct {
 	// Code is the authorization code issued alongside this ID token, which
 	// happens in the hybrid flow. When set, the token carries a "c_hash".
 	Code string
+
+	// ACR is the authentication context class the sign-in reached, emitted as
+	// the acr claim. AMR lists the methods used, emitted as amr.
+	//
+	// They describe what actually happened, not what was asked for. A relying
+	// party that sent acr_values reads acr to find out whether it got what it
+	// wanted -- OIDC makes acr_values a voluntary request, so a provider may
+	// legitimately authenticate differently and say so here.
+	ACR string
+	AMR []string
+
+	// MaxAgeSeconds is a max_age the authorization request carried, nil when
+	// it did not.
+	//
+	// When set, AuthTime is mandatory and must satisfy it. OIDC Core section
+	// 3.1.3.6 requires an auth_time claim in that case, and a token minted
+	// without one answers a demand for a fresh authentication with no evidence
+	// that any happened.
+	MaxAgeSeconds *int
 }
+
+// ErrMaxAgeNotSatisfied reports an ID token that would have ignored a max_age
+// the authorization request carried.
+//
+// It is returned rather than a token because the alternative is silent: the
+// relying party asked for an authentication no older than N seconds, receives
+// a well-formed token describing an older one, and has nothing to compare
+// against when auth_time is missing entirely.
+var ErrMaxAgeNotSatisfied = errors.New("oidc: ID token would not satisfy the requested max_age")
 
 // DefaultIDTokenTTL is how long an ID token is valid when no TTL is given.
 const DefaultIDTokenTTL = time.Hour
@@ -81,6 +110,21 @@ func (s *Server) IssueIDToken(ctx context.Context, req IDTokenRequest) (string, 
 	}
 
 	now := s.now()
+
+	// A max_age request without an auth_time claim is not a valid ID token
+	// (OIDC Core section 3.1.3.6), and the relying party that asked for a
+	// fresh authentication would have nothing to check. Refusing here is the
+	// last place the omission is catchable.
+	if req.MaxAgeSeconds != nil {
+		if req.AuthTime.IsZero() {
+			return "", fmt.Errorf("%w: the request carried max_age, so auth_time is required",
+				ErrMaxAgeNotSatisfied)
+		}
+		if now.Sub(req.AuthTime) > time.Duration(*req.MaxAgeSeconds)*time.Second {
+			return "", fmt.Errorf("%w: authenticated at %s, max_age is %d seconds",
+				ErrMaxAgeNotSatisfied, req.AuthTime.UTC().Format(time.RFC3339), *req.MaxAgeSeconds)
+		}
+	}
 	ttl := req.TTL
 	if ttl <= 0 {
 		ttl = DefaultIDTokenTTL
@@ -139,6 +183,12 @@ func (s *Server) IssueIDToken(ctx context.Context, req IDTokenRequest) (string, 
 	}
 	if !req.AuthTime.IsZero() {
 		claims["auth_time"] = req.AuthTime.Unix()
+	}
+	if req.ACR != "" {
+		claims["acr"] = req.ACR
+	}
+	if len(req.AMR) > 0 {
+		claims["amr"] = req.AMR
 	}
 
 	return s.sign(ctx, claims)

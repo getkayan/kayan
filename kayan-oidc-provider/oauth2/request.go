@@ -26,6 +26,12 @@ type AuthorizeRequest struct {
 	CodeChallenge       string
 	CodeChallengeMethod string
 	Prompt              []string
+
+	// AuthenticationRequirements carries max_age and acr_values. They are
+	// constraints on the sign-in rather than on the request, so the caller
+	// consults them before reusing an existing session; see
+	// [AuthenticationRequirements.NeedsReauthentication].
+	AuthenticationRequirements
 }
 
 // ParseAuthorizeRequest validates authorization request parameters.
@@ -72,6 +78,11 @@ func (p *Provider) ParseAuthorizeRequest(ctx context.Context, values url.Values)
 		return nil, ErrInvalidRequest.WithDescription("redirect_uri is not registered for this client")
 	}
 
+	maxAge, err := parseMaxAge(values.Get("max_age"))
+	if err != nil {
+		return nil, err
+	}
+
 	responseType := splitSpace(values.Get("response_type"))
 	if len(responseType) == 0 {
 		return nil, ErrInvalidRequest.WithDescription("response_type is required")
@@ -116,6 +127,10 @@ func (p *Provider) ParseAuthorizeRequest(ctx context.Context, values url.Values)
 		CodeChallenge:       challenge,
 		CodeChallengeMethod: method,
 		Prompt:              splitSpace(values.Get("prompt")),
+		AuthenticationRequirements: AuthenticationRequirements{
+			MaxAge:    maxAge,
+			ACRValues: splitSpace(values.Get("acr_values")),
+		},
 	}, nil
 }
 

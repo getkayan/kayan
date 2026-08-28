@@ -155,6 +155,24 @@ type AuthCode struct {
 	// section 15.5.2).
 	Nonce     string    `json:"nonce,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
+
+	// AuthTime is when the end user actually authenticated, which is not when
+	// this code was issued: a code issued from a reused session records the
+	// older moment. It is what the ID token's auth_time claim reports and what
+	// max_age is checked against.
+	AuthTime time.Time `json:"auth_time,omitempty"`
+
+	// ACR is the authentication context class the sign-in actually reached,
+	// and AMR the methods it used. They travel with the code because the token
+	// endpoint mints the ID token and the authorization endpoint is where the
+	// authentication happened.
+	ACR string   `json:"acr,omitempty"`
+	AMR []string `json:"amr,omitempty"`
+
+	// MaxAgeSeconds records a max_age the authorization request carried, so
+	// the token endpoint can refuse to mint an ID token that would silently
+	// ignore it. Nil means the parameter was absent.
+	MaxAgeSeconds *int `json:"max_age,omitempty"`
 }
 
 // AuthCodeStore defines the interface for managing authorization codes.

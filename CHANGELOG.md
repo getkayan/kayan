@@ -87,6 +87,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- OIDC `max_age` and `acr_values` are parsed, carried on the authorization
+  code, and enforced. A code cannot be issued for a `max_age` request without
+  an authentication time, `Exchange` refuses a code whose authentication has
+  since gone stale, and `IssueIDToken` refuses to mint a token that would omit
+  or contradict `auth_time`. ID tokens carry `acr` and `amr`;
+  `DiscoveryOptions.ACRValues` advertises `acr_values_supported`.
+- `oauth2.TokenResponse.Authentication` returns the nonce, `auth_time`, `acr`,
+  and `amr` from the consumed authorization code. The nonce was previously
+  unreachable through the ordinary flow, which left the ID-token replay defence
+  implemented but unusable from outside.
+- **Breaking:** `oauth2.TokenResponse` and `oauth2.AuthCode` gained fields;
+  `TokenResponse` is no longer comparable with `==`, and an `AuthCodeStore`
+  must persist the four new `AuthCode` fields.
 - SAML step-up: `ServiceProvider.InitiateLoginWith` sends `ForceAuthn`,
   `IsPassive`, and `RequestedAuthnContext`, and the response is checked against
   what was asked. An assertion whose `AuthnContextClassRef` was not requested is

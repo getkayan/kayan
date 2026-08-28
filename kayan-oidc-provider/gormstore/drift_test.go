@@ -57,6 +57,14 @@ func fillStruct(t *testing.T, v any, seed int64) {
 		case field.Type.Kind() == reflect.Ptr && field.Type.Elem() == reflect.TypeOf(time.Time{}):
 			when := time.Unix(1700000000+rng.Int63n(1000), 0).UTC()
 			target.Set(reflect.ValueOf(&when))
+		case field.Type.Kind() == reflect.Ptr && field.Type.Elem().Kind() == reflect.Int:
+			// A pointer to int carries three states -- absent, zero, and a
+			// value -- and the middle one is why these fields are pointers.
+			// Filling with a non-zero value catches a converter that drops the
+			// field; the zero case is covered where it matters, in the
+			// max_age tests.
+			n := i + 1
+			target.Set(reflect.ValueOf(&n))
 		default:
 			t.Fatalf("fillStruct does not know how to fill %s.%s (%s); "+
 				"extend it rather than skipping the field, or the drift this "+

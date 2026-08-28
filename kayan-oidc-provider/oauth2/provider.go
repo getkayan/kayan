@@ -175,6 +175,34 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 	IDToken      string `json:"id_token,omitempty"`
 	Sub          string `json:"sub,omitempty"`
+
+	// Authentication carries what the authorization endpoint recorded about
+	// the sign-in, for the caller to pass to the ID token issuer. It is not
+	// serialised -- none of it belongs in the token endpoint's JSON response.
+	//
+	// Without it the nonce was unreachable: the authorization code holds it,
+	// Exchange consumes and deletes that code, and nothing handed the value
+	// back. A caller following the ordinary flow could not populate the nonce
+	// claim at all, which left the ID-token replay defence (OIDC Core section
+	// 15.5.2) implemented in the issuer and unusable from outside.
+	Authentication AuthenticationInfo `json:"-"`
+}
+
+// AuthenticationInfo is what the authorization endpoint knew about the sign-in
+// and the token endpoint has to pass on.
+type AuthenticationInfo struct {
+	// Nonce echoes the authorization request's nonce into the ID token.
+	Nonce string
+
+	// AuthTime is when the end user actually authenticated. It becomes the
+	// auth_time claim, which OIDC Core section 3.1.3.6 requires whenever the
+	// request carried max_age.
+	AuthTime time.Time
+
+	// ACR is the authentication context class the sign-in reached, and AMR the
+	// methods used. They become the acr and amr claims.
+	ACR string
+	AMR []string
 }
 
 func NewProvider(cs ClientStore, acs AuthCodeStore, rts RefreshTokenStore, issuer string, signingKey any, keyID string, opts ...ProviderOption) *Provider {
@@ -322,6 +350,21 @@ func (p *Provider) Exchange(ctx context.Context, code, clientID, clientSecret, r
 		return nil, err
 	}
 
+	// A code issued for a request that carried max_age must record an
+	// authentication recent enough to satisfy it. Failing here rather than
+	// minting the token is the point: if the authorization endpoint reused a
+	// session that was already too old, the relying party asked for a fresh
+	// authentication, did not get one, and would have no way to tell.
+	if authCode.MaxAgeSeconds != nil {
+		requirements := AuthenticationRequirements{MaxAge: authCode.MaxAgeSeconds}
+		if !requirements.SatisfiedBy(authCode.AuthTime, p.clock.Now()) {
+			p.logAudit(ctx, "oauth2.exchange.failure", clientID, authCode.IdentityID,
+				"failure", "authentication older than the requested max_age")
+			return nil, ErrInvalidGrant.WithDescription(
+				"the authentication behind this code is older than the requested max_age")
+		}
+	}
+
 	accessToken, err := p.GenerateAccessToken(clientID, authCode.IdentityID, authCode.Scopes)
 	if err != nil {
 		return nil, ErrServerError.WithCause(err)
@@ -340,6 +383,12 @@ func (p *Provider) Exchange(ctx context.Context, code, clientID, clientSecret, r
 		ExpiresIn:    int64(accessTokenTTL.Seconds()),
 		RefreshToken: refreshValue,
 		Sub:          authCode.IdentityID,
+		Authentication: AuthenticationInfo{
+			Nonce:    authCode.Nonce,
+			AuthTime: authCode.AuthTime,
+			ACR:      authCode.ACR,
+			AMR:      authCode.AMR,
+		},
 	}, nil
 }
 
@@ -880,8 +929,32 @@ func (p *Provider) Revoke(ctx context.Context, tokenString string) error {
 // checked by [Provider.ParseAuthorizeRequest], and the nonce is carried
 // through to the ID token.
 func (p *Provider) GenerateAuthCodeFor(ctx context.Context, req *AuthorizeRequest, identityID string) (string, error) {
+	return p.GenerateAuthCodeForAuthentication(ctx, req, identityID, AuthenticationInfo{})
+}
+
+// GenerateAuthCodeForAuthentication issues an authorization code and records
+// what the sign-in actually was.
+//
+// Supply it wherever the deployment knows: auth carries the moment the end
+// user authenticated, the context class the sign-in reached, and the methods
+// used. Those become the ID token's auth_time, acr, and amr claims, and
+// auth_time is what max_age is judged against.
+//
+// A request that carried max_age with no AuthTime is refused. Issuing the code
+// anyway would produce an ID token with no auth_time -- which OIDC Core
+// section 3.1.3.6 forbids for a max_age request -- and would silently answer a
+// demand for a fresh authentication with whatever session happened to exist.
+func (p *Provider) GenerateAuthCodeForAuthentication(ctx context.Context, req *AuthorizeRequest, identityID string, auth AuthenticationInfo) (string, error) {
 	if req == nil {
 		return "", ErrInvalidRequest.WithDescription("no authorization request")
+	}
+	if req.MaxAge != nil && auth.AuthTime.IsZero() {
+		return "", ErrServerError.WithDescription("the request carried max_age but no authentication time " +
+			"was supplied; use GenerateAuthCodeForAuthentication and set AuthTime")
+	}
+	if req.MaxAge != nil && !req.SatisfiedBy(auth.AuthTime, p.clock.Now()) {
+		return "", ErrServerError.WithDescription("the supplied authentication is older than the " +
+			"requested max_age; reauthenticate the end user before issuing a code")
 	}
 
 	code, err := p.tokens()
@@ -899,6 +972,10 @@ func (p *Provider) GenerateAuthCodeFor(ctx context.Context, req *AuthorizeReques
 		CodeChallengeMethod: req.CodeChallengeMethod,
 		Nonce:               req.Nonce,
 		ExpiresAt:           p.clock.Now().Add(authCodeTTL),
+		AuthTime:            auth.AuthTime,
+		ACR:                 auth.ACR,
+		AMR:                 auth.AMR,
+		MaxAgeSeconds:       req.MaxAge,
 	}
 	if err := p.authCodeStore.SaveAuthCode(ctx, authCode); err != nil {
 		return "", ErrServerError.WithCause(err)

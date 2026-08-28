@@ -37,6 +37,15 @@ type DiscoveryOptions struct {
 
 	// GrantTypes advertised. Defaults to the grants the provider implements.
 	GrantTypes []string
+
+	// ACRValues lists the authentication context class references this
+	// deployment can actually reach, advertised as acr_values_supported.
+	//
+	// It has no default. Kayan does not perform the authentication and cannot
+	// know which classes a deployment reaches, and listing a class the
+	// deployment cannot produce would have relying parties send acr_values
+	// that are always answered differently.
+	ACRValues []string
 }
 
 // BuildDiscovery assembles the OpenID Provider metadata document.
@@ -79,7 +88,7 @@ func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Dis
 		SubjectTypesSupported:  []string{"public"},
 
 		ScopesSupported: defaultTo(opts.Scopes, []string{"openid", "profile", "email"}),
-		ClaimsSupported: defaultTo(opts.Claims, []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce"}),
+		ClaimsSupported: defaultTo(opts.Claims, []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "acr", "amr"}),
 		GrantTypesSupported: defaultTo(opts.GrantTypes, []string{
 			oauth2.GrantAuthorizationCode,
 			oauth2.GrantRefreshToken,
@@ -87,6 +96,7 @@ func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Dis
 		}),
 
 		TokenEndpointAuthMethodsSupported: s.tokenEndpointAuthMethods(),
+		ACRValuesSupported:                opts.ACRValues,
 	}
 
 	// Advertise the algorithms the configured keys actually sign with.

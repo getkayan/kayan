@@ -59,7 +59,13 @@ type Discovery struct {
 	GrantTypesSupported               []string `json:"grant_types_supported,omitempty"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
-	ClaimsSupported                   []string `json:"claims_supported"`
+
+	// ACRValuesSupported lists the authentication context class references
+	// this provider can reach. It is omitted when the deployment declares
+	// none, since a provider that lists a class it cannot produce sends
+	// relying parties acr_values it will always answer differently.
+	ACRValuesSupported []string `json:"acr_values_supported,omitempty"`
+	ClaimsSupported    []string `json:"claims_supported"`
 }
 
 type Server struct {

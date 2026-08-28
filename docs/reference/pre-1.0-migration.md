@@ -13,6 +13,14 @@ and HTTP dependencies in `core`. The reviewed API snapshots in
   modules. Applications import only the protocols and adapters they choose.
 - Storage contracts use consumer-owned models, `any`, and factories to support
   Bring Your Own Schema rather than prescribed database models.
+- `oauth2.TokenResponse` gained `Authentication`, which carries a `[]string`,
+  so the struct is no longer comparable with `==`. The field is not serialised;
+  it exists because the nonce, `auth_time`, `acr`, and `amr` live on the
+  authorization code that `Exchange` consumes and deletes, and nothing handed
+  them back.
+- `oauth2.AuthCode` gained `AuthTime`, `ACR`, `AMR`, and `MaxAgeSeconds`. An
+  `AuthCodeStore` must persist all four, or the token endpoint cannot tell
+  whether `max_age` was honoured.
 - `saml.Session` gained `RequestedAuthnContexts []string`, so the struct is no
   longer comparable with `==`. A `SessionStore` implementation persisting the
   new field is what makes `ForceAuthn` and `RequestedAuthnContext` enforceable:

@@ -198,8 +198,16 @@ type gormAuthCode struct {
 	// Nonce binds the ID token issued from this code to the authorization
 	// request that produced it. Dropping it here silently removed that
 	// binding for every deployment on this adapter.
-	Nonce     string
-	ExpiresAt time.Time `gorm:"index"`
+	Nonce string
+	// AuthTime, ACR, and AMR record what the sign-in behind this code actually
+	// was. MaxAgeSeconds records what the authorization request demanded of
+	// it. Dropping any of them would leave the token endpoint unable to tell
+	// whether max_age was honoured.
+	AuthTime      time.Time
+	ACR           string
+	AMR           []string `gorm:"type:text;serializer:json"`
+	MaxAgeSeconds *int
+	ExpiresAt     time.Time `gorm:"index"`
 }
 
 func (gormAuthCode) TableName() string { return "oauth2_auth_codes" }
@@ -217,6 +225,10 @@ func toCoreAuthCode(gc *gormAuthCode) *oauth2.AuthCode {
 		CodeChallenge:       gc.CodeChallenge,
 		CodeChallengeMethod: gc.CodeChallengeMethod,
 		Nonce:               gc.Nonce,
+		AuthTime:            gc.AuthTime,
+		ACR:                 gc.ACR,
+		AMR:                 gc.AMR,
+		MaxAgeSeconds:       gc.MaxAgeSeconds,
 		ExpiresAt:           gc.ExpiresAt,
 	}
 }
@@ -234,6 +246,10 @@ func fromCoreAuthCode(c *oauth2.AuthCode) *gormAuthCode {
 		CodeChallenge:       c.CodeChallenge,
 		CodeChallengeMethod: c.CodeChallengeMethod,
 		Nonce:               c.Nonce,
+		AuthTime:            c.AuthTime,
+		ACR:                 c.ACR,
+		AMR:                 c.AMR,
+		MaxAgeSeconds:       c.MaxAgeSeconds,
 		ExpiresAt:           c.ExpiresAt,
 	}
 }
