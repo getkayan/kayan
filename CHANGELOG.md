@@ -87,6 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- Outgoing SAML `AuthnRequest` messages are signed when `Config.SignRequests`
+  is set, through the new `saml.RedirectSigner` seam and
+  `saml.WithRedirectSigner`. Previously the flag was read only to populate
+  metadata, so a service provider advertised signed requests and sent unsigned
+  ones; it now fails closed when it cannot sign. `Config.SignatureMethod` is
+  honoured, and RSA-SHA1 is refused rather than silently upgraded.
 - SAML metadata generation emits `KeyDescriptor` elements, logout endpoints,
   NameID formats, and `WantAssertionsSigned`. The previous documents carried
   no key material, so an identity provider had nothing to verify signatures

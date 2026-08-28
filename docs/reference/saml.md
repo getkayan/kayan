@@ -99,8 +99,21 @@ itself are running.
 func WithSPSigner(s Signer) SPOption
 ```
 
-Sets the signer used for outgoing `AuthnRequest` messages. Relevant only when
-`Config.SignRequests` is true.
+Sets the signer for enveloped XML-DSig signatures, used on outgoing
+`LogoutResponse` documents.
+
+It does not sign redirect-binding messages. Those carry a detached signature in
+the URL query, which needs a different primitive:
+
+```go
+func WithRedirectSigner(s RedirectSigner) SPOption
+```
+
+Sets the signer for HTTP-Redirect binding messages, which is what signs an
+outgoing `AuthnRequest`. When `Config.SignRequests` is true and no redirect
+signer is supplied, one is derived from `Config.PrivateKey`; supply this to
+keep the key in an HSM. `Config.SignRequests` with neither a private key nor a
+signer is an error at login rather than a silent downgrade to unsigned.
 
 ```go
 func WithSPClock(c domain.Clock) SPOption

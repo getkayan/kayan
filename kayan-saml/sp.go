@@ -437,6 +437,7 @@ type ServiceProvider struct {
 	verifier           SignatureVerifier
 	decrypter          Decrypter
 	signer             Signer
+	redirectSigner     RedirectSigner
 	replayCache        ReplayCache
 	clock              domain.Clock
 	metadataHTTPClient HTTPDoer
@@ -480,7 +481,6 @@ func WithSignatureVerifier(v SignatureVerifier) SPOption {
 	return func(sp *ServiceProvider) { sp.verifier = v }
 }
 
-// WithSPSigner sets the signer used for outgoing AuthnRequests.
 // WithDecrypter enables encrypted assertions.
 //
 // Without one, a response carrying an EncryptedAssertion is refused with
@@ -492,6 +492,12 @@ func WithDecrypter(d Decrypter) SPOption {
 	return func(sp *ServiceProvider) { sp.decrypter = d }
 }
 
+// WithSPSigner sets the signer for enveloped XML-DSig signatures, used on
+// outgoing LogoutResponse documents.
+//
+// It does NOT sign redirect-binding messages: those carry a detached signature
+// in the URL query and need [WithRedirectSigner]. The two are separate because
+// they sign different things, and a signer for one cannot produce the other.
 func WithSPSigner(s Signer) SPOption {
 	return func(sp *ServiceProvider) { sp.signer = s }
 }
@@ -518,6 +524,20 @@ func WithAutoProvision() SPOption {
 }
 
 // WithSPClock sets the clock used for validity windows.
+// WithRedirectSigner supplies the signer for HTTP-Redirect binding messages.
+//
+// It is separate from [WithSPSigner] because the two sign different things:
+// WithSPSigner produces an enveloped XML-DSig signature inside a document,
+// while the redirect binding signs a detached octet string built from the URL
+// query. A DEFLATE-compressed message has no XML left for a signature to live
+// in, so one signer cannot serve both.
+//
+// When Config.SignRequests is set and no redirect signer is supplied, one is
+// derived from Config.PrivateKey. Supply this to keep the key in an HSM.
+func WithRedirectSigner(s RedirectSigner) SPOption {
+	return func(sp *ServiceProvider) { sp.redirectSigner = s }
+}
+
 func WithSPClock(c domain.Clock) SPOption {
 	return func(sp *ServiceProvider) { sp.clock = c }
 }
@@ -677,6 +697,15 @@ func (sp *ServiceProvider) InitiateLogin(ctx context.Context, idpID string, retu
 		}
 	}
 
+	// Resolve the signer before anything is persisted. A refused login must
+	// not leave a pending session behind: that would let an unauthenticated
+	// caller fill the session store by repeatedly asking for a login the
+	// service provider cannot actually perform.
+	redirectSigner, err := sp.resolveRedirectSigner()
+	if err != nil {
+		return "", err
+	}
+
 	// Before hook
 	if sp.hooks.BeforeAuthnRequest != nil {
 		if err := sp.hooks.BeforeAuthnRequest(ctx, idpID, req); err != nil {
@@ -717,16 +746,45 @@ func (sp *ServiceProvider) InitiateLogin(ctx context.Context, idpID string, retu
 		return "", err
 	}
 
-	redirect, err := url.Parse(idp.SSOUrl)
-	if err != nil {
-		return "", fmt.Errorf("saml: parse SSO URL: %w", err)
-	}
-	query := redirect.Query()
-	query.Set("SAMLRequest", encoded)
-	query.Set("RelayState", session.ID)
-	redirect.RawQuery = query.Encode()
+	return redirectURL(ctx, idp.SSOUrl, "SAMLRequest", encoded, session.ID, redirectSigner)
+}
 
-	return redirect.String(), nil
+// resolveRedirectSigner returns the signer for outgoing redirect-binding
+// requests, or nil when the deployment does not sign them.
+//
+// Config.SignRequests used to be read only to populate the metadata document's
+// AuthnRequestsSigned attribute, so a service provider advertised signed
+// requests and sent unsigned ones. An identity provider configured to require
+// signatures rejected every login, and nothing on this side reported why.
+//
+// It now fails closed. A deployment that asks for signing and cannot sign is a
+// misconfiguration the operator has to see, and the first login attempt is
+// where they see it.
+func (sp *ServiceProvider) resolveRedirectSigner() (RedirectSigner, error) {
+	if !sp.config.SignRequests {
+		return nil, nil
+	}
+
+	if sp.redirectSigner != nil {
+		return sp.redirectSigner, nil
+	}
+
+	if sp.config.PrivateKey == nil {
+		return nil, fmt.Errorf("%w: Config.SignRequests is set, so configure "+
+			"Config.PrivateKey or supply WithRedirectSigner", ErrNoRedirectSigner)
+	}
+
+	// The metadata document publishes the signing certificate, and it is the
+	// only way an identity provider learns which key to verify against. Signing
+	// with a key whose certificate is not published produces requests nobody
+	// can check, which fails exactly as an unsigned request does.
+	if sp.config.Certificate == nil {
+		return nil, fmt.Errorf("%w: Config.SignRequests is set but Config.Certificate is not, "+
+			"so the metadata document would carry no key for the identity provider "+
+			"to verify against", ErrNoRedirectSigner)
+	}
+
+	return NewRSARedirectSigner(sp.config.PrivateKey, sp.config.SignatureMethod)
 }
 
 // deflateAndEncode compresses a SAML message for the HTTP-Redirect binding.
