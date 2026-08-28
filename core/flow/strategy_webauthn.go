@@ -92,6 +92,16 @@ type WebAuthnConfig struct {
 	// like a deployment that enforces authenticator provenance.
 	AttestationPreference protocol.ConveyancePreference
 
+	// AttestationPolicy decides whether a newly registered authenticator is
+	// acceptable. Nil accepts any.
+	//
+	// Set it whenever AttestationPreference asks for attestation. Requesting
+	// attestation and not judging it collects a certificate chain, prompts the
+	// user on some platforms, and proves nothing -- while looking, in a
+	// configuration review, exactly like a deployment that enforces
+	// authenticator provenance.
+	AttestationPolicy AttestationPolicy
+
 	// DiscoverableUserVerification overrides the user-verification
 	// requirement for usernameless login. Empty means required.
 	//
@@ -449,6 +459,13 @@ func (s *WebAuthnStrategy) FinishRegistration(
 	credential, err := s.webAuthn.CreateCredential(user, waSession, response)
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: credential creation failed: %w", err)
+	}
+
+	// Judged before anything is stored. A credential that fails the policy
+	// must leave no trace: a stored-then-rejected credential is one a later
+	// login path can still find.
+	if err := s.applyAttestationPolicy(ctx, credential); err != nil {
+		return nil, err
 	}
 
 	// Store credential

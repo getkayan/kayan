@@ -36,6 +36,11 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 >   stores only a hash. Pushed authorization requests (RFC 9126) are supported
 >   and can be required. No device code, token exchange, DPoP, request objects
 >   (RFC 9101), or dynamic client registration.
+> - **WebAuthn** (`core/flow`) — attestation statements are verified by the
+>   WebAuthn library, but deciding which authenticator models to trust needs a
+>   hardware inventory or the FIDO Metadata Service. Kayan makes no outbound
+>   requests, so that decision is an `AttestationPolicy` you supply; there is no
+>   bundled metadata blob.
 > - **SCIM** (`kayan-scim`) — no bulk operations. Sorting and ETag concurrency
 >   need storage implementing `SortableScimStorage` and
 >   `ConditionalScimStorage`; without them `sortBy` and `If-Match` are refused

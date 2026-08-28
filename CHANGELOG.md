@@ -87,6 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect, `ProcessLogoutRequest` verifies an inbound one and reports whose
   session to end, and `BuildLogoutResponse` produces the reply. The signature
   on an inbound request is mandatory.
+- WebAuthn attestation policy: `WebAuthnConfig.AttestationPolicy` judges a
+  newly registered authenticator before the credential is stored.
+  `flow.RequireTrustedAttestation` refuses `none` and `self`,
+  `flow.AllowedAuthenticators` restricts by AAGUID (refusing the all-zero one),
+  `flow.RequireDeviceBoundCredential` refuses a syncable passkey, and
+  `flow.CombineAttestationPolicies` composes them. Nil accepts any, so
+  existing deployments are unchanged.
 - SAML identity-provider single logout: `IdentityProvider.ProcessLogoutRequest`
   verifies a service provider's signed LogoutRequest against that provider's
   registered certificate, `BuildLogoutResponse` answers it, and
