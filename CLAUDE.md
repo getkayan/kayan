@@ -150,8 +150,19 @@ has no entry for it. Three modules were unbuildable in CI for exactly this
 reason while every local check passed.
 
 ```bash
-bash scripts/check-modules.sh   # GOWORK=off build of every module
+bash scripts/check-modules.sh     # GOWORK=off build of every module
+bash scripts/check-consumable.sh  # what a project outside this repo actually gets
 ```
+
+The second is not the same check. `check-modules.sh` builds each module where
+its own `replace` directives apply; a consumer gets neither, because a replace
+is honoured only while its module is the main module. Every module once
+required `core v0.0.0` -- never tagged -- so nothing outside this repository
+could import Kayan at all, and every check here passed.
+
+Releasing a module means tagging `<module>/vX.Y.Z` and pointing the siblings'
+`require` lines at it. The `replace` directives stay: they cost a consumer
+nothing and keep local builds compiling the working tree.
 
 ### Committing and pushing
 

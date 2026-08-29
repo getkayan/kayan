@@ -39,6 +39,27 @@ jobs:
       - name: Build every module with GOWORK=off
         run: bash scripts/check-modules.sh
 
+  consumable:
+    name: Consumers can import the published modules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      # module-isolation builds each module where its own replace directives
+      # apply. A consumer gets neither, and that gap hid a total failure: every
+      # module required core v0.0.0, a version never tagged, so no project
+      # could `go get` any part of Kayan while every other check passed.
+      #
+      # This validates the last release rather than the working tree, because
+      # a release is what a consumer receives.
+      - name: Build a throwaway module against the published core
+        run: bash scripts/check-consumable.sh
+
   coverage-floors:
     name: Coverage floors
     runs-on: ubuntu-latest

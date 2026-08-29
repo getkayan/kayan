@@ -19,6 +19,13 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 
 > [!WARNING]
 > **Pre-1.0. Not ready for production use.**
+
+Modules are published per directory. Import what you need:
+
+```bash
+go get github.com/getkayan/kayan/core@v0.2.0
+go get github.com/getkayan/kayan/kayan-gorm@v0.2.0
+```
 >
 > The public API will change without a deprecation cycle — see
 > [VERSIONING.md](./VERSIONING.md).
