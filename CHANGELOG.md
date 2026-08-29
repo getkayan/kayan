@@ -120,6 +120,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain authorization requests, as FAPI 2.0 requires.
   `oidc.WithPushedRequestSupport` makes discovery advertise the endpoint only
   where it is served.
+- `admin.Manager.ResolveCaller` builds a `Caller` from the user and role
+  stores. Without it a role created with `CreateRole` granted nothing:
+  `authorize` resolves role names against the fixed `DefaultRolePermissions`
+  table, so a custom role name matched nothing and nothing bridged the two.
+  A non-active account is refused, and `IsSuperAdmin` is never derived from a
+  role name.
 - Passkeys: `WebAuthnStrategy.BeginDiscoverableLogin` and
   `FinishDiscoverableLogin` sign a user in with no identifier, resolving the
   identity from the asserted user handle through the new
