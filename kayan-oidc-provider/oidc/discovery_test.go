@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"strings"
 	"testing"
 
 	"github.com/getkayan/kayan/core/keys"
@@ -26,32 +27,50 @@ func discoveryServer(t *testing.T, opts ...ServerOption) *Server {
 	return NewServer("https://issuer.example.test", nil, "", opts...)
 }
 
-// TestPARIsNotAdvertisedWithoutSupport.
+// TestPAREndpointWithoutAProviderIsRefused.
 //
-// A client that reads pushed_authorization_request_endpoint from discovery
-// starts pushing to it. If the provider does not serve one, that is a 404
-// halfway through a flow the client cannot restart -- and this package has
-// shipped exactly this mistake before, six times.
-func TestPARIsNotAdvertisedWithoutSupport(t *testing.T) {
+// A relying party configures itself from this document. Advertising an
+// endpoint the provider cannot serve strands it mid-flow; silently omitting an
+// endpoint the provider does serve leaves every client configured without PAR,
+// so a deployment that believes it requires PAR quietly does not.
+//
+// Both are misconfigurations, so BuildDiscovery reports them rather than
+// picking one and continuing -- the same treatment the end-session endpoint
+// already gets.
+func TestPAREndpointWithoutAProviderIsRefused(t *testing.T) {
 	server := discoveryServer(t)
 
-	doc, err := server.BuildDiscovery(context.Background(), DiscoveryOptions{
+	_, err := server.BuildDiscovery(context.Background(), DiscoveryOptions{
 		Endpoints: Endpoints{
 			Authorization:              "https://issuer.example.test/authorize",
 			Token:                      "https://issuer.example.test/token",
 			PushedAuthorizationRequest: "https://issuer.example.test/par",
 		},
 	})
+	if err == nil {
+		t.Fatal("a PAR endpoint was advertised with no provider able to serve it")
+	}
+	if !strings.Contains(err.Error(), "WithPushedRequestSupport") {
+		t.Errorf("error = %v, want it to name the missing option", err)
+	}
+}
+
+// TestNoPAREndpointIsFine keeps the check scoped: a deployment that does not
+// serve PAR must still be able to build a discovery document.
+func TestNoPAREndpointIsFine(t *testing.T) {
+	server := discoveryServer(t)
+
+	doc, err := server.BuildDiscovery(context.Background(), DiscoveryOptions{
+		Endpoints: Endpoints{
+			Authorization: "https://issuer.example.test/authorize",
+			Token:         "https://issuer.example.test/token",
+		},
+	})
 	if err != nil {
 		t.Fatalf("BuildDiscovery: %v", err)
 	}
 	if doc.PushedAuthorizationRequestEndpoint != "" {
-		t.Errorf("advertised %q with no provider able to serve it",
-			doc.PushedAuthorizationRequestEndpoint)
-	}
-	if doc.RequirePushedAuthorizationRequests {
-		t.Error("advertised require_pushed_authorization_requests with no endpoint; " +
-			"a client reading that refuses to send any authorization request it can complete")
+		t.Error("PAR was advertised without an endpoint")
 	}
 }
 

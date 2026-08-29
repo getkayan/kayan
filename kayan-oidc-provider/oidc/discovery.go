@@ -77,6 +77,18 @@ func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Dis
 			"must not be advertised (supply %s)", "WithClientStore")
 	}
 
+	// The mirror of the end-session check above. There the danger is
+	// advertising an endpoint the provider cannot serve; here it is the
+	// reverse -- a deployment that enabled PAR and forgot to pass the provider
+	// gets a document that silently omits it, so every relying party
+	// configures itself without PAR and the requirement is quietly not met.
+	// Both are misconfigurations the operator should be told about.
+	if opts.Endpoints.PushedAuthorizationRequest != "" && s.par == nil {
+		return Discovery{}, fmt.Errorf("oidc: a pushed authorization request endpoint is " +
+			"configured but the provider serving it was not supplied, so it cannot be " +
+			"advertised (pass WithPushedRequestSupport)")
+	}
+
 	doc := Discovery{
 		Issuer:                s.issuer,
 		AuthorizationEndpoint: opts.Endpoints.Authorization,
