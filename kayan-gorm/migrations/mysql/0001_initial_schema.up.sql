@@ -4,6 +4,10 @@
 -- TEXT column without a prefix length, and 191 keeps a composite unique key
 -- inside the InnoDB limit under utf8mb4.
 --
+-- Short values that carry a DEFAULT are VARCHAR for a second reason: MySQL
+-- refuses a literal default on a TEXT column outright (error 1101), where
+-- PostgreSQL and SQLite accept one.
+--
 -- Every table carrying identity data has a tenant_id column. It is indexed
 -- alongside the columns each query filters on, because the tenant predicate is
 -- added to every statement by the isolation callback — an index that omits it
@@ -15,7 +19,7 @@ CREATE TABLE identities (
     traits      JSON,
     roles       JSON,
     permissions JSON,
-    state       TEXT NOT NULL DEFAULT 'active',
+    state       VARCHAR(191) NOT NULL DEFAULT 'active',
     mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     mfa_secret  TEXT,
     verified    BOOLEAN NOT NULL DEFAULT FALSE,
