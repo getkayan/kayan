@@ -35,10 +35,12 @@ var (
 // Context, section 3).
 const (
 	// AuthnContextPassword is a password over an unprotected transport.
+	// #nosec G101 -- a SAML authentication context class reference, not a credential.
 	AuthnContextPassword = "urn:oasis:names:tc:SAML:2.0:ac:classes:Password"
 
 	// AuthnContextPasswordProtectedTransport is a password over TLS. This is
 	// what most identity providers assert for an ordinary login.
+	// #nosec G101 -- a SAML authentication context class reference, not a credential.
 	AuthnContextPasswordProtectedTransport = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
 
 	// AuthnContextMFA is the multi-factor class. Note that identity providers

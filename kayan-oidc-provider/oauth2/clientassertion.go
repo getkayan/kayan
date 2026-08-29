@@ -29,6 +29,8 @@ const AuthMethodPrivateKeyJWT = "private_key_jwt"
 
 // ClientAssertionTypeJWTBearer is the only client_assertion_type accepted
 // (RFC 7523 section 2.2).
+//
+// #nosec G101 -- a protocol identifier naming the assertion format, not a credential.
 const ClientAssertionTypeJWTBearer = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
 // Errors reported while authenticating a client assertion.
