@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/beevik/etree v1.6.0
-	github.com/getkayan/kayan/core v0.0.0
+	github.com/getkayan/kayan/core v0.2.0
 	github.com/russellhaering/goxmldsig v1.6.0
 )
 

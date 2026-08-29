@@ -3,7 +3,7 @@ module github.com/getkayan/kayan/kayan-oidc-provider
 go 1.25.5
 
 require (
-	github.com/getkayan/kayan/core v0.0.0
+	github.com/getkayan/kayan/core v0.2.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0

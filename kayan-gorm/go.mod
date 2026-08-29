@@ -3,8 +3,8 @@ module github.com/getkayan/kayan/kayan-gorm
 go 1.25.5
 
 require (
-	github.com/getkayan/kayan/core v0.0.0
-	github.com/getkayan/kayan/kayan-testing v0.0.0
+	github.com/getkayan/kayan/core v0.2.0
+	github.com/getkayan/kayan/kayan-testing v0.2.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/google/uuid v1.6.0
 	gorm.io/driver/mysql v1.6.0
