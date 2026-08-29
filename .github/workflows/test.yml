@@ -72,7 +72,17 @@ jobs:
             kayan-testing/coverage.out
           flags: unittests
           name: codecov-umbrella
-          fail_ci_if_error: true
+          # codecov-action v4 requires a token even for a public repository.
+          # Without the secret the upload fails; the job does not, because
+          # coverage reporting is not what gates this build. The floors in
+          # scripts/check-coverage.sh are, and they run in their own job with
+          # no third-party dependency.
+          #
+          # Failing the build when a reporting service is unreachable teaches
+          # people that red CI is normal, which is how a genuinely broken
+          # build goes unnoticed.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   postgres-migrations:
     name: PostgreSQL migration chain
