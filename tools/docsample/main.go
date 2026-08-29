@@ -123,9 +123,16 @@ func inspect(block string) []string {
 		"GetCredentialByIdentifier", "CreateSession", "GetSession", "DeleteSession",
 	}
 	for _, method := range ctxMethods {
-		pattern := regexp.MustCompile(`\.` + method + `\(([^,)]*)`)
-		for _, match := range pattern.FindAllStringSubmatch(block, -1) {
-			first := strings.TrimSpace(match[1])
+		needle := "." + method + "("
+		for offset := 0; ; {
+			at := strings.Index(block[offset:], needle)
+			if at < 0 {
+				break
+			}
+			start := offset + at + len(needle)
+			offset = start
+
+			first := strings.TrimSpace(firstArgument(block[start:]))
 			if strings.Contains(strings.ToLower(first), "ctx") ||
 				strings.HasSuffix(first, "Context()") {
 				continue
@@ -135,4 +142,33 @@ func inspect(block string) []string {
 	}
 
 	return problems
+}
+
+// firstArgument returns the first argument of a call, given everything after
+// its opening parenthesis.
+//
+// It tracks parenthesis depth rather than stopping at the first ")", because
+// the first argument is frequently itself a call: r.Context() in net/http,
+// c.UserContext() in Fiber. A scan that stopped at the first ")" captured
+// "r.Context(" and then reported the sample for omitting the context it
+// plainly passes -- which is how this checker came to fail the build over a
+// correct example.
+func firstArgument(s string) string {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return s[:i]
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				return s[:i]
+			}
+		}
+	}
+	return s
 }
