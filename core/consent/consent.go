@@ -346,7 +346,7 @@ func (m *Manager) UpdateVersion(version string) {
 
 // ---- Errors ----
 
-// Common errors.
+// ConsentError is a consent failure with a machine-readable code.
 type ConsentError struct {
 	Code    string
 	Message string

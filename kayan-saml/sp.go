@@ -554,7 +554,6 @@ func WithAutoProvision() SPOption {
 	return func(sp *ServiceProvider) { sp.autoProvision = true }
 }
 
-// WithSPClock sets the clock used for validity windows.
 // WithRedirectSigner supplies the signer for HTTP-Redirect binding messages.
 //
 // It is separate from [WithSPSigner] because the two sign different things:
@@ -649,7 +648,7 @@ func (sp *ServiceProvider) RegisterIdPFromMetadata(ctx context.Context, id, meta
 	if err != nil {
 		return fmt.Errorf("saml: fetch IdP metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("saml: fetch IdP metadata: unexpected HTTP status %d", resp.StatusCode)
 	}
@@ -884,7 +883,7 @@ func ParseRedirectBinding(values url.Values, parameter string) ([]byte, error) {
 	}
 
 	reader := flate.NewReader(bytes.NewReader(compressed))
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	message, err := io.ReadAll(io.LimitReader(reader, maxDecodedMessageSize+1))
 	if err != nil {

@@ -112,7 +112,7 @@ func (r *ScimRepository) ListScimUsers(ctx context.Context, filter string, start
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	users := make([]*scim.User, 0)
 	for rows.Next() {

@@ -194,7 +194,7 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 		if dispatcher != nil {
 			event := events.NewEvent(events.TopicIdentityFailure, events.CodeBadRequest)
 			// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
-			dispatcher.Dispatch(ctx, event)
+			_ = dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
 	}
@@ -212,7 +212,7 @@ func (m *RegistrationManager) Submit(ctx context.Context, method string, traits 
 			event.SubjectID = fi.GetID()
 		}
 		// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
-		dispatcher.Dispatch(ctx, event)
+		_ = dispatcher.Dispatch(ctx, event)
 	}
 
 	// 3. Post-hooks

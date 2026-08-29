@@ -88,14 +88,6 @@ func (c *Client) IsPublic() bool {
 	return c.TokenEndpointAuthMethod == AuthMethodNone
 }
 
-// authMethod returns the effective authentication method.
-func (c *Client) authMethod() string {
-	if c.TokenEndpointAuthMethod == "" {
-		return AuthMethodClientSecretBasic
-	}
-	return c.TokenEndpointAuthMethod
-}
-
 // AllowsRedirectURI reports whether uri is registered for this client.
 //
 // The comparison is exact. Prefix matching would let

@@ -434,7 +434,7 @@ func (s *WebAuthnStrategy) FinishRegistration(
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: session not found or expired")
 	}
-	defer s.sessionStore.DeleteSession(ctx, sessionID)
+	defer func() { _ = s.sessionStore.DeleteSession(ctx, sessionID) }()
 
 	if s.clock.Now().After(sessionData.ExpiresAt) {
 		return nil, errors.New("webauthn: session expired")
@@ -563,9 +563,7 @@ func (s *WebAuthnStrategy) BeginLogin(
 	}
 
 	// Store allowed credential IDs
-	for _, c := range session.AllowedCredentialIDs {
-		sessionData.AllowedCredIDs = append(sessionData.AllowedCredIDs, c)
-	}
+	sessionData.AllowedCredIDs = append(sessionData.AllowedCredIDs, session.AllowedCredentialIDs...)
 
 	if err := s.sessionStore.SaveSession(ctx, sessionID, sessionData); err != nil {
 		return nil, "", fmt.Errorf("webauthn: failed to save session: %w", err)
@@ -616,7 +614,7 @@ func (s *WebAuthnStrategy) FinishLogin(
 	if err != nil {
 		return nil, errors.New("webauthn: session not found or expired")
 	}
-	defer s.sessionStore.DeleteSession(ctx, sessionID)
+	defer func() { _ = s.sessionStore.DeleteSession(ctx, sessionID) }()
 
 	if s.clock.Now().After(sessionData.ExpiresAt) {
 		return nil, errors.New("webauthn: session expired")

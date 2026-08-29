@@ -154,7 +154,8 @@ func (p *Provider) parseAuthorizeParameters(ctx context.Context, values url.Valu
 	}, nil
 }
 
-// Response types this provider supports.
+// ResponseTypeCode is the only response_type this provider supports: the
+// authorization code flow.
 const ResponseTypeCode = "code"
 
 // TokenRequest is a validated token request with its client authenticated.

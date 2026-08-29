@@ -65,9 +65,9 @@ func (c *CLI) listTenants(args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tDOMAIN\tACTIVE")
+	_, _ = fmt.Fprintln(w, "ID\tNAME\tDOMAIN\tACTIVE")
 	for _, t := range result.Data {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%v\n", t.ID, t.Name, t.Domain, t.Active)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%v\n", t.ID, t.Name, t.Domain, t.Active)
 	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("render tenants: %w", err)

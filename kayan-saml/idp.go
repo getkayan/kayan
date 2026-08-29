@@ -494,7 +494,6 @@ func (idp *IdentityProvider) PostBindingForm(acsURL string, response []byte, rel
 // Strategy implements LoginStrategy for SAML authentication.
 type Strategy struct {
 	sp      *ServiceProvider
-	idps    map[string]*IdPConfig
 	factory func() any
 }
 

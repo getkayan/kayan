@@ -165,26 +165,6 @@ func (gormIdentity) TableName() string        { return "identities" }
 func (i *gormIdentity) TenantID() string      { return i.TenantID_ }
 func (i *gormIdentity) SetTenantID(id string) { i.TenantID_ = id }
 
-func toCoreIdentity(gi *gormIdentity) *identity.Identity {
-	if gi == nil {
-		return nil
-	}
-	return &identity.Identity{
-		ID:          gi.ID,
-		Traits:      gi.Traits,
-		Roles:       gi.Roles,
-		Permissions: gi.Permissions,
-		CreatedAt:   gi.CreatedAt,
-		UpdatedAt:   gi.UpdatedAt,
-		DeletedAt:   gi.DeletedAt,
-		MFAEnabled:  gi.MFAEnabled,
-		MFASecret:   gi.MFASecret,
-		Verified:    gi.Verified,
-		VerifiedAt:  gi.VerifiedAt,
-		State:       gi.State,
-	}
-}
-
 func fromCoreIdentity(i *identity.Identity) *gormIdentity {
 	if i == nil {
 		return nil

@@ -86,9 +86,9 @@ func (c *CLI) listUsers(args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tEMAIL\tSTATE\tCREATED")
+	_, _ = fmt.Fprintln(w, "ID\tEMAIL\tSTATE\tCREATED")
 	for _, u := range result.Data {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", u.ID, u.Email, u.State, u.CreatedAt.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", u.ID, u.Email, u.State, u.CreatedAt.Format(time.RFC3339))
 	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("render users: %w", err)

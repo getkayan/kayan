@@ -136,7 +136,7 @@ func (n *BackChannelLogoutNotifier) NotifyClient(ctx context.Context, clientID s
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("logout notification failed with status: %d", resp.StatusCode)

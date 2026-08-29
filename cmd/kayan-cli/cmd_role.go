@@ -60,13 +60,13 @@ func (c *CLI) listRoles(args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tPERMISSIONS")
+	_, _ = fmt.Fprintln(w, "ID\tNAME\tPERMISSIONS")
 	for _, r := range result.Data {
 		perms := strings.Join(r.Permissions, ", ")
 		if len(perms) > 50 {
 			perms = perms[:47] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", r.ID, r.Name, perms)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", r.ID, r.Name, perms)
 	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("render roles: %w", err)

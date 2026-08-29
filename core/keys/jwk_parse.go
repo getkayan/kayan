@@ -2,6 +2,7 @@ package keys
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -102,7 +103,7 @@ func (j JWK) PublicKey() (crypto.PublicKey, error) {
 		return &rsa.PublicKey{N: n, E: exponent}, nil
 
 	case "EC":
-		curve, size, err := curveForName(j.Crv)
+		curve, ecdhCurve, size, err := curveForName(j.Crv)
 		if err != nil {
 			return nil, err
 		}
@@ -114,14 +115,20 @@ func (j JWK) PublicKey() (crypto.PublicKey, error) {
 		if err != nil {
 			return nil, err
 		}
-		key := &ecdsa.PublicKey{Curve: curve, X: x, Y: y}
 		// A point off the curve is not a public key. Accepting one enables
 		// invalid-curve attacks, where the arithmetic leaks the private
 		// scalar of whatever key is used alongside it.
-		if !curve.IsOnCurve(x, y) {
+		//
+		// crypto/ecdh performs that check while parsing an uncompressed point,
+		// and is what elliptic.Curve.IsOnCurve was deprecated in favour of.
+		point := make([]byte, 1+2*size)
+		point[0] = 4 // uncompressed form, SEC 1 section 2.3.3
+		x.FillBytes(point[1 : 1+size])
+		y.FillBytes(point[1+size:])
+		if _, err := ecdhCurve.NewPublicKey(point); err != nil {
 			return nil, fmt.Errorf("%w: EC point is not on %s", ErrMalformedJWK, j.Crv)
 		}
-		return key, nil
+		return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
 
 	case "OKP":
 		if j.Crv != "Ed25519" {
@@ -145,17 +152,18 @@ func (j JWK) PublicKey() (crypto.PublicKey, error) {
 	}
 }
 
-// curveForName maps a JWK curve name to its curve and coordinate width.
-func curveForName(name string) (elliptic.Curve, int, error) {
+// curveForName maps a JWK curve name to its curve, the crypto/ecdh curve that
+// validates points on it, and its coordinate width.
+func curveForName(name string) (elliptic.Curve, ecdh.Curve, int, error) {
 	switch name {
 	case "P-256":
-		return elliptic.P256(), 32, nil
+		return elliptic.P256(), ecdh.P256(), 32, nil
 	case "P-384":
-		return elliptic.P384(), 48, nil
+		return elliptic.P384(), ecdh.P384(), 48, nil
 	case "P-521":
-		return elliptic.P521(), 66, nil
+		return elliptic.P521(), ecdh.P521(), 66, nil
 	default:
-		return nil, 0, fmt.Errorf("%w: EC curve %q", ErrUnsupportedKey, name)
+		return nil, nil, 0, fmt.Errorf("%w: EC curve %q", ErrUnsupportedKey, name)
 	}
 }
 

@@ -159,7 +159,7 @@ func (s *LDAPStrategy) Authenticate(ctx context.Context, username, password stri
 	// left them with neither.
 	conn, entries, err := s.lookup(ctx, username)
 	if conn != nil {
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 	}
 	// A truncated result is not a failure -- it is the ambiguity answer,
 	// arriving as an error because the directory stopped early. Checking it

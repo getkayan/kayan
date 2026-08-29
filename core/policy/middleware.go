@@ -351,7 +351,7 @@ func (m *CachingMiddleware) generateKey(subject any, action string, resource any
 
 	h := sha256.New()
 	for _, part := range []string{subjectKey, action, resourceKey} {
-		fmt.Fprintf(h, "%d:%s", len(part), part)
+		_, _ = fmt.Fprintf(h, "%d:%s", len(part), part)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

@@ -37,7 +37,8 @@ import (
 	"time"
 )
 
-// Default types for high-level use cases
+// DefaultIdentity is the identity type supplied for callers that do not bring
+// their own. DefaultCredential is its credential counterpart.
 type DefaultIdentity = Identity
 type DefaultCredential = Credential
 type DefaultSession = Session

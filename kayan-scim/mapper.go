@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/getkayan/kayan/core/identity"
 )
@@ -187,7 +188,7 @@ func (m *Mapper) getScimValue(user *User, path string) any {
 
 	for _, part := range parts {
 		// Handle simple fields
-		f := v.FieldByName(strings.Title(part))
+		f := v.FieldByName(exportedFieldName(part))
 		if !f.IsValid() {
 			return nil
 		}
@@ -212,7 +213,7 @@ func (m *Mapper) setScimValue(user *User, path string, value any) {
 	v := reflect.ValueOf(user).Elem()
 
 	for i, part := range parts {
-		name := strings.Title(part)
+		name := exportedFieldName(part)
 		f := v.FieldByName(name)
 		if !f.IsValid() {
 			return
@@ -273,4 +274,20 @@ func (m *Mapper) getField(obj any, field string) any {
 
 func (m *Mapper) ToModelPlaceholder() any {
 	return m.factory()
+}
+
+// exportedFieldName converts a SCIM attribute name into the Go field name it
+// maps to, by upper-casing the first rune: "givenName" becomes "GivenName".
+//
+// It replaces strings.Title, which is deprecated. The documented replacement,
+// golang.org/x/text/cases, title-cases every word and would turn "givenName"
+// into "Givenname" -- breaking every reflection lookup in this file. Only the
+// first rune was ever significant here.
+func exportedFieldName(attribute string) string {
+	if attribute == "" {
+		return ""
+	}
+	runes := []rune(attribute)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }

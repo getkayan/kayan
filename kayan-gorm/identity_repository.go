@@ -62,7 +62,7 @@ func (r *IdentityRepository) ListIdentities(ctx context.Context, factory func() 
 	if err != nil {
 		return nil, storageError("list identities", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		ident := factory()

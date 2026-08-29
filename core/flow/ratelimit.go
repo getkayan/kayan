@@ -518,7 +518,7 @@ func CompositeKeyFunc(fns ...func(context.Context, string) string) func(context.
 	}
 }
 
-// ContextKeyFunc extracts additional context from ctx to build the key.
+// ContextKey is the type used for rate-limiter values carried in a context.
 type ContextKey string
 
 func ContextKeyFunc(ctxKey ContextKey, separator string) func(context.Context, string) string {

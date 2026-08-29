@@ -234,10 +234,12 @@ func TestRegistration_EmptyTraits(t *testing.T) {
 	pwStrategy := NewPasswordStrategy(repo, NewBcryptHasher(4), "email", func() any { return &identity.Identity{} })
 	mgr.RegisterStrategy(pwStrategy)
 
-	_, err := mgr.Submit(context.Background(), "password", identity.JSON(`{}`), "password123")
-	// Empty traits should still work (strategy may or may not accept it)
-	// but empty []byte traits should fail
-	_, err = mgr.Submit(context.Background(), "password", identity.JSON(nil), "password123")
+	// Empty JSON traits are accepted or not depending on the strategy; the
+	// assertion below is about nil traits, so this result is deliberately
+	// unexamined rather than assigned to an err that nothing reads.
+	_, _ = mgr.Submit(context.Background(), "password", identity.JSON(`{}`), "password123")
+
+	_, err := mgr.Submit(context.Background(), "password", identity.JSON(nil), "password123")
 	if err == nil {
 		t.Error("expected error for nil traits")
 	}

@@ -113,11 +113,6 @@ type LoginOptions struct {
 	RelayState string
 }
 
-// requested reports whether any option needs enforcing on the response.
-func (o LoginOptions) requested() bool {
-	return o.ForceAuthn || len(o.RequestedAuthnContexts) > 0
-}
-
 // applyTo writes the options onto an AuthnRequest.
 func (o LoginOptions) applyTo(req *AuthnRequest) {
 	req.ForceAuthn = o.ForceAuthn

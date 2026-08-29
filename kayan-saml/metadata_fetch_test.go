@@ -34,9 +34,13 @@ func TestMetadataURLPolicyRejectsLocalTargets(t *testing.T) {
 	}
 }
 
+// markerKey is a named type so the context value cannot collide with an
+// anonymous struct key used anywhere else.
+type markerKey struct{}
+
 func TestMetadataFetchUsesInjectedClientAndContext(t *testing.T) {
 	const metadata = `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.example.test"><IDPSSODescriptor><SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.test/sso"/></IDPSSODescriptor></EntityDescriptor>`
-	ctx := context.WithValue(context.Background(), struct{}{}, "marker")
+	ctx := context.WithValue(context.Background(), markerKey{}, "marker")
 	sp := NewServiceProvider(Config{}, nil, nil, nil, WithMetadataHTTPClient(metadataDoerFunc(
 		func(req *http.Request) (*http.Response, error) {
 			if req.Context() != ctx {

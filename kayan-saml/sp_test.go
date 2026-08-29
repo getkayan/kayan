@@ -2,14 +2,9 @@ package saml
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
-	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -124,21 +119,6 @@ func (u *mockUser) SetTraits(traits identity.JSON) {
 }
 
 // --- Helpers ---
-
-func generateTestCert() (*x509.Certificate, *rsa.PrivateKey) {
-	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
-	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			Organization: []string{"Test Org"},
-		},
-		NotBefore: time.Now(),
-		NotAfter:  time.Now().Add(time.Hour),
-	}
-	derBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
-	cert, _ := x509.ParseCertificate(derBytes)
-	return cert, priv
-}
 
 // --- Tests ---
 

@@ -69,7 +69,14 @@ func TestBuiltInResolvers(t *testing.T) {
 }
 
 func TestJWTClaimResolver(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "claims", map[string]any{"tenant_id": "claim-acme"})
+	// A plain string key on purpose. ClaimsContextKey is configuration, and
+	// the resolver looks the value up under exactly what the caller named --
+	// which for the JWT middleware this integrates with is a string. A typed
+	// key here would not match what the resolver reads.
+	//
+	//nolint:staticcheck // SA1029: the key type is the caller's to choose.
+	ctx := context.WithValue(context.Background(), "claims",
+		map[string]any{"tenant_id": "claim-acme"})
 	resolver := NewJWTClaimResolver("tenant_id", "claims")
 
 	got, err := resolver.Resolve(ctx, ResolveInfo{})

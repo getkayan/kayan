@@ -254,7 +254,7 @@ func (m *LoginManager) InitiateLogin(ctx context.Context, method, identifier str
 		event := events.NewEvent(events.TopicLoginInitiated, events.CodeAccepted)
 		event.ActorID = identifier
 		// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
-		dispatcher.Dispatch(ctx, event)
+		_ = dispatcher.Dispatch(ctx, event)
 	}
 
 	return result, nil
@@ -295,7 +295,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 			event := events.NewEvent(events.TopicLoginFailure, events.CodeUnauthorized)
 			event.ActorID = identifier
 			// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
-			dispatcher.Dispatch(ctx, event)
+			_ = dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
 	}
@@ -316,7 +316,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 				event := events.NewEvent(events.TopicLoginMFARequired, events.CodeAccepted)
 				event.ActorID = identifier
 				// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
-				dispatcher.Dispatch(ctx, event)
+				_ = dispatcher.Dispatch(ctx, event)
 			}
 			// The identity travels on the error, not as the first return
 			// value: the first factor succeeding is not authentication while
@@ -344,7 +344,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 				event := events.NewEvent(events.TopicLoginFailure, events.CodeUnauthorized)
 				event.ActorID = identifier
 				// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
-				dispatcher.Dispatch(ctx, event)
+				_ = dispatcher.Dispatch(ctx, event)
 			}
 			return nil, err
 		}
@@ -366,7 +366,7 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 			event.SubjectID = fi.GetID()
 		}
 		// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
-		dispatcher.Dispatch(ctx, event)
+		_ = dispatcher.Dispatch(ctx, event)
 	}
 
 	return ident, nil

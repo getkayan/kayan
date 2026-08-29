@@ -214,5 +214,5 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 	// The response status is already committed. Encoding can only fail after a
 	// partial response, so there is no safe alternate body to send.
 	// #nosec G104 -- intentionally ignore terminal response encoding error.
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -76,7 +76,7 @@ func TestNewProviderEnabledInitializesTelemetry(t *testing.T) {
 	if provider.meterProvider == nil {
 		t.Fatal("expected meter provider to be initialized")
 	}
-	if provider.Tracer() == nil || provider.Tracer() == trace.NewNoopTracerProvider().Tracer("noop") {
+	if provider.Tracer() == nil || provider.Tracer() == noop.NewTracerProvider().Tracer("noop") {
 		t.Fatal("expected non-nil tracer")
 	}
 
