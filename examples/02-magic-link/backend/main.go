@@ -16,6 +16,9 @@ import (
 	"github.com/getkayan/kayan/core/flow"
 	"github.com/getkayan/kayan/core/identity"
 	"github.com/getkayan/kayan/core/session"
+	// kayantesting.MemoryStore keeps everything in process memory and loses it
+	// on restart. It is what lets this example run with no database; a real
+	// deployment uses kayan-gorm or another persistent adapter.
 	kayantesting "github.com/getkayan/kayan/kayan-testing"
 	"github.com/google/uuid"
 	"log"

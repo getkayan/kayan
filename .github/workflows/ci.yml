@@ -159,10 +159,15 @@ jobs:
 
       # kayan-testing ships in-memory doubles. Importing it from shipping code
       # would put a store that loses everything on restart into production.
+      # examples/ is excluded. Every example runs from `go run` with no
+      # database, which is what makes them worth reading, and the in-memory
+      # store is how that works. They are demonstrations rather than shipping
+      # code, and each one says at its import that the store loses everything
+      # on restart -- which is the warning the rule exists to deliver.
       - name: kayan-testing must only be imported by tests
         run: |
           set -euo pipefail
-          offenders="$(grep -rln 'getkayan/kayan/kayan-testing' --include='*.go' .             | grep -v '_test\.go$' | grep -v '^\./kayan-testing/' || true)"
+          offenders="$(grep -rln 'getkayan/kayan/kayan-testing' --include='*.go' .             | grep -v '_test\.go$' | grep -v '^\./kayan-testing/'             | grep -v '^\./examples/' || true)"
           if [ -n "${offenders}" ]; then
             echo "ERROR: kayan-testing imported outside a _test.go file:"
             echo "${offenders}"
