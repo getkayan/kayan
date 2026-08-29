@@ -1,0 +1,44 @@
+# Linter configuration for every module in this repository.
+#
+# The version pin in CI stopped a new golangci-lint release turning the build
+# red on its own. It did not pin *what* gets enforced: with no config file, the
+# enforced set was whatever that release happened to default to, so a tool
+# upgrade still changed the rules. This file makes the set explicit, which is
+# the half the pin was missing.
+version: "2"
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+
+  settings:
+    staticcheck:
+      checks:
+        - all
+        # QF* are refactoring suggestions -- "this selector could be shorter".
+        # They are not defects, and a build that fails on them trains people to
+        # stop reading the linter.
+        - -QF1008
+        # ST1000 wants a package comment in a house style this repository does
+        # not follow; the packages that matter are documented at length.
+        - -ST1000
+        # ST1003 wants IdP renamed to IDP throughout kayan-saml. "IdP" is how
+        # the SAML specifications spell it, and obeying the rule would rename
+        # most of that module's public surface -- IdPConfig, RegisterIdP,
+        # ParseIdPMetadata -- for a naming convention that does not know the
+        # domain. Genuine cases like TenantId are fixed in the code instead.
+        - -ST1003
+    govet:
+      disable:
+        # Reports that a constant could be inlined. It is advice about the
+        # standard library's own naming, not about this code.
+        - inline
+
+  exclusions:
+    rules:
+      # Test setup routinely ignores errors from calls whose failure would show
+      # up as the test failing anyway. Requiring `_ =` on every one of them adds
+      # noise to the files people read most.
+      - path: _test\.go
+        linters:
+          - errcheck

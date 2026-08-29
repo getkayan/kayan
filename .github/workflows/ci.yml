@@ -73,14 +73,20 @@ jobs:
           cache: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
           # Pinned deliberately. Every other tool in this repository is pinned
           # to a version or a commit; "latest" meant a new upstream release
           # could turn the build red with no change in the repository, which
           # is indistinguishable from a real regression at the moment it
           # happens.
-          version: v1.64.8
+          #
+          # v1.64.8 was built with Go 1.24 and refuses to load a module
+          # targeting Go 1.25 at all -- "the Go language version used to build
+          # golangci-lint is lower than the targeted Go version" -- so every
+          # lint job failed without examining a line of code. A pin has to move
+          # when the toolchain does.
+          version: v2.13.1
           working-directory: ${{ matrix.module }}
 
   arch-lint:
