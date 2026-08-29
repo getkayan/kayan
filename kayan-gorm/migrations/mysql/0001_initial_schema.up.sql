@@ -110,15 +110,35 @@ CREATE INDEX idx_audit_events_actor ON audit_events (tenant_id, actor_id);
 CREATE INDEX idx_audit_events_subject ON audit_events (tenant_id, subject_id);
 CREATE INDEX idx_audit_events_type ON audit_events (tenant_id, type);
 
+-- These columns are narrower than the VARCHAR(191) used elsewhere, because all
+-- seven of them appear in one UNIQUE index and InnoDB caps an index key at
+-- 3072 bytes. Under utf8mb4 every character costs 4 bytes, so 7 x 191 x 4 =
+-- 5348 and the table cannot be created at all -- which is why the MySQL
+-- migration chain had never run.
+--
+--   tenant_id        191 x 4 =  764
+--   object_id        128 x 4 =  512
+--   subject_id       128 x 4 =  512
+--   object_type       64 x 4 =  256
+--   relation          64 x 4 =  256
+--   subject_type      64 x 4 =  256
+--   subject_relation  64 x 4 =  256
+--                              ----
+--                              2812   (limit 3072)
+--
+-- A prefix length on the index would have kept the wider columns, and is
+-- wrong here: two tuples differing only past the prefix would collide, and
+-- this index is what stops a revoked authorization surviving as a duplicate.
+-- Over-long input now fails the insert instead, which is visible.
 CREATE TABLE relation_tuples (
     id               VARCHAR(191) PRIMARY KEY,
     tenant_id        VARCHAR(191) NOT NULL DEFAULT '',
-    object_type      VARCHAR(191) NOT NULL,
-    object_id        VARCHAR(191) NOT NULL,
-    relation         VARCHAR(191) NOT NULL,
-    subject_type     VARCHAR(191) NOT NULL,
-    subject_id       VARCHAR(191) NOT NULL,
-    subject_relation VARCHAR(191) NOT NULL DEFAULT '',
+    object_type      VARCHAR(64)  NOT NULL,
+    object_id        VARCHAR(128) NOT NULL,
+    relation         VARCHAR(64)  NOT NULL,
+    subject_type     VARCHAR(64)  NOT NULL,
+    subject_id       VARCHAR(128) NOT NULL,
+    subject_relation VARCHAR(64)  NOT NULL DEFAULT '',
     created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
