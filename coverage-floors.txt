@@ -19,7 +19,7 @@ core/audit 40
 core/compliance 79
 core/consent 58
 core/device 85
-core/domain 23
+core/domain 89
 core/events 82
 core/flow 69
 core/health 95
