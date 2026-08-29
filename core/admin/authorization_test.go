@@ -1,9 +1,14 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"regexp"
+	"sort"
 	"testing"
+	"unicode"
 )
 
 // The admin API is the privileged surface: every method here can read, mutate,
@@ -53,12 +58,58 @@ func (s *spyStores) Query(context.Context, AuditQuery) (*AuditEventListResult, e
 	return &AuditEventListResult{}, nil
 }
 
+// spyRoles and spyTenants exist because their List, Get and Create collide
+// with UserStore's: same names, different return types, so one type cannot
+// implement all three. They share the reach counter so a leak through any
+// store shows up the same way.
+type spyRoles struct{ spy *spyStores }
+
+func (s spyRoles) List(context.Context, ListOptions) (*RoleListResult, error) {
+	s.spy.reached++
+	return &RoleListResult{}, nil
+}
+func (s spyRoles) Get(context.Context, string) (*Role, error) {
+	s.spy.reached++
+	return &Role{ID: "r1"}, nil
+}
+func (s spyRoles) Create(context.Context, *Role) error  { s.spy.reached++; return nil }
+func (s spyRoles) Update(context.Context, *Role) error  { s.spy.reached++; return nil }
+func (s spyRoles) Delete(context.Context, string) error { s.spy.reached++; return nil }
+func (s spyRoles) AssignToUser(context.Context, any, string) error {
+	s.spy.reached++
+	return nil
+}
+func (s spyRoles) RemoveFromUser(context.Context, any, string) error {
+	s.spy.reached++
+	return nil
+}
+func (s spyRoles) GetUserRoles(context.Context, any) ([]Role, error) {
+	s.spy.reached++
+	return nil, nil
+}
+
+type spyTenants struct{ spy *spyStores }
+
+func (s spyTenants) List(context.Context, ListOptions) (*TenantListResult, error) {
+	s.spy.reached++
+	return &TenantListResult{}, nil
+}
+func (s spyTenants) Get(context.Context, string) (*Tenant, error) {
+	s.spy.reached++
+	return &Tenant{ID: "t1"}, nil
+}
+func (s spyTenants) Create(context.Context, *Tenant) error { s.spy.reached++; return nil }
+func (s spyTenants) Update(context.Context, *Tenant) error { s.spy.reached++; return nil }
+func (s spyTenants) Delete(context.Context, string) error  { s.spy.reached++; return nil }
+
 func newSpyManager() (*Manager, *spyStores) {
 	spy := &spyStores{}
 	return NewManager(
 		WithUserStore(spy),
 		WithSessionStore(spy),
 		WithAuditStore(spy),
+		WithRoleStore(spyRoles{spy: spy}),
+		WithTenantStore(spyTenants{spy: spy}),
 	), spy
 }
 
@@ -102,6 +153,49 @@ func adminCalls() []call {
 		}},
 		{"QueryAudit", PermAuditRead, func(m *Manager, c *Caller) error {
 			_, err := m.QueryAudit(ctx, c, AuditQuery{})
+			return err
+		}},
+		{"CreateUser", PermUsersWrite, func(m *Manager, c *Caller) error {
+			_, err := m.CreateUser(ctx, c, CreateUserInput{Email: "new@example.test"})
+			return err
+		}},
+		{"ListTenants", PermTenantsRead, func(m *Manager, c *Caller) error {
+			_, err := m.ListTenants(ctx, c, ListOptions{})
+			return err
+		}},
+		{"GetTenant", PermTenantsRead, func(m *Manager, c *Caller) error {
+			_, err := m.GetTenant(ctx, c, "t1")
+			return err
+		}},
+		{"CreateTenant", PermTenantsWrite, func(m *Manager, c *Caller) error {
+			_, err := m.CreateTenant(ctx, c, CreateTenantInput{Name: "acme"})
+			return err
+		}},
+		{"DeleteTenant", PermTenantsDelete, func(m *Manager, c *Caller) error {
+			return m.DeleteTenant(ctx, c, "t1")
+		}},
+		{"ListRoles", PermRolesRead, func(m *Manager, c *Caller) error {
+			_, err := m.ListRoles(ctx, c, ListOptions{})
+			return err
+		}},
+		{"GetRole", PermRolesRead, func(m *Manager, c *Caller) error {
+			_, err := m.GetRole(ctx, c, "r1")
+			return err
+		}},
+		{"CreateRole", PermRolesWrite, func(m *Manager, c *Caller) error {
+			_, err := m.CreateRole(ctx, c, CreateRoleInput{
+				Name: "editor", Permissions: []string{PermUsersRead},
+			})
+			return err
+		}},
+		{"DeleteRole", PermRolesDelete, func(m *Manager, c *Caller) error {
+			return m.DeleteRole(ctx, c, "r1")
+		}},
+		{"AssignRoleToUser", PermRolesWrite, func(m *Manager, c *Caller) error {
+			return m.AssignRoleToUser(ctx, c, "u1", "r1")
+		}},
+		{"GetUserRoles", PermRolesRead, func(m *Manager, c *Caller) error {
+			_, err := m.GetUserRoles(ctx, c, "u1")
 			return err
 		}},
 	}
@@ -284,4 +378,64 @@ type auditFunc func(context.Context, AuditQuery) (*AuditEventListResult, error)
 
 func (f auditFunc) Query(ctx context.Context, q AuditQuery) (*AuditEventListResult, error) {
 	return f(ctx, q)
+}
+
+// TestEveryAuthorizingMethodIsInTheTable is why the tests above can call
+// themselves "every operation".
+//
+// adminCalls is written by hand, and the tests that walk it are only as
+// complete as somebody remembered to make it. It listed nine of twenty
+// methods; the eleven it omitted were every role and every tenant operation,
+// so nothing checked that CreateRole, DeleteRole, AssignRoleToUser or
+// DeleteTenant refuse an unprivileged caller. They do -- but that was a
+// property of the implementation rather than something a test held true.
+//
+// This finds the exported Manager methods that consult authorize and asserts
+// the table names all of them, so a method added tomorrow fails here rather
+// than going quietly untested.
+func TestEveryAuthorizingMethodIsInTheTable(t *testing.T) {
+	source, err := os.ReadFile("admin.go")
+	if err != nil {
+		t.Fatalf("read admin.go: %v", err)
+	}
+
+	// In scope: exported, hangs off *Manager, and consults authorize.
+	// Anything else is not an authorization decision.
+	signature := regexp.MustCompile(`func \(m \*Manager\) (\w+)\([^)]*\)[^{]*\{`)
+	locations := signature.FindAllSubmatchIndex(source, -1)
+
+	var authorizing []string
+	for i, loc := range locations {
+		name := string(source[loc[2]:loc[3]])
+		if !unicode.IsUpper(rune(name[0])) {
+			continue
+		}
+		end := len(source)
+		if i+1 < len(locations) {
+			end = locations[i+1][0]
+		}
+		if bytes.Contains(source[loc[1]:end], []byte("m.authorize(")) {
+			authorizing = append(authorizing, name)
+		}
+	}
+	if len(authorizing) == 0 {
+		t.Fatal("found no authorizing methods; this test is not looking at what it thinks")
+	}
+
+	listed := map[string]bool{}
+	for _, c := range adminCalls() {
+		listed[c.name] = true
+	}
+
+	var missing []string
+	for _, name := range authorizing {
+		if !listed[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("adminCalls omits %v; the tests that walk it claim to cover every "+
+			"operation and would not exercise these at all", missing)
+	}
 }

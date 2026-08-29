@@ -14,7 +14,7 @@
 # Format: <package path relative to the repo root> <minimum percent>
 # A package with no entry here is reported but does not fail the build.
 
-core/admin 37
+core/admin 61
 core/audit 40
 core/compliance 79
 core/consent 58
