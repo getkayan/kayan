@@ -125,11 +125,16 @@ jobs:
               "${file}"
           done
 
-      - name: Attach the SBOMs to the release
+      - name: Create the GitHub release and attach the SBOMs
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${GITHUB_REF_NAME}" sbom/* --clobber
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --verify-tag \
+              --title "Kayan ${GITHUB_REF_NAME}" --generate-notes
+          fi
+          gh release upload "${GITHUB_REF_NAME}" sbom/* --clobber
 
       - name: Upload the SBOMs as a workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
