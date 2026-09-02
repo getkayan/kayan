@@ -3,7 +3,7 @@ module github.com/getkayan/kayan/kayan-saml
 go 1.25.5
 
 require (
-	github.com/beevik/etree v1.6.0
+	github.com/beevik/etree v1.7.1
 	github.com/getkayan/kayan/core v0.3.0
 	github.com/russellhaering/goxmldsig v1.6.0
 )
