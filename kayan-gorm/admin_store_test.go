@@ -283,3 +283,90 @@ func TestAdminCallerUsesTheRoleDefinitionFromItsOwnTenant(t *testing.T) {
 		t.Fatalf("unscoped ResolveCaller error = %v, want tenant.ErrNoTenant", err)
 	}
 }
+
+func TestAdminRoleStoreLifecycle(t *testing.T) {
+	ctx := context.Background()
+	_, stores := setupAdminStores(t)
+	if err := stores.Users.Create(ctx, &admin.User{
+		ID: "user-1", Email: "role-user@example.test", State: admin.UserStateActive,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := stores.Roles.Create(ctx, &admin.Role{
+		Name: "reader", Description: "old", Permissions: []string{"documents:read"},
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if err := stores.Roles.Update(ctx, &admin.Role{
+		ID: "reader", Name: "reader", Description: "updated",
+		Permissions: []string{"documents:read", "documents:list"},
+	}); err != nil {
+		t.Fatalf("update role: %v", err)
+	}
+	role, err := stores.Roles.Get(ctx, "reader")
+	if err != nil {
+		t.Fatalf("get role: %v", err)
+	}
+	if role.Description != "updated" || len(role.Permissions) != 2 {
+		t.Fatalf("updated role = %#v", role)
+	}
+	if err := stores.Roles.Update(ctx, &admin.Role{ID: "reader", Name: "renamed"}); !errors.Is(err, admin.ErrInvalidInput) {
+		t.Fatalf("rename error = %v, want admin.ErrInvalidInput", err)
+	}
+	listed, err := stores.Roles.List(ctx, admin.ListOptions{Query: "READ", Limit: 1})
+	if err != nil {
+		t.Fatalf("list roles: %v", err)
+	}
+	if listed.Total != 1 || len(listed.Data) != 1 || listed.Data[0].Name != "reader" {
+		t.Fatalf("role list = %#v", listed)
+	}
+	if err := stores.Roles.AssignToUser(ctx, "user-1", "reader"); err != nil {
+		t.Fatalf("assign role: %v", err)
+	}
+	roles, err := stores.Roles.GetUserRoles(ctx, "user-1")
+	if err != nil || len(roles) != 1 || roles[0].Name != "reader" {
+		t.Fatalf("assigned roles = %#v, err = %v", roles, err)
+	}
+	if err := stores.Roles.RemoveFromUser(ctx, "user-1", "reader"); err != nil {
+		t.Fatalf("remove role: %v", err)
+	}
+	roles, err = stores.Roles.GetUserRoles(ctx, "user-1")
+	if err != nil || len(roles) != 0 {
+		t.Fatalf("roles after removal = %#v, err = %v", roles, err)
+	}
+	if err := stores.Roles.Delete(ctx, "reader"); err != nil {
+		t.Fatalf("delete role: %v", err)
+	}
+	if _, err := stores.Roles.Get(ctx, "reader"); !errors.Is(err, admin.ErrNotFound) {
+		t.Fatalf("get deleted role error = %v, want admin.ErrNotFound", err)
+	}
+	if err := stores.Roles.Delete(ctx, "reader"); !errors.Is(err, admin.ErrNotFound) {
+		t.Fatalf("second delete error = %v, want admin.ErrNotFound", err)
+	}
+}
+
+func TestAdminSessionStoreRevokesOneSession(t *testing.T) {
+	ctx := context.Background()
+	repo, stores := setupAdminStores(t)
+	sessions := session.NewDatabaseStrategy(repo)
+	first, err := sessions.Create(ctx, "session-1", "user-1")
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	second, err := sessions.Create(ctx, "session-2", "user-1")
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	if err := stores.Sessions.Revoke(ctx, first.ID); err != nil {
+		t.Fatalf("revoke session: %v", err)
+	}
+	if _, err := sessions.Validate(ctx, first.ID); err == nil {
+		t.Fatal("revoked session still validates")
+	}
+	if _, err := sessions.Validate(ctx, second.ID); err != nil {
+		t.Fatalf("unrelated session was revoked: %v", err)
+	}
+	if err := stores.Sessions.Revoke(ctx, "missing"); !errors.Is(err, admin.ErrNotFound) {
+		t.Fatalf("missing session error = %v, want admin.ErrNotFound", err)
+	}
+}

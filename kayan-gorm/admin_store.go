@@ -410,6 +410,9 @@ func (s *AdminRoleStore) List(ctx context.Context, opts admin.ListOptions) (*adm
 func (s *AdminRoleStore) Get(ctx context.Context, id string) (*admin.Role, error) {
 	var model RoleDefinition
 	if err := s.db.WithContext(ctx).First(&model, "name = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("gormstore: get admin role: %w", admin.ErrNotFound)
+		}
 		return nil, storageError("get admin role", err)
 	}
 	role := adminRoleFromModel(&model)
@@ -430,11 +433,19 @@ func (s *AdminRoleStore) Create(ctx context.Context, role *admin.Role) error {
 
 // Update implements admin.RoleStore.
 func (s *AdminRoleStore) Update(ctx context.Context, role *admin.Role) error {
-	if role == nil || role.Name == "" {
+	if role == nil || role.ID == "" || role.Name == "" || role.ID != role.Name {
 		return admin.ErrInvalidInput
 	}
+	// Role names are the persistent IDs used by assignments. Renaming one
+	// would otherwise orphan every assignment, so updates intentionally cover
+	// only mutable fields. A struct update preserves GORM's JSON serializer for
+	// Permissions; a map update would pass []string directly to the SQL driver.
+	updates := &RoleDefinition{
+		Description: role.Description,
+		Permissions: append([]string(nil), role.Permissions...),
+	}
 	result := s.db.WithContext(ctx).Model(&RoleDefinition{}).Where("name = ?", role.ID).
-		Updates(map[string]any{"name": role.Name, "description": role.Description, "permissions": role.Permissions})
+		Select("description", "permissions").Updates(updates)
 	if result.Error != nil {
 		return storageError("update admin role", result.Error)
 	}
