@@ -1108,8 +1108,9 @@ func (r *OAuth2Repository) DeleteRefreshToken(ctx context.Context, token string)
 ## Known gaps
 
 The provider implements `authorization_code`, `refresh_token`, and
-`client_credentials`. There is no device code grant, no token exchange, no DPoP,
-no `private_key_jwt` client authentication, and no dynamic client registration.
-Client registration is your application's, which also means the client secret
-hashing at registration must use the same `domain.Hasher` the provider verifies
-with.
+`client_credentials`. `private_key_jwt` and pushed authorization requests are
+implemented and advertised only when their required stores are configured.
+There is no device code grant, token exchange, DPoP, RFC 9101 request object, or
+dynamic client registration. Client registration is your application's, which
+also means client-secret hashing at registration must use the same
+`domain.Hasher` the provider verifies with.

@@ -399,6 +399,39 @@ Note that these two methods take no `context.Context`, unlike the rest of the
 module. That makes them unable to participate in tenant scoping through the
 ambient context, which is a known rough edge rather than a design decision.
 
+## Admin stores
+
+```go
+type AdminStores struct {
+    Users    *AdminUserStore
+    Sessions *AdminSessionStore
+    Roles    *AdminRoleStore
+    Audit    *AdminAuditStore
+}
+
+func NewAdminStores(db *gorm.DB) *AdminStores
+```
+
+These implement the four persistent store contracts used by `core/admin` over
+the same identity, credential, session, role, and audit tables used by login
+and authorization:
+
+```go
+stores := gormstore.NewAdminStores(db)
+manager := admin.NewManager(
+    admin.WithUserStore(stores.Users),
+    admin.WithSessionStore(stores.Sessions),
+    admin.WithRoleStore(stores.Roles),
+    admin.WithAuditStore(stores.Audit),
+)
+```
+
+Creating a user with a password or initial roles uses
+`admin.UserProvisioningStore`: the identity, bcrypt hash, and assignments are
+one transaction. Locking or disabling a user also revokes that user's database
+sessions. These stores target Kayan's default identity table; a caller-owned
+BYOS identity model supplies its own `admin.UserStore` mapping.
+
 ## ReBAC repository
 
 ```go

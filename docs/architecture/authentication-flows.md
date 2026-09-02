@@ -2091,23 +2091,18 @@ Note also that the fallback path **does not create a credential** with the
 miss the credential lookup again and create another identity. A production
 `UserFactory` should write the credential.
 
-### What SAML does not cover
+### SAML deployment boundaries
 
-**No Single Logout.** `Config.SLOUrl` and `IdPConfig.SLOUrl` exist as
-configuration fields, and nothing anywhere parses, validates, or emits a
-`LogoutRequest` or `LogoutResponse`. Signing out of your application does not
-sign the user out of the IdP or of other SPs in the federation.
+Single Logout is implemented for SP- and IdP-side flows.
 
-**No encrypted assertions.** `EncryptedAssertion` is not supported. Assertions
-travel protected by TLS and nothing else, so anything with visibility into the
-browser's POST body sees the attribute values.
+Encrypted assertions are supported with RSA-OAEP and AES-GCM; RSA 1.5 and CBC
+are refused.
 
-**Metadata parsing is simplified and unauthenticated.** `ParseIdPMetadata`
-extracts the entity ID, one SSO URL, and the first usable signing certificate.
-`RegisterIdPFromMetadata` fetches over plain `http.Get` with no timeout and no
-signature check on the document — anyone who can answer that request installs a
-certificate that will then be trusted to assert identities. Treat metadata
-ingestion as an operation you review, not one you automate from an untrusted URL.
+Metadata parsing retains every signing certificate for rollover. Remote
+retrieval is bounded, injectable, and public-HTTPS-only by default. Inbound
+metadata XML signatures are not verified, so metadata still needs an explicit
+pinning or review process. The default replay cache is process-local; use a
+shared cache across replicas.
 
 ---
 

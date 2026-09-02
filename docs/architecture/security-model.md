@@ -323,26 +323,20 @@ The read is bounded with `io.LimitReader(reader, maxDecodedMessageSize+1)` and
 the result rejected if it exceeds the limit. `TestRedirectBindingRejectsDecompressionBomb`
 covers it.
 
-### What SAML does NOT cover
+### SAML boundaries
 
-**No Single Logout.** `Config.SLOUrl` and `IdPConfig.SLOUrl` exist as
-configuration fields, but there is no `LogoutRequest` or `LogoutResponse`
-handling anywhere in the module. Nothing parses, validates, or emits SLO
-messages. Signing out of Kayan does not sign the user out of the IdP or of
-other service providers in the federation. If you need SLO, you are building it
-yourself.
+Single Logout is implemented for SP- and IdP-side flows, including signed
+redirect messages. Multi-vendor interoperability evidence remains a release
+gate rather than something unit tests can establish.
 
-**No encrypted assertions.** `EncryptedAssertion` is not supported. An IdP
-configured to encrypt assertions will not interoperate. Assertions travel
-protected by TLS and nothing else, which means anything with visibility into
-the browser's POST body sees the attribute values.
+Encrypted assertions are supported with RSA-OAEP key transport and AES-GCM
+content encryption. RSA 1.5 and CBC are refused.
 
-**Metadata parsing is simplified.** `ParseIdPMetadata` extracts the entity ID,
-one SSO URL, and one signing certificate. It does not handle the full metadata
-schema, does not verify metadata signatures, and takes the first usable
-certificate it finds. Treat metadata ingestion as an operation you review, not
-one you automate from an untrusted URL. `RegisterIdPFromMetadata` fetches over
-plain `http.Get` with no timeout and no signature check on the document.
+Metadata parsing keeps every signing certificate needed for rollover. Remote
+retrieval is bounded, injectable, and restricted to public HTTPS by default.
+The parser does not verify an inbound metadata document's XML signature, so
+metadata still needs an explicit pinning or review process. The default
+assertion replay cache is process-local; use a shared cache across replicas.
 
 **Provisioning is opt-in.** The built-in `reconcileIdentity` refuses a NameID
 with no existing identity, returning `ErrNoSuchIdentity`, unless the service
@@ -656,8 +650,10 @@ Lifetimes are `accessTokenTTL = time.Hour` and `refreshTokenTTL = 7 * 24 * time.
 ### What OAuth 2.0 does NOT cover
 
 Per the [README](../../README.md): `authorization_code`, `refresh_token`, and
-`client_credentials` only. **No device code, no token exchange, no DPoP, no
-`private_key_jwt`, and no dynamic client registration.** Only the code response
+`client_credentials`. `private_key_jwt` and pushed authorization requests are
+implemented and advertised only when configured. There is no device code,
+token exchange, DPoP, RFC 9101 request object, or dynamic client registration.
+Only the code response
 type is accepted — `token` and `id_token` are refused rather than silently
 ignored, so no implicit flow is advertised that does not exist.
 
@@ -732,13 +728,13 @@ negative control that keeps the test honest), and
 touches no database. The cost is that a token cannot be revoked before it
 expires, which is why examples use short expiries.
 
-`Delete` on a stateless strategy with no revocation store is a **no-op**. That
-is documented rather than hidden, because a logout that silently does nothing
-is worse than one that fails. Attach `WithRevocationStore` or use
-`NewDatabaseStrategy` when immediate revocation matters.
+`Delete` on a stateless strategy with no revocation store returns an error. It
+does not report a logout that cannot revoke anything. Attach
+`WithRevocationStore` or use `NewDatabaseStrategy` when immediate revocation
+matters.
 
-Per the [README](../../README.md), the cross-application SSO store in
-`core/session` is **in-memory only**, so single sign-on is single-process.
+Cross-application SSO has GORM and Redis stores. The in-memory implementation
+remains a development and single-process option.
 
 ---
 
@@ -1011,23 +1007,22 @@ Consolidated, so nothing above needs to be hunted for. The
 [README](../../README.md) is the canonical list and is kept current.
 
 **SAML**
-- No Single Logout. `SLOUrl` fields exist; no SLO message handling does.
-- No encrypted assertion support.
-- Metadata parsing is simplified; metadata signatures are not verified.
+- Single Logout and encrypted assertions are implemented.
+- Inbound metadata signatures are not verified by the parser.
 - The default replay cache is per-process — an assertion is replayable once per
   replica.
 
 **OAuth 2.0 / OIDC**
-- `authorization_code`, `refresh_token`, `client_credentials` only. No device
-  code, token exchange, DPoP, `private_key_jwt`, or dynamic client
-  registration.
+- `authorization_code`, `refresh_token`, and `client_credentials` are
+  implemented. `private_key_jwt` and PAR are supported when configured. Device
+  code, token exchange, DPoP, request objects, and dynamic registration are not.
 - Refresh reuse detection requires a store implementing
   `RefreshTokenFamilyStore`. With a plain store, a replay is reported invalid
   but the thief's token keeps working.
 
 **Sessions**
-- The cross-application SSO store is in-memory only; SSO is single-process.
-- `Delete` on a stateless strategy with no revocation store is a no-op.
+- Cross-application SSO has GORM and Redis stores.
+- `Delete` on a stateless strategy with no revocation store returns an error.
 
 **ReBAC**
 - `ListDirectObjects` returns direct grants only and does not walk the relation
@@ -1042,15 +1037,15 @@ Consolidated, so nothing above needs to be hunted for. The
   authoring, and no hot reload. Changing a rule means redeploying. Tenant-
   authored policy needs a different engine behind the `policy.Engine` seam.
 - One rule per action; `AddRule` overwrites silently.
-- Under `AllowOverrides`, a `HybridStrategy` **swallows engine errors** — an
-  engine that fails is treated as a non-objection.
+- Under `AllowOverrides`, an allow wins immediately; if nothing allows and any
+  engine fails, the failure is returned rather than converted into a clean
+  denial.
 
 **Storage**
 - `kayantesting.StorageSuite` does not cover `audit.AuditStore` or tenancy.
-- `kayan-gorm` does not currently run the suite; it has equivalent bespoke
-  tests.
-- The bundled `gormIdentity`/`gormCredential`/`gormSession` models do not
-  implement `tenant.Scoped`, so the isolation callbacks skip them.
+- `kayan-gorm` runs the shared suite and dedicated audit and tenancy tests.
+- Bundled models implement `tenant.Scoped`. Caller-owned BYOS identity models
+  must implement it themselves.
 
 **General**
 - Pre-1.0. The public API changes without a deprecation cycle. See

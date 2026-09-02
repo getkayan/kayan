@@ -1287,6 +1287,10 @@ func WithHasherCost(cost int) QuickOption
 func WithIDGenerator(gen domain.IDGenerator) QuickOption
 func WithPasswordPolicy(p *PasswordPolicy) QuickOption
 func WithQuickDispatcher(d events.Dispatcher) QuickOption
+func WithQuickAudit(store audit.AuditStore, onError AuditErrorHandler) QuickOption
+func WithLockout(config LockoutConfig) QuickOption
+func WithLockoutStore(store LockoutStore) QuickOption
+func WithoutLockout() QuickOption
 func WithRegHook(pre, post Hook) QuickOption
 func WithLoginHook(pre, post Hook) QuickOption
 ```
@@ -1295,6 +1299,11 @@ func WithLoginHook(pre, post Hook) QuickOption
 nil. `WithQuickDispatcher` sets the same dispatcher on both managers, which is
 almost always what you want — an audit trail that records registrations but not
 logins is not an audit trail.
+
+`WithQuickAudit` persists both registration and login outcomes and requires an
+error handler so an audit-backend outage is observable. Password lockout is on
+by default; `WithLockoutStore` replaces the per-process default with a shared
+store for multi-replica deployments.
 
 ### `PasswordStrategy`
 
@@ -2721,10 +2730,9 @@ func (s *MemoryRevocationStore) Revoke(ctx context.Context, sessionID string, ex
 func (s *MemoryRevocationStore) IsRevoked(ctx context.Context, sessionID string) (bool, error)
 ```
 
-**Without a revocation store, `JWTStrategy.Delete` is a no-op that returns nil.**
-There is nothing on the server to delete: the token holds its own validity, and
-the client keeps working until the token expires. A "log out everywhere" button
-wired to `Delete` on a bare `JWTStrategy` reports success and changes nothing.
+**Without a revocation store, `JWTStrategy.Delete` returns an error.** There is
+nothing on the server to delete: the token holds its own validity, so the
+strategy refuses to report a successful logout while it remains usable.
 
 This is the fundamental cost of stateless sessions, not an oversight, and the
 usual mitigation is a short access-token expiry so the window is small. When
@@ -5435,6 +5443,16 @@ type UserStore interface {
     UpdateState(ctx context.Context, id any, state UserState) error
 }
 
+type PasswordCredential struct {
+    Identifier string
+    SecretHash string
+}
+
+type UserProvisioningStore interface {
+    UserStore
+    Provision(ctx context.Context, user *User, credential *PasswordCredential, roles []string) error
+}
+
 type TenantStore interface {
     List(ctx context.Context, opts ListOptions) (*TenantListResult, error)
     Get(ctx context.Context, id string) (*Tenant, error)
@@ -5464,6 +5482,11 @@ type AuditStore interface {
     Query(ctx context.Context, query AuditQuery) (*AuditEventListResult, error)
 }
 ```
+
+When `CreateUserInput` includes a password or roles, `Manager.CreateUser`
+requires `UserProvisioningStore`. The password is hashed before crossing the
+store boundary, and the identity, credential, and assignments must be committed
+atomically. A plain `UserStore` is still sufficient for credential-free users.
 
 Note this `admin.AuditStore` is a narrower, read-only interface than
 `audit.AuditStore` — the admin surface queries the trail and never writes to it.

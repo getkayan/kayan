@@ -102,10 +102,9 @@ strategy := session.NewJWTStrategy(config).
 `Delete` then records the token until its natural expiry, and `Validate`
 consults the list.
 
-**Without a revocation store, `Delete` is a no-op.** There is genuinely
-nothing server-side to remove. That is documented rather than hidden, because
-a logout endpoint that silently does nothing is worse than one that returns an
-error.
+**Without a revocation store, `Delete` returns an error.** There is genuinely
+nothing server-side to remove, so the strategy refuses to report a successful
+logout while the token remains valid.
 
 `MemoryRevocationStore` is per-process. Several replicas each keep their own
 list, so a token revoked on one is still accepted by the others — use a shared

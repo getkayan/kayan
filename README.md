@@ -18,7 +18,8 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 ```
 
 > [!WARNING]
-> **Pre-1.0. Not ready for production use.**
+> **Pre-1.0. Production use requires an explicit scope and the deployment
+> checklist below; protocol certification and independent review are pending.**
 
 Modules are published per directory. Import what you need:
 
@@ -59,6 +60,10 @@ go get github.com/getkayan/kayan/kayan-gorm@v0.2.0
 >
 > Per-capability maturity is tracked in
 > [docs/reference/capabilities.md](./docs/reference/capabilities.md).
+>
+> For users, password login, revocable sessions, persistent roles and
+> permissions, audit, and administration, see the tested
+> [production wiring reference](./examples/12-production/README.md).
 
 ---
 

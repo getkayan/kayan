@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CODE_OF_CONDUCT.md (Contributor Covenant v2.1)
 - SECURITY.md with vulnerability reporting process
 - GitHub issue and PR templates
+- `kayan-gorm.NewAdminStores` for persistent user, session, role, and audit
+  administration over the same tables used by authentication and RBAC.
+- `flow.WithQuickAudit` to persist registration and login outcomes from
+  `PasswordAuth`.
+- A tested PostgreSQL/Redis production wiring reference for users, login,
+  revocable sessions, roles, permissions, audit, and administration.
+
+### Changed
+- `admin.Manager.CreateUser` now provisions a supplied password and initial
+  roles atomically through `UserProvisioningStore`; it returns
+  `ErrNotConfigured` instead of silently discarding either value.
+- `LoginManager` refuses locked, inactive, and pending identities implementing
+  `IdentityStateSource`, and the default identity implements that contract.
+- Disabling a user through the GORM admin store revokes all database sessions
+  in the same transaction.
 
 ## Unreleased 1.0 Roadmap (Not Yet Shipped)
 

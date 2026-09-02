@@ -660,9 +660,9 @@ is worse than one nobody trusts:
 - **`DeleteExpiredTokens` is half-asserted** — it checks that a live token
   survives, not that the expired one was removed. A no-op passes that case.
 
-And `kayan-gorm` does not currently run the suite; it has equivalent bespoke
-tests in `sqlite_test.go`. Wiring it in would mean `kayan-gorm` taking a module
-dependency on `kayan-testing`. Anyone writing a *new* adapter should run it.
+`kayan-gorm` runs the suite through `contract_test.go` and also has dedicated
+real-database, audit, and tenancy tests. Anyone writing a new adapter should run
+the shared suite and add equivalent tests for the contracts it does not cover.
 
 ### Clock injection
 
@@ -733,10 +733,10 @@ func (s *KMSStrategy) Validate(ctx context.Context, sessionID any) (*identity.Se
 }
 ```
 
-**`Delete` must actually delete, or be documented as not deleting.** A stateless
-strategy with no revocation store has a `Delete` that is a no-op, and that is
-documented rather than hidden — a logout that silently does nothing is worse than
-one that fails. If yours cannot revoke, say so in the doc comment.
+**`Delete` must actually delete or return an error.** The built-in stateless
+strategy returns an error when it has no revocation store; it never reports a
+successful logout while the token remains valid. Custom strategies should keep
+the same contract.
 
 **Rotate on refresh, and invalidate the old session.** `DatabaseStrategy.Refresh`
 issues a new session ID *and* a new refresh token, then deletes the old row:

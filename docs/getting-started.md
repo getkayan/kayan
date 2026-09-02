@@ -185,9 +185,9 @@ strategy := session.NewJWTStrategy(config).
     WithRevocationStore(session.NewMemoryRevocationStore())
 ```
 
-Without a revocation store, `Delete` on a stateless strategy is a no-op —
-there is nothing server-side to remove. That is documented rather than hidden,
-because a logout that silently does nothing is worse than one that fails.
+Without a revocation store, `Delete` on a stateless strategy returns an error:
+there is nothing server-side to remove, so it refuses to report a successful
+logout that did not happen.
 
 ### Choosing a signing algorithm
 
@@ -382,7 +382,9 @@ PATCH shapes Okta and Entra ID actually send.
 Kayan is pre-1.0. The public API changes without a deprecation cycle, and the
 [README](../README.md) lists the gaps that would otherwise surprise you.
 
-Beyond that, four things are worth checking in any deployment:
+The tested [production wiring reference](../examples/12-production/README.md)
+shows the users, login, sessions, roles, permissions, audit, and administration
+path together. Check these deployment properties before exposing it:
 
 **The session secret is not in your source.** The examples read
 `SESSION_SECRET` and refuse to start without it, for the reason that a secret
@@ -390,8 +392,28 @@ committed in a sample is the one that ends up signing real sessions.
 
 **Migrations are versioned.** `AutoMigrateDev` has no way back.
 
+**Logout is actually revocable.** Use database sessions or attach a shared
+revocation store to JWT sessions. A bare JWT strategy returns an error from
+`Delete` because it cannot end the token.
+
+**Role definitions and assignments are persistent.** Use
+`rbac.NewStorageStrategy`; the memory strategy gives each replica a different
+authorization view.
+
+**Lockout is shared across replicas.** Pass a Redis-backed store to
+`flow.WithLockoutStore`, or each replica gives an attacker a separate attempt
+budget.
+
+**Audit events are persistent and audit-store failures are observed.** Use
+`flow.WithQuickAudit` (or the manager-specific audit options) with a non-nil
+error handler.
+
 **Tenant isolation is registered** if you are multi-tenant, and you have tested
 that a query with no tenant errors rather than returning everything.
+
+**TLS and browser CSRF policy belong to the host application.** Bearer headers
+avoid ambient cookie authentication. If you use cookies, add `Secure`,
+`HttpOnly`, `SameSite`, and explicit CSRF protection.
 
 **MFA and device trust have a persistent store.** The in-memory
 implementations lose every enrollment on restart, which locks out every user

@@ -36,6 +36,13 @@ and HTTP dependencies in `core`. The reviewed API snapshots in
   observable and the client store is not required to implement audit storage.
 - SAML metadata retrieval defaults to public HTTPS URLs. Private IdP metadata
   endpoints require an explicit `WithMetadataURLPolicy` opt-in.
+- `admin.Manager.CreateUser` no longer ignores `CreateUserInput.Password` or
+  `Roles`. A store must implement `admin.UserProvisioningStore` to commit the
+  identity, hashed password, and assignments atomically; otherwise the call
+  returns `admin.ErrNotConfigured` before creating the user.
+- `LoginManager` now refuses non-active identities implementing
+  `flow.IdentityStateSource`. The default `identity.Identity` implements the
+  contract. Custom BYOS identities opt in by adding `IdentityState() string`.
 - `core/telemetry`, `core/logger`, and `core/config` moved to the optional
   `kayan-observability` module. Only the import path changes:
 
