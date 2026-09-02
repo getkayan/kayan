@@ -231,15 +231,15 @@ jobs:
       # and they silently stopped compiling when a core interface changed.
       # They are the first thing a user copies, so they are the last thing that
       # should be broken.
-      - name: Build every example
+      - name: Build and test every example
         run: |
           set -euo pipefail
           status=0
           for dir in examples/*/backend; do
             [ -f "${dir}/go.mod" ] || continue
             echo "::group::${dir}"
-            if ! (cd "${dir}" && GOWORK=off go build ./...); then
-              echo "ERROR: ${dir} does not compile"
+            if ! (cd "${dir}" && GOWORK=off go test ./...); then
+              echo "ERROR: ${dir} does not build or pass its tests"
               status=1
             fi
             echo "::endgroup::"
