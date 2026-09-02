@@ -189,6 +189,32 @@ func TestDeletingAdminUserRemovesEveryAuthenticationPath(t *testing.T) {
 	}
 }
 
+func TestLockingAdminUserRevokesExistingSessions(t *testing.T) {
+	ctx := context.Background()
+	repo, stores := setupAdminStores(t)
+	manager := admin.NewManager(
+		admin.WithUserStore(stores.Users),
+		admin.WithIDGenerator(func() any { return "user-1" }),
+	)
+	root := &admin.Caller{IsSuperAdmin: true}
+	if _, err := manager.CreateUser(ctx, root, admin.CreateUserInput{
+		Email: "locked@example.test", Password: "correct horse battery staple",
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	sessions := session.NewDatabaseStrategy(repo)
+	issued, err := sessions.Create(ctx, "session-1", "user-1")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := manager.LockUser(ctx, root, "user-1", "incident response"); err != nil {
+		t.Fatalf("LockUser: %v", err)
+	}
+	if _, err := sessions.Validate(ctx, issued.ID); err == nil {
+		t.Fatal("session issued before the account lock still validates")
+	}
+}
+
 func TestAdminAuditQueryPaginatesAndCountsIndependently(t *testing.T) {
 	ctx := context.Background()
 	repo, stores := setupAdminStores(t)

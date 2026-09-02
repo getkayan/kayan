@@ -287,6 +287,12 @@ func (s *AdminUserStore) Update(ctx context.Context, user *admin.User) error {
 				return storageError("update admin login identifier", err)
 			}
 		}
+		if model.State != "" && model.State != string(admin.UserStateActive) {
+			if err := tx.Model(&gormSession{}).Where("identity_id = ?", model.ID).
+				Update("active", false).Error; err != nil {
+				return storageError("revoke disabled admin user sessions", err)
+			}
+		}
 		return nil
 	})
 }
@@ -315,15 +321,23 @@ func (s *AdminUserStore) Delete(ctx context.Context, id any) error {
 
 // UpdateState implements admin.UserStore.
 func (s *AdminUserStore) UpdateState(ctx context.Context, id any, state admin.UserState) error {
-	result := s.db.WithContext(ctx).Model(&gormIdentity{}).Where("id = ?", id).
-		Updates(map[string]any{"state": state, "updated_at": time.Now()})
-	if result.Error != nil {
-		return storageError("update admin user state", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("gormstore: update admin user state: %w", admin.ErrNotFound)
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&gormIdentity{}).Where("id = ?", id).
+			Updates(map[string]any{"state": state, "updated_at": time.Now()})
+		if result.Error != nil {
+			return storageError("update admin user state", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("gormstore: update admin user state: %w", admin.ErrNotFound)
+		}
+		if state != admin.UserStateActive {
+			if err := tx.Model(&gormSession{}).Where("identity_id = ?", id).
+				Update("active", false).Error; err != nil {
+				return storageError("revoke locked admin user sessions", err)
+			}
+		}
+		return nil
+	})
 }
 
 // ListByUser implements admin.SessionStore.
