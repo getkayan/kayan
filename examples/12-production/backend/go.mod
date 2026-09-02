@@ -3,9 +3,9 @@ module example/production-iam
 go 1.25.5
 
 require (
-	github.com/getkayan/kayan/core v0.2.0
-	github.com/getkayan/kayan/kayan-gorm v0.0.0
-	github.com/getkayan/kayan/kayan-redis v0.0.0
+	github.com/getkayan/kayan/core v0.3.0
+	github.com/getkayan/kayan/kayan-gorm v0.3.0
+	github.com/getkayan/kayan/kayan-redis v0.3.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.7.3

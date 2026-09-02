@@ -3,7 +3,7 @@ module example/ldap-auth
 go 1.25.5
 
 require (
-	github.com/getkayan/kayan/core v0.2.0
+	github.com/getkayan/kayan/core v0.3.0
 	github.com/google/uuid v1.6.0
 )
 
@@ -24,6 +24,6 @@ replace github.com/getkayan/kayan/core => ../../../core
 // Run: go mod tidy
 // In production use a real LDAPDialer backed by github.com/go-ldap/ldap/v3
 
-require github.com/getkayan/kayan/kayan-testing v0.0.0
+require github.com/getkayan/kayan/kayan-testing v0.3.0
 
 replace github.com/getkayan/kayan/kayan-testing => ../../../kayan-testing

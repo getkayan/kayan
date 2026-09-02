@@ -3,7 +3,7 @@ module github.com/getkayan/kayan/kayan-ldap
 go 1.25.5
 
 require (
-	github.com/getkayan/kayan/core v0.2.0
+	github.com/getkayan/kayan/core v0.3.0
 	github.com/go-ldap/ldap/v3 v3.4.8
 )
 

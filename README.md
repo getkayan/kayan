@@ -24,8 +24,8 @@ reg, login := flow.PasswordAuth(repo, factory, "email")
 Modules are published per directory. Import what you need:
 
 ```bash
-go get github.com/getkayan/kayan/core@v0.2.0
-go get github.com/getkayan/kayan/kayan-gorm@v0.2.0
+go get github.com/getkayan/kayan/core@v0.3.0
+go get github.com/getkayan/kayan/kayan-gorm@v0.3.0
 ```
 >
 > The public API will change without a deprecation cycle — see
