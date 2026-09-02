@@ -182,3 +182,19 @@ func TestRedisRateLimiter_CustomPrefix(t *testing.T) {
 		t.Fatal("expected keys with custom prefix")
 	}
 }
+
+func TestRedisRateLimiterRejectsInvalidLimitsAndCancelledContext(t *testing.T) {
+	limiter, server := setupTestRateLimiter(t)
+	defer server.Close()
+	if _, _, err := limiter.Allow(context.Background(), "key", 0, time.Minute); err == nil {
+		t.Fatal("zero limit was accepted")
+	}
+	if _, _, err := limiter.Allow(context.Background(), "key", 1, time.Nanosecond); err == nil {
+		t.Fatal("sub-millisecond window was accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := limiter.Allow(ctx, "key", 1, time.Minute); err != context.Canceled {
+		t.Fatalf("cancelled Allow error = %v", err)
+	}
+}
