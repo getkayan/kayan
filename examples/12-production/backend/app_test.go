@@ -34,6 +34,26 @@ func testApplication(t *testing.T, allowRegistration bool) *application {
 	return newApplication(repo, flow.NewMemoryLockoutStore(), allowRegistration)
 }
 
+func TestDecodeJSONRejectsTrailingContent(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "second value", body: `{"email":"user@example.test"} {}`},
+		{name: "malformed suffix", body: `{"email":"user@example.test"} !`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(tt.body))
+			var destination map[string]string
+			if err := decodeJSON(recorder, request, &destination); err == nil {
+				t.Fatal("decodeJSON accepted trailing content")
+			}
+		})
+	}
+}
+
 func request(t *testing.T, handler http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var payload bytes.Buffer

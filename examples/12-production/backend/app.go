@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/getkayan/kayan/core/admin"
+	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/flow"
 	"github.com/getkayan/kayan/core/identity"
 	"github.com/getkayan/kayan/core/rbac"
@@ -91,8 +93,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err := decoder.Decode(dst); err != nil {
 		return err
 	}
-	if decoder.Decode(&struct{}{}) == nil {
-		return errors.New("request contains more than one JSON value")
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request contains more than one JSON value")
+		}
+		return err
 	}
 	return nil
 }
@@ -350,6 +355,8 @@ func (a *application) bootstrap(ctx context.Context, email, password string) err
 	}
 	if _, err := a.stores.Users.GetByEmail(ctx, email); err == nil {
 		return nil
+	} else if !errors.Is(err, admin.ErrNotFound) && !errors.Is(err, domain.ErrNotFound) {
+		return fmt.Errorf("look up bootstrap administrator: %w", err)
 	}
 	if _, err := a.stores.Roles.Get(ctx, "administrator"); err != nil {
 		if err := a.stores.Roles.Create(ctx, &admin.Role{Name: "administrator", Permissions: []string{"*"}}); err != nil {
