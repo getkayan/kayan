@@ -5,6 +5,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"github.com/getkayan/kayan/core/domain"
 	"strings"
 	"time"
@@ -183,6 +184,24 @@ type UserStore interface {
 	UpdateState(ctx context.Context, id any, state UserState) error
 }
 
+// PasswordCredential is a password credential prepared for persistence.
+// SecretHash is already hashed; a store must never interpret it as plaintext.
+type PasswordCredential struct {
+	Identifier string
+	SecretHash string
+}
+
+// UserProvisioningStore atomically creates a user together with optional
+// password credentials and role assignments.
+//
+// It is deliberately separate from UserStore. Creating the identity, then a
+// credential, then its roles through three independent calls can leave a
+// partially provisioned account when the second or third write fails.
+type UserProvisioningStore interface {
+	UserStore
+	Provision(ctx context.Context, user *User, credential *PasswordCredential, roles []string) error
+}
+
 // SessionStore defines storage operations for sessions.
 type SessionStore interface {
 	ListByUser(ctx context.Context, userID any) ([]Session, error)
@@ -263,7 +282,7 @@ type ManagerOption func(*Manager)
 
 // NewManager creates a new admin manager.
 func NewManager(opts ...ManagerOption) *Manager {
-	m := &Manager{}
+	m := &Manager{hasher: domain.NewBcryptHasher(0)}
 	for _, opt := range opts {
 		opt(m)
 	}
@@ -380,7 +399,24 @@ func (m *Manager) CreateUser(ctx context.Context, caller *Caller, input CreateUs
 	}
 	user.Traits["email"] = input.Email
 
-	if err := m.users.Create(ctx, user); err != nil {
+	var credential *PasswordCredential
+	if input.Password != "" {
+		hash, err := m.hasher.Hash(input.Password)
+		if err != nil {
+			return nil, fmt.Errorf("admin: hash password: %w", err)
+		}
+		credential = &PasswordCredential{Identifier: input.Email, SecretHash: hash}
+	}
+
+	if credential != nil || len(input.Roles) > 0 {
+		provisioner, ok := m.users.(UserProvisioningStore)
+		if !ok {
+			return nil, ErrNotConfigured
+		}
+		if err := provisioner.Provision(ctx, user, credential, input.Roles); err != nil {
+			return nil, err
+		}
+	} else if err := m.users.Create(ctx, user); err != nil {
 		return nil, err
 	}
 
