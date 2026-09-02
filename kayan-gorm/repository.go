@@ -113,6 +113,8 @@ func (r *Repository) AutoMigrateDev(models ...any) error {
 		&gormAuditEvent{},
 		&gormAuthToken{},
 		&gormRelationTuple{},
+		&RoleAssignment{},
+		&RoleDefinition{},
 	}
 	allModels := append(baseModels, models...)
 	return r.db.AutoMigrate(allModels...)
