@@ -35,6 +35,14 @@ type LoginManager struct {
 // LoginOption configures a LoginManager.
 type LoginOption func(*LoginManager)
 
+// IdentityStateSource lets an identity opt into central account-state
+// enforcement. All login strategies pass through LoginManager, so checking
+// here prevents a disabled user from switching to another authentication
+// method that forgot its own state check.
+type IdentityStateSource interface {
+	IdentityState() string
+}
+
 // WithLoginDispatcher sets the event dispatcher.
 func WithLoginDispatcher(d events.Dispatcher) LoginOption {
 	return func(m *LoginManager) { m.dispatcher = d }
@@ -298,6 +306,25 @@ func (m *LoginManager) Authenticate(ctx context.Context, method, identifier, sec
 			_ = dispatcher.Dispatch(ctx, event)
 		}
 		return nil, err
+	}
+
+	if stateful, ok := ident.(IdentityStateSource); ok {
+		state := stateful.IdentityState()
+		if state != "" && state != "active" {
+			if auditSink != nil {
+				auditSink.save(ctx, &audit.AuditEvent{
+					Type: string(events.TopicLoginFailure), ActorID: identifier,
+					Status: "failure", Message: ErrAccountInactive.Error(),
+				})
+			}
+			if dispatcher != nil {
+				event := events.NewEvent(events.TopicLoginFailure, events.CodeUnauthorized)
+				event.ActorID = identifier
+				// #nosec G104 -- domain events are best-effort and cannot change auth outcome.
+				_ = dispatcher.Dispatch(ctx, event)
+			}
+			return nil, ErrAccountInactive
+		}
 	}
 
 	// Check if MFA required

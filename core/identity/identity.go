@@ -90,6 +90,11 @@ type Identity struct {
 }
 
 func (i *Identity) GetID() any { return i.ID }
+
+// IdentityState reports whether this identity may authenticate. An empty state
+// is retained as active for compatibility with identities created before state
+// enforcement was introduced.
+func (i *Identity) IdentityState() string { return i.State }
 func (i *Identity) SetID(id any) {
 	if s, ok := id.(string); ok {
 		i.ID = s

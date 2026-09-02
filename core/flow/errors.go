@@ -7,6 +7,11 @@ var (
 	// but the duplicate policy prevents automatic linking/capture.
 	ErrIdentityAlreadyExists = errors.New("registration: identity already exists")
 
+	// ErrAccountInactive is returned after credentials verify when the identity
+	// is disabled, locked, or pending. Public handlers should still return the
+	// same generic response used for invalid credentials.
+	ErrAccountInactive = errors.New("login: account is not active")
+
 	// ErrRecoveryRateLimited is returned when recovery requests exceed the rate limit.
 	ErrRecoveryRateLimited = errors.New("recovery: rate limited")
 
