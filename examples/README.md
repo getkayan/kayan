@@ -20,6 +20,7 @@ Each numbered example focuses on one capability and usually includes:
 9. `09-email-otp` - email one-time passwords
 10. `10-ldap` - LDAP-backed identity lookup
 11. `11-kayan-oidc` - OIDC-oriented integration flow
+12. `12-production` - PostgreSQL, Redis, persistent RBAC, admin, and sessions
 
 ## Run a Backend Example
 
@@ -37,5 +38,7 @@ Swap `01-password` for any other example directory when exploring a different fl
 - Start with `01-password` if you want the smallest complete auth flow.
 - Move to `02-magic-link`, `03-totp`, or `04-webauthn` when evaluating passwordless or MFA flows.
 - Use `11-kayan-oidc` when you need a fuller protocol-oriented reference.
+- Use `12-production` when wiring users, login, sessions, roles, permissions,
+  audit, and administration for a real application.
 
 For the quickest library-first onboarding path, pair these examples with `docs/QUICKSTART.md` and `docs/getting-started.md`.
