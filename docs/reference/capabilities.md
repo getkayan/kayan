@@ -23,6 +23,7 @@ Package-level freeze status and remaining evidence gates are tracked in the
 | SAML 2.0 | Experimental | Encrypted assertions are supported with RSA-OAEP key transport and AES-GCM content encryption; rsa-1_5 and CBC modes are refused. Single logout covers SP-initiated requests and verified inbound ones. Metadata generation emits key descriptors, endpoints, and NameID formats. Metadata retrieval is injectable, bounded, and public-HTTPS-only by default; interoperability evidence remains pending |
 | SCIM 2.0 | Experimental | Discovery, value-path parsing, and filtered PATCH sub-attributes are implemented, including group-membership PATCH in the shapes Okta and Entra send; storage adapters may explicitly reject multi-valued shapes they cannot represent |
 | GORM and Redis adapters | Experimental, optional | GORM passes the shared storage suite; CI exercises concurrent atomicity on real PostgreSQL/MySQL and SSO lifecycle/concurrency on real Redis |
+| Tenant resource governance | Experimental | Per-tenant and global rate/concurrency admission is available in memory and Redis; CPU, memory, database, and queue isolation remains host-owned |
 | CLI | Experimental | Its remote administration API is not part of the stable library contract |
 
 ## Observability
@@ -55,6 +56,12 @@ One boundary is inherent to BYOS and cannot be closed from the adapter side.
 multi-tenant deployment must implement `tenant.Scoped` on that struct. A model
 that does not is invisible to the isolation callbacks and is read across
 tenants. The library does not own the type and cannot add the field to it.
+
+Data isolation does not prevent a noisy tenant from exhausting shared runtime
+capacity. `tenant.Governor` adds per-tenant and global rate/concurrency budgets;
+`RedisConcurrencyLimiter` shares expiring leases across replicas. See
+[Tenant Resource Governance](../concepts/resource-governance.md). CPU, memory,
+database-pool, and worker-queue scheduling remain infrastructure concerns.
 
 SAML step-up authentication is available through
 `ServiceProvider.InitiateLoginWith`. `RequestedAuthnContext` is enforced by

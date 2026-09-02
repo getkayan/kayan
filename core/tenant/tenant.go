@@ -10,6 +10,7 @@
 //   - Per-tenant configuration (password policies, session TTL, etc.)
 //   - Multiple resolution strategies (domain, subdomain, path, header)
 //   - Storage-enforced isolation through the Scoped interface
+//   - Per-tenant and global rate/concurrency admission through Governor
 //   - Lifecycle hooks for tenant operations
 //   - Context-based tenant propagation
 //

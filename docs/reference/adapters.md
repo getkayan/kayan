@@ -654,6 +654,37 @@ is exactly when a credential-stuffing run would concentrate its attempts.
 in-memory limiter across N replicas permits N times the configured rate, which is
 the whole reason this store exists.
 
+The limiter uses Redis server time for window scores and a random member for
+each admission. Application-node clock skew cannot change the window, and two
+requests arriving in the same millisecond cannot overwrite one another.
+
+## RedisConcurrencyLimiter
+
+```go
+type RedisConcurrencyLimiter struct {
+    // Has unexported fields.
+}
+
+func NewRedisConcurrencyLimiter(client *redis.Client, prefix string) *RedisConcurrencyLimiter
+func (r *RedisConcurrencyLimiter) Acquire(ctx context.Context, key string, limit int, ttl time.Duration) (tenant.ConcurrencyLease, bool, time.Duration, error)
+func (r *RedisConcurrencyLimiter) Renew(ctx context.Context, lease tenant.ConcurrencyLease, ttl time.Duration) (tenant.ConcurrencyLease, bool, error)
+func (r *RedisConcurrencyLimiter) Release(ctx context.Context, lease tenant.ConcurrencyLease) error
+```
+
+Implements `tenant.ConcurrencyLimiter` across every application replica. Each
+key is a sorted set of random ownership tokens scored by expiry. Lua makes
+expired-lease pruning, counting, and insertion atomic, and Redis server time
+prevents replica clock skew from corrupting the budget.
+
+`Release` removes only the matching token, so a delayed cleanup from an expired
+worker cannot remove a newer worker's lease. `Renew` returns `ok == false` when
+the token expired or was lost. Redis also expires the whole set at its latest
+member, preventing abandoned operation keys from accumulating indefinitely.
+
+Use it with `tenant.Governor`; direct callers are responsible for the same
+acquire, renew, release, and cancellation lifecycle described in
+[Tenant Resource Governance](../concepts/resource-governance.md).
+
 ## RedisLockoutStore
 
 ```go

@@ -3804,6 +3804,72 @@ the caller's job.
 password login to be off for their users; leaving it enabled means an account
 provisioned before the mandate still has a working password nobody is watching.
 
+### Resource governance
+
+`Governor` is the transport-independent noisy-neighbor boundary. It applies a
+tenant policy and then an optional deployment-wide policy before expensive work
+starts:
+
+```go
+type ResourceLimits struct {
+    RateLimit        int
+    RateWindow       time.Duration
+    ConcurrencyLimit int
+    LeaseTTL         time.Duration
+}
+
+type LimitProvider interface {
+    Limits(ctx context.Context, tenantID, operation string) (ResourceLimits, error)
+}
+
+type LimitProviderFunc func(ctx context.Context, tenantID, operation string) (ResourceLimits, error)
+type FixedLimits ResourceLimits
+
+type GovernanceRateLimiter interface {
+    Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, int, error)
+}
+
+type ConcurrencyLimiter interface {
+    Acquire(ctx context.Context, key string, limit int, ttl time.Duration) (ConcurrencyLease, bool, time.Duration, error)
+    Renew(ctx context.Context, lease ConcurrencyLease, ttl time.Duration) (ConcurrencyLease, bool, error)
+    Release(ctx context.Context, lease ConcurrencyLease) error
+}
+```
+
+The built-in memory implementations are
+`NewMemoryGovernanceRateLimiter` and `NewMemoryConcurrencyLimiter`. They enforce
+one process; use `kayan-redis` for shared capacity across replicas.
+
+```go
+func NewGovernor(rate GovernanceRateLimiter, concurrency ConcurrencyLimiter, provider LimitProvider, opts ...GovernorOption) (*Governor, error)
+func WithGlobalLimitProvider(provider LimitProvider) GovernorOption
+func WithGovernorHooks(hooks GovernorHooks) GovernorOption
+
+func (g *Governor) Acquire(ctx context.Context, operation string) (*Permit, error)
+func (p *Permit) Renew(ctx context.Context) error
+func (p *Permit) Release(ctx context.Context) error
+```
+
+`Acquire` requires a tenant context and stable operation name. Policy and
+backend errors fail closed with `ErrGovernanceUnavailable`. Tenant limits run
+before global limits, and a failed global admission rolls back any tenant
+concurrency lease already acquired. Internal backend keys hash the tenant ID;
+they do not expose customer names in Redis keys.
+
+The governor rejects excess work; it does not queue or schedule it. Set tenant
+concurrency below global concurrency to prevent one tenant occupying every
+admitted slot, and use fair host-owned queues where work must wait rather than
+fail.
+
+`LimitError` identifies rate versus concurrency rejection and tenant versus
+global scope. `errors.Is` matches `ErrRateLimitExceeded` or
+`ErrConcurrencyExceeded`; `RetryAfter` can drive an HTTP response header.
+
+Concurrency permits carry expiring ownership tokens. `Release` is idempotent;
+long-running work calls `Renew` before expiry and stops on
+`ErrConcurrencyLeaseLost`. See [Tenant Resource Governance](../concepts/resource-governance.md)
+for wiring, cleanup-context rules, Redis behavior, and infrastructure limits.
+
 ### `Store` and `Manager`
 
 ```go

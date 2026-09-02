@@ -25,6 +25,9 @@ for.
 **"I am serving several customers from one deployment."**
 [Multi-Tenancy](./concepts/multi-tenancy.md) — resolution strategies, and how
 isolation is enforced in storage rather than left to application discipline.
+[Resource Governance](./concepts/resource-governance.md) adds per-tenant and
+global rate and concurrency budgets so one customer cannot consume every
+shared worker.
 
 **"I need SSO with an enterprise identity provider."**
 [SAML reference](./reference/saml.md) for SAML 2.0, or
@@ -75,6 +78,7 @@ Narrative explanations of the ideas the API assumes you already hold.
 - [Sessions](./concepts/sessions.md) — stateless versus revocable, and the trade
 - [Authorization](./concepts/authorization.md) — RBAC, ABAC, ReBAC, and when each fits
 - [Multi-Tenancy](./concepts/multi-tenancy.md) — resolution and enforcement
+- [Resource Governance](./concepts/resource-governance.md) — noisy-neighbor protection and distributed concurrency leases
 
 ## Architecture
 

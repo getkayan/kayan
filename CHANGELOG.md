@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tenant resource governance with per-tenant and global rate/concurrency
+  budgets, fail-closed policy resolution, expiring renewable leases, and
+  rollback of partially acquired capacity.
+- Atomic Redis concurrency enforcement and OpenTelemetry governance metrics.
+
 ### Changed
 
 - Redis rate windows use Redis server time and random members, preventing
   application-replica clock skew and same-millisecond collisions from changing
   distributed limits.
+- Redis concurrency leases use Redis server time, preventing application
+  replica clock skew from shortening or extending shared capacity reservations.
 
 ## [0.3.0] - 2026-09-02
 

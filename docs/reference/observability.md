@@ -254,6 +254,26 @@ The handlers record:
 | `kayan.lockout.total` | counter | `action` |
 | `kayan.auth.duration` | histogram, seconds | `strategy` |
 | `kayan.sessions.active` | up/down counter | `tenant` |
+| `kayan.governance.decisions` | counter | `tenant`, `operation`, `scope`, `kind`, `outcome` |
+| `kayan.governance.in_flight` | up/down counter | `tenant`, `operation` |
+| `kayan.governance.operation.duration` | histogram, seconds | `tenant`, `operation` |
+
+### Tenant resource-governance metrics
+
+```go
+func (p *Provider) TenantGovernorHooks() tenant.GovernorHooks
+```
+
+Pass these hooks to `tenant.WithGovernorHooks` when constructing a governor.
+Allowed admissions increment `in_flight`; permit release decrements it and
+records duration. Decisions distinguish `allowed`, policy `limited`, and
+backend/configuration `error` outcomes.
+
+A nil or disabled provider returns empty hooks. Tenant labels are bounded by
+the set of validated tenants, but can still be expensive at large scale. Drop
+or aggregate the tenant attribute in the OpenTelemetry Collector when the
+metrics backend cannot sustain one series per tenant and operation. Keep
+high-cardinality billing records in a dedicated usage store.
 
 ### Direct metric recording
 

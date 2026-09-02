@@ -10,6 +10,10 @@ Resolution is a request-scoped concern and lives in `core/tenant`. Isolation is
 a storage concern and lives in the adapter — `kayan-gorm` for GORM, yours for
 anything else.
 
+This page covers data isolation. Protecting shared CPU, database, Redis, and
+worker capacity from a noisy tenant is a separate concern; see
+[Tenant Resource Governance](./resource-governance.md).
+
 The reason for the split is that a resolution bug is loud and an isolation bug
 is silent. Resolve the wrong tenant and the customer sees an empty account and
 opens a ticket within the hour. Forget a predicate in one query and everything

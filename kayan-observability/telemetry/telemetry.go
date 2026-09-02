@@ -21,6 +21,9 @@
 //   - kayan.lockout.total: Account lockout events
 //   - kayan.auth.duration: Authentication duration histogram
 //   - kayan.sessions.active: Active session count
+//   - kayan.governance.decisions: Tenant resource admission decisions
+//   - kayan.governance.in_flight: Governed operations currently in flight
+//   - kayan.governance.operation.duration: Governed operation duration
 //
 // # Example Usage
 //
@@ -109,6 +112,9 @@ type Provider struct {
 	lockoutCounter      metric.Int64Counter
 	authDuration        metric.Float64Histogram
 	activeSessions      metric.Int64UpDownCounter
+	governanceDecisions metric.Int64Counter
+	governanceInFlight  metric.Int64UpDownCounter
+	governanceDuration  metric.Float64Histogram
 }
 
 // NewProvider creates a new telemetry provider.
@@ -275,6 +281,33 @@ func (p *Provider) initMetrics() error {
 		"kayan.sessions.active",
 		metric.WithDescription("Number of active sessions"),
 		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return err
+	}
+
+	p.governanceDecisions, err = p.meter.Int64Counter(
+		"kayan.governance.decisions",
+		metric.WithDescription("Tenant resource-governance admission decisions"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return err
+	}
+
+	p.governanceInFlight, err = p.meter.Int64UpDownCounter(
+		"kayan.governance.in_flight",
+		metric.WithDescription("Governed operations currently in flight"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return err
+	}
+
+	p.governanceDuration, err = p.meter.Float64Histogram(
+		"kayan.governance.operation.duration",
+		metric.WithDescription("Duration of governed operations"),
+		metric.WithUnit("s"),
 	)
 	if err != nil {
 		return err

@@ -8,5 +8,6 @@
 //
 //   - RedisLockoutStore: Implements flow.LockoutStore for distributed brute-force lockout tracking.
 //   - RedisRateLimiter: Implements flow.RateLimiter for distributed rate limiting.
+//   - RedisConcurrencyLimiter: Implements tenant.ConcurrencyLimiter with expiring leases.
 //   - RedisWebAuthnSessionStore: Implements flow.WebAuthnSessionStore for WebAuthn ceremony sessions.
 package redisstore

@@ -289,7 +289,8 @@ with PATCH and a filter grammar.
 
 **Multi-tenancy** (`core/tenant`) — eight resolution strategies, with
 isolation enforced at the storage layer. A scoped query with no tenant in
-context is an error, never an unscoped read.
+context is an error, never an unscoped read. Tenant and global rate/concurrency
+governance prevents one customer from consuming all admitted shared work.
 
 **Operations** — audit, consent, compliance, telemetry, health checks.
 
@@ -300,6 +301,7 @@ context is an error, never an unscoped read.
 - [Getting Started](./docs/getting-started.md) · [Quick Start](./docs/QUICKSTART.md)
 - [BYOS](./docs/concepts/byos.md) · [Strategies](./docs/concepts/strategies.md) · [Sessions](./docs/concepts/sessions.md)
 - [Authorization](./docs/concepts/authorization.md) · [Multi-Tenancy](./docs/concepts/multi-tenancy.md)
+- [Tenant Resource Governance](./docs/concepts/resource-governance.md)
 - [Architecture](./docs/architecture/README.md) · [Security Model](./docs/architecture/security-model.md)
 - [Examples](./examples/README.md) — runnable backends per strategy
 - [AGENTS.md](./AGENTS.md) / [CLAUDE.md](./CLAUDE.md) — architectural rules for contributors and AI agents

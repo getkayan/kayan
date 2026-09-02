@@ -8,7 +8,7 @@ to its canonical declaration and package documentation on pkg.go.dev. The linked
 guide beside each package explains lifecycle, security behavior, errors, and usage.
 Exported fields and interface methods are shown on the linked type declaration.
 
-**Coverage:** 32 packages, 1961 exported symbols.
+**Coverage:** 32 packages, 2013 exported symbols.
 
 ## Packages
 
@@ -1265,10 +1265,34 @@ Package tenant provides multi-tenancy support for Kayan IAM.
 - [`method CacheResolver.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#CacheResolver.Resolve)
 - [`type ChainResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ChainResolver) - ChainResolver tries multiple resolvers in order until one succeeds.
 - [`method ChainResolver.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ChainResolver.Resolve)
+- [`type ConcurrencyLease`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ConcurrencyLease) - ConcurrencyLease identifies one expiring capacity reservation.
+- [`type ConcurrencyLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ConcurrencyLimiter) - ConcurrencyLimiter reserves distributed or local in-flight capacity.
 - [`func DefaultPasswordPolicy`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#DefaultPasswordPolicy) - DefaultPasswordPolicy returns sensible defaults.
+- [`var ErrConcurrencyExceeded`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrConcurrencyExceeded) - Errors reported by tenant resource governance.
+- [`var ErrConcurrencyLeaseLost`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrConcurrencyLeaseLost) - Errors reported by tenant resource governance.
 - [`var ErrCrossTenant`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrCrossTenant) - ErrCrossTenant reports an attempt to reach a record belonging to another tenant.
+- [`var ErrGovernanceUnavailable`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrGovernanceUnavailable) - Errors reported by tenant resource governance.
+- [`var ErrInvalidLimits`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrInvalidLimits) - Errors reported by tenant resource governance.
+- [`var ErrInvalidOperation`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrInvalidOperation) - Errors reported by tenant resource governance.
 - [`var ErrNoTenant`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrNoTenant) - ErrNoTenant reports that a tenant-scoped operation was attempted with no tenant in the context.
+- [`var ErrRateLimitExceeded`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ErrRateLimitExceeded) - Errors reported by tenant resource governance.
+- [`type FixedLimits`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#FixedLimits) - FixedLimits applies the same limits to every operation and tenant presented to the provider.
+- [`method FixedLimits.Limits`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#FixedLimits.Limits) - Limits implements LimitProvider.
 - [`func FromContext`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#FromContext) - FromContext extracts the tenant from context.
+- [`type GovernanceDecision`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceDecision) - GovernanceDecision describes one final admission decision.
+- [`type GovernanceKind`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceKind) - GovernanceKind identifies the constrained resource dimension.
+- [`const GovernanceKindConcurrency`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceKindConcurrency)
+- [`const GovernanceKindNone`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceKindNone)
+- [`const GovernanceKindRate`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceKindRate)
+- [`type GovernanceRateLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceRateLimiter) - GovernanceRateLimiter counts admission attempts in a time window.
+- [`type GovernanceScope`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceScope) - GovernanceScope identifies which budget made an admission decision.
+- [`const GovernanceScopeGlobal`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceScopeGlobal)
+- [`const GovernanceScopeTenant`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceScopeTenant)
+- [`type GovernanceUsage`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernanceUsage) - GovernanceUsage describes an admitted operation when its permit is released.
+- [`type Governor`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Governor) - Governor admits work against per-tenant and optional global resource limits.
+- [`method Governor.Acquire`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Governor.Acquire) - Acquire admits an operation for the tenant in ctx.
+- [`type GovernorHooks`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernorHooks) - GovernorHooks connects admission decisions to audit and observability code.
+- [`type GovernorOption`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#GovernorOption) - GovernorOption configures a Governor.
 - [`type HeaderResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#HeaderResolver) - HeaderResolver extracts tenant from a request header.
 - [`method HeaderResolver.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#HeaderResolver.Resolve)
 - [`type Hooks`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Hooks) - Hooks provides extension points for tenant lifecycle events.
@@ -1276,6 +1300,12 @@ Package tenant provides multi-tenancy support for Kayan IAM.
 - [`func IsSystemContext`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#IsSystemContext) - IsSystemContext reports whether ctx was marked by [WithSystemContext].
 - [`type JWTClaimResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#JWTClaimResolver) - JWTClaimResolver extracts tenant from a JWT claim.
 - [`method JWTClaimResolver.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#JWTClaimResolver.Resolve)
+- [`type LimitError`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#LimitError) - LimitError reports a rejected admission without exposing an internal key.
+- [`method LimitError.Error`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#LimitError.Error) - Error implements error.
+- [`method LimitError.Unwrap`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#LimitError.Unwrap) - Unwrap makes errors.Is work with ErrRateLimitExceeded and ErrConcurrencyExceeded.
+- [`type LimitProvider`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#LimitProvider) - LimitProvider resolves limits for a tenant and a stable operation name.
+- [`type LimitProviderFunc`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#LimitProviderFunc) - LimitProviderFunc adapts a function to LimitProvider.
+- [`method LimitProviderFunc.Limits`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#LimitProviderFunc.Limits) - Limits implements LimitProvider.
 - [`type ListFilter`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ListFilter) - ListFilter for tenant queries.
 - [`type Manager`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Manager) - Manager coordinates tenant resolution, validation, and lifecycle.
 - [`method Manager.Create`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Manager.Create) - Create creates a new tenant.
@@ -1289,11 +1319,20 @@ Package tenant provides multi-tenancy support for Kayan IAM.
 - [`method Manager.ResolveFromRequest`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Manager.ResolveFromRequest) - ResolveFromRequest resolves and validates the tenant from an HTTP request.
 - [`method Manager.Update`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Manager.Update) - Update updates a tenant.
 - [`type ManagerOption`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ManagerOption) - ManagerOption configures the Manager.
+- [`type MemoryConcurrencyLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#MemoryConcurrencyLimiter) - MemoryConcurrencyLimiter is an expiring in-process concurrency limiter for tests and single-instance deployments.
+- [`method MemoryConcurrencyLimiter.Acquire`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#MemoryConcurrencyLimiter.Acquire) - Acquire implements ConcurrencyLimiter.
+- [`method MemoryConcurrencyLimiter.Release`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#MemoryConcurrencyLimiter.Release) - Release implements ConcurrencyLimiter.
+- [`method MemoryConcurrencyLimiter.Renew`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#MemoryConcurrencyLimiter.Renew) - Renew implements ConcurrencyLimiter.
+- [`type MemoryGovernanceRateLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#MemoryGovernanceRateLimiter) - MemoryGovernanceRateLimiter is a fixed-window limiter for tests and single-instance deployments.
+- [`method MemoryGovernanceRateLimiter.Allow`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#MemoryGovernanceRateLimiter.Allow) - Allow implements GovernanceRateLimiter.
 - [`func NewCacheResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewCacheResolver)
 - [`func NewChainResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewChainResolver)
+- [`func NewGovernor`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewGovernor) - NewGovernor creates a resource governor.
 - [`func NewHeaderResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewHeaderResolver)
 - [`func NewJWTClaimResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewJWTClaimResolver)
 - [`func NewManager`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewManager) - NewManager creates a new tenant manager with the given store and resolver.
+- [`func NewMemoryConcurrencyLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewMemoryConcurrencyLimiter) - NewMemoryConcurrencyLimiter creates an in-process concurrency limiter.
+- [`func NewMemoryGovernanceRateLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewMemoryGovernanceRateLimiter) - NewMemoryGovernanceRateLimiter creates an in-process rate limiter.
 - [`func NewPathResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewPathResolver)
 - [`func NewQueryResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewQueryResolver)
 - [`func NewStaticResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#NewStaticResolver)
@@ -1302,6 +1341,9 @@ Package tenant provides multi-tenancy support for Kayan IAM.
 - [`type PasswordPolicy`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#PasswordPolicy) - PasswordPolicy defines password requirements per tenant.
 - [`type PathResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#PathResolver) - PathResolver extracts tenant from URL path.
 - [`method PathResolver.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#PathResolver.Resolve)
+- [`type Permit`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Permit) - Permit represents admitted work.
+- [`method Permit.Release`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Permit.Release) - Release returns every concurrency reservation.
+- [`method Permit.Renew`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Permit.Renew) - Renew extends all concurrency reservations.
 - [`type QueryResolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#QueryResolver) - QueryResolver extracts tenant from query parameter.
 - [`method QueryResolver.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#QueryResolver.Resolve)
 - [`type RateLimitConfig`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#RateLimitConfig) - RateLimitConfig per-tenant rate limit settings.
@@ -1313,6 +1355,8 @@ Package tenant provides multi-tenancy support for Kayan IAM.
 - [`type Resolver`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Resolver) - Resolver extracts tenant identity from incoming transport data.
 - [`type ResolverFunc`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ResolverFunc) - ResolverFunc is an adapter to allow ordinary functions as Resolvers.
 - [`method ResolverFunc.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ResolverFunc.Resolve)
+- [`type ResourceLimits`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ResourceLimits) - ResourceLimits bounds one class of work for a tenant or for the deployment.
+- [`method ResourceLimits.Validate`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ResourceLimits.Validate) - Validate checks that every enabled limit has the duration needed to enforce it.
 - [`type Scoped`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Scoped) - Scoped is implemented by records that belong to a tenant.
 - [`type Scoper`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Scoper) - Scoper applies tenant isolation to a storage query.
 - [`type ScoperFunc`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ScoperFunc) - ScoperFunc adapts a function to [Scoper].
@@ -1329,6 +1373,8 @@ Package tenant provides multi-tenancy support for Kayan IAM.
 - [`method ValidatingResolver.Resolve`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#ValidatingResolver.Resolve)
 - [`func Verify`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#Verify) - Verify reports whether a record may be returned in the current context.
 - [`func WithDefaultTenant`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#WithDefaultTenant) - WithDefaultTenant sets a fallback tenant ID.
+- [`func WithGlobalLimitProvider`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#WithGlobalLimitProvider) - WithGlobalLimitProvider adds a deployment-wide budget after each tenant's own budget.
+- [`func WithGovernorHooks`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#WithGovernorHooks) - WithGovernorHooks installs informational decision and usage hooks.
 - [`func WithHooks`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#WithHooks) - WithHooks sets lifecycle hooks.
 - [`func WithLightweight`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#WithLightweight) - WithLightweight only stores tenant ID in context, not full object.
 - [`func WithOptionalTenant`](https://pkg.go.dev/github.com/getkayan/kayan/core/tenant#WithOptionalTenant) - WithOptionalTenant makes tenant resolution optional.
@@ -1595,6 +1641,7 @@ Package telemetry provides observability infrastructure for Kayan IAM.
 - [`method Provider.SpanSessionValidate`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-observability/telemetry#Provider.SpanSessionValidate) - SpanSessionValidate starts a span for session validation.
 - [`method Provider.SpanWebAuthn`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-observability/telemetry#Provider.SpanWebAuthn) - SpanWebAuthn starts a span for WebAuthn operations.
 - [`method Provider.StartSpan`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-observability/telemetry#Provider.StartSpan) - StartSpan starts a new span with common Kayan attributes.
+- [`method Provider.TenantGovernorHooks`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-observability/telemetry#Provider.TenantGovernorHooks) - TenantGovernorHooks connects a tenant.Governor to OpenTelemetry metrics.
 - [`method Provider.Tracer`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-observability/telemetry#Provider.Tracer) - Tracer returns the tracer instance.
 - [`func SetSpanError`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-observability/telemetry#SetSpanError) - SetSpanError marks a span as having an error.
 - [`func SetSpanSuccess`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-observability/telemetry#SetSpanSuccess) - SetSpanSuccess marks a span as successful.
@@ -1810,11 +1857,16 @@ Package kredis provides Redis-backed storage adapters for Kayan IAM.
 
 [Package documentation](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis) | [Behavioral guide](./adapters.md)
 
+- [`func NewRedisConcurrencyLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#NewRedisConcurrencyLimiter) - NewRedisConcurrencyLimiter creates a distributed concurrency limiter.
 - [`func NewRedisLockoutStore`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#NewRedisLockoutStore) - NewRedisLockoutStore creates a new Redis-based lockout store.
 - [`func NewRedisRateLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#NewRedisRateLimiter) - NewRedisRateLimiter creates a new Redis-based rate limiter.
 - [`func NewRedisSSOStore`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#NewRedisSSOStore) - NewRedisSSOStore creates an optional Redis-backed session.SSOStore.
 - [`func NewRedisSessionStore`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#NewRedisSessionStore) - NewRedisSessionStore creates a new Redis-backed session store.
 - [`func NewRedisWebAuthnSessionStore`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#NewRedisWebAuthnSessionStore) - NewRedisWebAuthnSessionStore creates a new Redis-based WebAuthn session store.
+- [`type RedisConcurrencyLimiter`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#RedisConcurrencyLimiter) - RedisConcurrencyLimiter enforces distributed in-flight limits with expiring sorted-set leases.
+- [`method RedisConcurrencyLimiter.Acquire`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#RedisConcurrencyLimiter.Acquire) - Acquire reserves capacity until release or TTL expiry.
+- [`method RedisConcurrencyLimiter.Release`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#RedisConcurrencyLimiter.Release) - Release removes only the lease with the matching ownership token.
+- [`method RedisConcurrencyLimiter.Renew`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#RedisConcurrencyLimiter.Renew) - Renew extends a lease only when its ownership token still exists.
 - [`type RedisLockoutStore`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#RedisLockoutStore) - RedisLockoutStore implements flow.LockoutStore using Redis for distributed deployments.
 - [`method RedisLockoutStore.ClearFailures`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#RedisLockoutStore.ClearFailures) - ClearFailures resets the failure count for the identifier.
 - [`method RedisLockoutStore.IsLocked`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-redis#RedisLockoutStore.IsLocked) - IsLocked checks if the identifier is currently locked.
