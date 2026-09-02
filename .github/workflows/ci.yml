@@ -188,7 +188,13 @@ jobs:
       - name: kayan-testing must only be imported by tests
         run: |
           set -euo pipefail
-          offenders="$(grep -rln 'getkayan/kayan/kayan-testing' --include='*.go' .             | grep -v '_test\.go$' | grep -v '^\./kayan-testing/'             | grep -v '^\./examples/' || true)"
+          # Match import declarations, not arbitrary string data. The API
+          # index generator stores module paths in Go string fields and must
+          # not be mistaken for code importing the in-memory adapter.
+          offenders="$(grep -rlnE '^[[:space:]]*([[:alnum:]_.]+[[:space:]]+)?"github.com/getkayan/kayan/kayan-testing"' --include='*.go' . \
+            | grep -v '_test\.go$' \
+            | grep -v '^\./kayan-testing/' \
+            | grep -v '^\./examples/' || true)"
           if [ -n "${offenders}" ]; then
             echo "ERROR: kayan-testing imported outside a _test.go file:"
             echo "${offenders}"
