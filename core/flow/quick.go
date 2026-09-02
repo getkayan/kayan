@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"github.com/getkayan/kayan/core/audit"
 	"github.com/getkayan/kayan/core/domain"
 	"github.com/getkayan/kayan/core/events"
 	"github.com/google/uuid"
@@ -41,6 +42,10 @@ func PasswordAuth(repo IdentityRepository, factory func() any, identifierField s
 	if cfg.dispatcher != nil {
 		regOpts = append(regOpts, WithRegDispatcher(cfg.dispatcher))
 		loginOpts = append(loginOpts, WithLoginDispatcher(cfg.dispatcher))
+	}
+	if cfg.auditStore != nil {
+		regOpts = append(regOpts, WithRegistrationAudit(cfg.auditStore, cfg.auditError))
+		loginOpts = append(loginOpts, WithLoginAudit(cfg.auditStore, cfg.auditError))
 	}
 	for _, h := range cfg.regPreHooks {
 		regOpts = append(regOpts, WithRegPreHook(h))
@@ -102,6 +107,8 @@ type quickConfig struct {
 	loginPreHooks   []Hook
 	loginPostHooks  []Hook
 	passwordPolicy  *PasswordPolicy
+	auditStore      audit.AuditStore
+	auditError      AuditErrorHandler
 }
 
 // QuickOption configures the PasswordAuth convenience constructor.
@@ -161,6 +168,19 @@ func WithIDGenerator(gen domain.IDGenerator) QuickOption {
 // WithQuickDispatcher sets the event dispatcher on both managers.
 func WithQuickDispatcher(d events.Dispatcher) QuickOption {
 	return func(c *quickConfig) { c.dispatcher = d }
+}
+
+// WithQuickAudit persists registration and login audit events.
+//
+// onError is called when audit persistence fails. Authentication results are
+// still returned because an audit backend outage is an application policy
+// decision; deployments that must fail closed can make the handler trigger
+// their own health or shutdown path.
+func WithQuickAudit(store audit.AuditStore, onError AuditErrorHandler) QuickOption {
+	return func(c *quickConfig) {
+		c.auditStore = store
+		c.auditError = onError
+	}
 }
 
 // WithRegHook adds pre and post hooks to the registration manager.
