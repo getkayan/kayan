@@ -41,6 +41,7 @@ A GORM-based storage adapter supporting PostgreSQL, MySQL, and SQLite.
 type Repository struct {
     *IdentityRepository
     *SessionRepository
+    *SSORepository
     // Has unexported fields.
 }
 
@@ -245,8 +246,36 @@ func NewSessionRepository(db *gorm.DB) *SessionRepository
 func (r *SessionRepository) CreateSession(ctx context.Context, s *identity.Session) error
 func (r *SessionRepository) GetSession(ctx context.Context, id any) (*identity.Session, error)
 func (r *SessionRepository) DeleteSession(ctx context.Context, id any) error
+func (r *SessionRepository) DeleteSessionsByIdentity(ctx context.Context, identityID any) error
 func (r *SessionRepository) GetSessionByRefreshToken(ctx context.Context, token string) (*identity.Session, error)
 ```
+
+`DeleteSessionsByIdentity` is the bulk revocation path used after a password
+reset or account lock. Changing a password without revoking existing sessions
+leaves an attacker who already authenticated signed in.
+
+### Database-backed SSO sessions
+
+```go
+type SSORepository struct {
+    // Has unexported fields.
+}
+
+func NewSSORepository(db *gorm.DB) *SSORepository
+
+func (r *SSORepository) CreateOrJoinSSOSession(ctx context.Context, candidate *session.SSOSession) (*session.SSOSession, error)
+func (r *SSORepository) GetSSOSession(ctx context.Context, id string) (*session.SSOSession, error)
+func (r *SSORepository) GetSSOSessionByIdentity(ctx context.Context, identityID string) (*session.SSOSession, error)
+func (r *SSORepository) JoinSSOSession(ctx context.Context, id string, app session.AppSession) (*session.AppSession, error)
+func (r *SSORepository) LeaveSSOSession(ctx context.Context, id, appID string) error
+func (r *SSORepository) DeactivateSSOSession(ctx context.Context, id string) ([]session.AppSession, error)
+func (r *SSORepository) DeleteSSOSession(ctx context.Context, id string) error
+```
+
+Implements `session.SSOStore` for cross-application sessions. Membership changes
+run in transactions so two applications joining or leaving at the same time do
+not overwrite each other. `DeactivateSSOSession` returns the application
+sessions that must be logged out; the caller performs that fan-out.
 
 ## Tokens and audit
 
@@ -376,28 +405,51 @@ type RBACRepository struct {
 
 func NewRBACRepository(db *gorm.DB) *RBACRepository
 
-func (r *RBACRepository) GetIdentityRoles(identityID any) ([]string, error)
-func (r *RBACRepository) SetIdentityRoles(identityID any, roles []string) error
+func (r *RBACRepository) AutoMigrate() error
+func (r *RBACRepository) GetIdentityRoles(ctx context.Context, identityID any) ([]string, error)
+func (r *RBACRepository) SetIdentityRoles(ctx context.Context, identityID any, roles []string) error
+func (r *RBACRepository) GetRole(ctx context.Context, name string) (*rbac.Role, error)
+func (r *RBACRepository) ListRoles(ctx context.Context) ([]*rbac.Role, error)
+func (r *RBACRepository) SaveRole(ctx context.Context, role *rbac.Role) error
+func (r *RBACRepository) DeleteRole(ctx context.Context, name string) error
 
 type RoleAssignment struct {
     ID         uint   `gorm:"primaryKey;autoIncrement"`
+    TenantId   string `gorm:"column:tenant_id;index"`
     IdentityID string `gorm:"index:idx_role_identity;not null"`
     Role       string `gorm:"index:idx_role_identity;not null"`
 }
 
 func (RoleAssignment) TableName() string
+func (a *RoleAssignment) TenantID() string
+func (a *RoleAssignment) SetTenantID(id string)
+
+type RoleDefinition struct {
+    Name        string   `gorm:"primaryKey"`
+    TenantId    string   `gorm:"column:tenant_id;primaryKey"`
+    Permissions []string `gorm:"type:text;serializer:json"`
+    Inherits    []string `gorm:"type:text;serializer:json"`
+    Description string
+}
+
+func (RoleDefinition) TableName() string
+func (d *RoleDefinition) TenantID() string
+func (d *RoleDefinition) SetTenantID(id string)
 ```
 
-Implements `rbac.RBACStorage`. `SetIdentityRoles` replaces all roles for an
+Implements both `rbac.AssignmentStore` and `rbac.RoleStore`.
+`SetIdentityRoles` replaces all roles for an
 identity in a single transaction, so a role change is never observed
 half-applied: there is no instant at which the old roles are removed and the new
 ones are not yet present. Without the transaction, a concurrent authorization
 check during a role update can see an empty role set and deny access to a user
-who has permission — a silent wrong denial whose behavior depends on timing.
+who has permission - a silent wrong denial whose behavior depends on timing.
 
-Note that these two methods take no `context.Context`, unlike the rest of the
-module. That makes them unable to participate in tenant scoping through the
-ambient context, which is a known rough edge rather than a design decision.
+Role definitions and assignments are tenant-scoped through the required
+`context.Context`. A missing tenant therefore fails closed when tenant isolation
+is registered. Deleting a definition intentionally leaves assignments in place;
+their next check returns `rbac.ErrRoleNotFound`, exposing broken configuration
+instead of silently converting it into an ordinary denial.
 
 ## Admin stores
 
@@ -431,6 +483,36 @@ Creating a user with a password or initial roles uses
 one transaction. Locking or disabling a user also revokes that user's database
 sessions. These stores target Kayan's default identity table; a caller-owned
 BYOS identity model supplies its own `admin.UserStore` mapping.
+
+```go
+func (s *AdminUserStore) List(ctx context.Context, opts admin.ListOptions) (*admin.UserListResult, error)
+func (s *AdminUserStore) Get(ctx context.Context, id any) (*admin.User, error)
+func (s *AdminUserStore) GetByEmail(ctx context.Context, email string) (*admin.User, error)
+func (s *AdminUserStore) Create(ctx context.Context, user *admin.User) error
+func (s *AdminUserStore) Provision(ctx context.Context, user *admin.User, credential *admin.PasswordCredential, roles []string) error
+func (s *AdminUserStore) Update(ctx context.Context, user *admin.User) error
+func (s *AdminUserStore) UpdateState(ctx context.Context, id any, state admin.UserState) error
+func (s *AdminUserStore) Delete(ctx context.Context, id any) error
+
+func (s *AdminSessionStore) ListByUser(ctx context.Context, userID any) ([]admin.Session, error)
+func (s *AdminSessionStore) Revoke(ctx context.Context, id any) error
+func (s *AdminSessionStore) RevokeByUser(ctx context.Context, userID any) error
+
+func (s *AdminRoleStore) List(ctx context.Context, opts admin.ListOptions) (*admin.RoleListResult, error)
+func (s *AdminRoleStore) Get(ctx context.Context, id string) (*admin.Role, error)
+func (s *AdminRoleStore) Create(ctx context.Context, role *admin.Role) error
+func (s *AdminRoleStore) Update(ctx context.Context, role *admin.Role) error
+func (s *AdminRoleStore) Delete(ctx context.Context, id string) error
+func (s *AdminRoleStore) AssignToUser(ctx context.Context, userID any, roleID string) error
+func (s *AdminRoleStore) RemoveFromUser(ctx context.Context, userID any, roleID string) error
+func (s *AdminRoleStore) GetUserRoles(ctx context.Context, userID any) ([]admin.Role, error)
+
+func (s *AdminAuditStore) Query(ctx context.Context, query admin.AuditQuery) (*admin.AuditEventListResult, error)
+```
+
+`Provision` writes the identity, optional password hash, and initial roles in
+one transaction. `Delete` removes related credentials and sessions in the same
+transaction. `UpdateState` revokes sessions when the new state is not active.
 
 ## ReBAC repository
 
@@ -623,6 +705,29 @@ count.
 `DeleteSession` must be called after the ceremony completes. The challenge is
 single-use; retaining it lets a captured assertion be replayed.
 
+## RedisSSOStore
+
+```go
+type RedisSSOStore struct {
+    // Has unexported fields.
+}
+
+func NewRedisSSOStore(client redis.UniversalClient, prefix string) *RedisSSOStore
+
+func (s *RedisSSOStore) CreateOrJoinSSOSession(ctx context.Context, candidate *session.SSOSession) (*session.SSOSession, error)
+func (s *RedisSSOStore) GetSSOSession(ctx context.Context, id string) (*session.SSOSession, error)
+func (s *RedisSSOStore) GetSSOSessionByIdentity(ctx context.Context, identityID string) (*session.SSOSession, error)
+func (s *RedisSSOStore) JoinSSOSession(ctx context.Context, id string, app session.AppSession) (*session.AppSession, error)
+func (s *RedisSSOStore) LeaveSSOSession(ctx context.Context, id, appID string) error
+func (s *RedisSSOStore) DeactivateSSOSession(ctx context.Context, id string) ([]session.AppSession, error)
+func (s *RedisSSOStore) DeleteSSOSession(ctx context.Context, id string) error
+```
+
+Implements `session.SSOStore` for deployments where cross-application session
+state must be shared across replicas. Redis transactions make application
+membership changes atomic. Use a prefix unique to the deployment when several
+applications share one Redis database.
+
 ---
 
 # kayan-ldap
@@ -664,7 +769,10 @@ production, where it turns the directory connection into a credential feed for
 anyone able to observe the network.
 
 ```go
-var ErrTLSRequired = errors.New("ldapstore: TLS is required")
+var (
+    ErrTLSRequired         = errors.New("ldapstore: TLS is required")
+    ErrNoClientCertificate = errors.New("ldapstore: SASL EXTERNAL requires a TLS client certificate")
+)
 ```
 
 ```go
@@ -734,6 +842,16 @@ func WithTimeout(d time.Duration) DialerOption
 Bounds connection and search operations. Defaults to `DefaultTimeout`.
 
 ```go
+func WithStartTLS() DialerOption
+```
+
+Connects on the configured address and completes StartTLS before returning the
+connection. The upgrade still enforces certificate verification and the TLS
+floor. If the upgrade or handshake fails, the connection is closed rather than
+returned in plaintext. Use this for directories exposing StartTLS on port 389;
+use the default implicit TLS path for LDAPS, commonly on port 636.
+
+```go
 func WithInsecureSkipVerify() DialerOption
 ```
 
@@ -752,6 +870,7 @@ type Conn struct {
 }
 
 func (c *Conn) Bind(dn, password string) error
+func (c *Conn) BindExternal(ctx context.Context) error
 func (c *Conn) Search(req flow.LDAPSearchRequest) ([]flow.LDAPEntry, error)
 func (c *Conn) Close() error
 ```
@@ -765,6 +884,16 @@ ends up in log aggregation, where it is retained far longer and read by far more
 people than the credential store ever would be.
 
 `Close` releases the connection and stops the context watcher.
+
+`BindExternal` performs SASL EXTERNAL using the client certificate configured
+on the TLS connection. It returns `ErrNoClientCertificate` when no certificate
+was presented, preventing a directory from silently mapping the bind to an
+anonymous identity.
+
+`Search` returns `flow.ErrLDAPResultTruncated` with any partial entries when the
+directory applies a size limit. Callers must treat that error as an incomplete
+answer, not as proof that no additional users or groups exist. Active Directory
+commonly applies a 1000-entry server limit to unpaged searches.
 
 ---
 

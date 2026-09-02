@@ -373,7 +373,10 @@ detection, JWKS, and discovery.
 **Accept provisioning.** [SCIM reference](./reference/scim.md), including the
 PATCH shapes Okta and Entra ID actually send.
 
-**Read the whole API.** [core reference](./reference/core.md).
+**Read the whole API.** Start with the exhaustive
+[Go API index](./reference/go-api.md), then use the
+[core behavioral reference](./reference/core.md) for lifecycle and security
+semantics.
 
 ---
 

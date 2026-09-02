@@ -1,8 +1,13 @@
 openapi: 3.0.3
 info:
-  title: Kayan IAM API
+  title: Kayan IAM Reference HTTP API
   description: |
-    Kayan is a headless, non-generic, and highly extensible authentication service.
+    This is an implementation-neutral reference contract for applications that
+    expose the headless Kayan Go libraries through HTTP. Kayan does not start a
+    server or register these routes. Host applications own transport, middleware,
+    authorization, serialization, and deployment policy.
+
+    Kayan is a headless, non-generic, and highly extensible IAM library.
     
     ## Features
     - **BYOS (Bring Your Own Schema)** - Works with any identity model

@@ -60,7 +60,11 @@ the code.
 | [saml](./reference/saml.md) | SAML 2.0 service provider and identity provider, signature verification, replay protection |
 | [scim](./reference/scim.md) | SCIM 2.0 resources, PATCH, and the filter grammar |
 | [adapters](./reference/adapters.md) | `kayan-gorm`, `kayan-redis`, `kayan-ldap`, `kayan-testing` |
+| [observability](./reference/observability.md) | Environment configuration, Zap logging, OpenTelemetry metrics and traces |
 | [configuration](./reference/configuration.md) | Environment variables and configuration types |
+| [Go API index](./reference/go-api.md) | Every exported declaration in all 32 public Go packages |
+| [HTTP API contract](./reference/http-api.md) | Boundary between the headless library and the reference OpenAPI document |
+| [CLI](./reference/cli.md) | Experimental command surface and the host routes used by remote commands |
 
 ## Concepts
 

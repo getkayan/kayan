@@ -1103,6 +1103,155 @@ func (r *OAuth2Repository) GetRefreshToken(ctx context.Context, token string) (*
 func (r *OAuth2Repository) DeleteRefreshToken(ctx context.Context, token string) error
 ```
 
+## Authentication context and `max_age`
+
+`ParseAuthorizeRequest` parses `max_age` and `acr_values` into the embedded
+`AuthenticationRequirements`:
+
+```go
+type AuthenticationRequirements struct {
+    MaxAge    *int
+    ACRValues []string
+}
+
+func (r AuthenticationRequirements) Requested() bool
+func (r AuthenticationRequirements) NeedsReauthentication(lastAuth, now time.Time) bool
+func (r AuthenticationRequirements) SatisfiedBy(lastAuth, now time.Time) bool
+```
+
+`max_age=0` is meaningful, which is why `MaxAge` is a pointer. Before reusing a
+login session, call `NeedsReauthentication`. A zero or stale authentication
+time does not satisfy the requirement.
+
+After authentication, issue the code with what actually happened:
+
+```go
+type AuthenticationInfo struct {
+    Nonce    string
+    AuthTime time.Time
+    ACR      string
+    AMR      []string
+}
+
+func (p *Provider) GenerateAuthCodeForAuthentication(
+    ctx context.Context,
+    req *AuthorizeRequest,
+    identityID string,
+    auth AuthenticationInfo,
+) (string, error)
+```
+
+A request carrying `max_age` is refused when `AuthTime` is missing or too old.
+The consumed code returns the same values in `TokenResponse.Authentication`;
+pass them to `IDTokenRequest` so the ID token carries `nonce`, `auth_time`,
+`acr`, and `amr`. `acr_values` is a preference in OIDC, not a mandatory class
+ordering: authenticate according to deployment policy and report the class
+actually reached.
+
+Set `DiscoveryOptions.ACRValues` only to classes the deployment can really
+produce. They become `acr_values_supported`.
+
+## Pushed authorization requests (PAR)
+
+```go
+type PushedRequestStore interface {
+    SavePushedRequest(ctx context.Context, request *PushedRequest) error
+    ConsumePushedRequest(ctx context.Context, uri string) (*PushedRequest, error)
+}
+
+func WithPushedRequests(store PushedRequestStore) ProviderOption
+func WithPushedRequestTTL(ttl time.Duration) ProviderOption
+func WithRequirePushedRequests(required bool) ProviderOption
+func (p *Provider) PushAuthorizationRequest(ctx context.Context, values url.Values, authorization string) (*PushedRequest, error)
+```
+
+`PushAuthorizationRequest` authenticates the client, validates the complete
+authorization request, strips client credentials before storage, and returns a
+short-lived `request_uri`. Redemption consumes it atomically and uses the
+pushed parameters alone; query parameters cannot override its client or
+redirect URI.
+
+`MemoryPushedRequestStore` is for a single process. A load-balanced deployment
+must implement the atomic store in shared storage or a URI pushed to one
+replica will fail on another. `WithRequirePushedRequests(true)` rejects the
+ordinary authorization path, as required by FAPI 2.0.
+
+Discovery advertises PAR only when both sides are wired:
+
+```go
+server := oidc.NewServer(
+    issuer,
+    signingKey,
+    keyID,
+    oidc.WithPushedRequestSupport(provider),
+)
+```
+
+Set `Endpoints.PushedAuthorizationRequest` in `DiscoveryOptions`. Configuring
+the URL without the provider is an error rather than an advertised endpoint
+that cannot serve requests.
+
+## `private_key_jwt` client authentication
+
+```go
+type ClientAssertionStore interface {
+    ConsumeAssertionID(ctx context.Context, clientID, jti string, expiresAt time.Time) error
+}
+
+type ClientKeyResolver interface {
+    ClientKeys(ctx context.Context, client *Client) (keys.JWKS, error)
+}
+
+func WithClientAssertions(store ClientAssertionStore) ProviderOption
+func WithClientKeyResolver(resolver ClientKeyResolver) ProviderOption
+func WithTokenEndpointURL(url string) ProviderOption
+func WithMaxClientAssertionLifetime(d time.Duration) ProviderOption
+```
+
+Register public keys in `Client.JWKS`, or supply a resolver that fetches and
+caches the client's registered `jwks_uri`. Kayan performs no outbound fetches.
+Assertions require `iss == sub == client_id`, a valid audience, `exp`, `iat`,
+and a non-empty `jti`; only asymmetric algorithms are accepted.
+
+The assertion store must atomically consume `jti`. Without one,
+`private_key_jwt` is refused rather than downgraded to a replayable bearer
+credential. `MemoryClientAssertionStore` is suitable only for one process;
+replicas need shared storage.
+
+Pass the provider to `oidc.WithClientAuthMethods` so discovery derives
+`token_endpoint_auth_methods_supported` from the methods actually configured.
+
+## RP-initiated logout
+
+```go
+func WithClientStore(store oauth2.ClientStore) ServerOption
+
+func (s *Server) ParseEndSessionRequest(ctx context.Context, values url.Values) (*EndSessionRequest, error)
+
+type EndSessionRequest struct {
+    ClientID                 string
+    Subject                  string
+    SessionID                string
+    PostLogoutRedirectURI    string
+    State                    string
+    LogoutHint               string
+    ConfirmationRequired     bool
+}
+
+func (r *EndSessionRequest) RedirectURL() string
+```
+
+Configure `WithClientStore` and register each client's
+`PostLogoutRedirectURIs`. A present `id_token_hint` must verify; an invalid one
+never falls back to an unauthenticated `client_id`. Redirects are exact-match
+allowlisted, and `RedirectURL` appends `state` only to a validated target.
+
+End the session identified by the verified `SessionID`. `LogoutHint` is
+untrusted display or lookup text, not authorization to select another user's
+session. Ask for confirmation whenever `ConfirmationRequired` is true. Discovery
+refuses to advertise `end_session_endpoint` without a client store capable of
+validating redirect targets.
+
 ---
 
 ## Known gaps

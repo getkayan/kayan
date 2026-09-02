@@ -13,6 +13,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,6 +21,7 @@ import (
 )
 
 var fence = regexp.MustCompile("(?s)```go( +notest)?\n(.*?)\n```")
+var markdownLink = regexp.MustCompile(`\[[^]]+\]\(([^)[:space:]]+)\)`)
 
 func main() {
 	root := "docs"
@@ -38,6 +40,10 @@ func main() {
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
+		}
+
+		for _, problem := range inspectLinks(path, string(content)) {
+			findings = append(findings, problem)
 		}
 
 		for i, match := range fence.FindAllStringSubmatch(string(content), -1) {
@@ -74,6 +80,31 @@ func main() {
 	if len(findings) > 0 {
 		os.Exit(1)
 	}
+}
+
+// inspectLinks reports relative Markdown links whose target does not exist.
+// External URLs and same-page anchors are intentionally left to their owners;
+// this check catches repository moves and misspelled paths without making CI
+// depend on the network.
+func inspectLinks(document, content string) []string {
+	var findings []string
+	for _, match := range markdownLink.FindAllStringSubmatch(content, -1) {
+		target := strings.Trim(match[1], "<>")
+		parsed, err := url.Parse(target)
+		if err != nil || parsed.Scheme != "" || parsed.Host != "" || parsed.Path == "" {
+			continue
+		}
+		decoded, err := url.PathUnescape(parsed.Path)
+		if err != nil {
+			findings = append(findings, fmt.Sprintf("%s: invalid link %q", document, target))
+			continue
+		}
+		candidate := filepath.Clean(filepath.Join(filepath.Dir(document), filepath.FromSlash(decoded)))
+		if _, err := os.Stat(candidate); err != nil {
+			findings = append(findings, fmt.Sprintf("%s: missing link target %q", document, target))
+		}
+	}
+	return findings
 }
 
 // compilable reports whether a block is a whole enough unit to reason about.

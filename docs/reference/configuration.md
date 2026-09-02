@@ -2,6 +2,9 @@
 
 This page documents the configuration surfaces that exist directly in the repository. Many deployments will wrap these values inside a broader host application configuration system.
 
+For constructors, lifecycle, metrics, spans, and logging behavior, see the
+[observability API reference](./observability.md).
+
 ## kayan-observability/config
 
 `kayan-observability/config.LoadConfig()` currently supports these environment variables:

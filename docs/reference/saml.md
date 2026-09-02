@@ -1187,6 +1187,132 @@ provider assumes the user is already authenticated via session. `GetNameID` and
 which field of your model is the subject identifier a given service provider
 expects.
 
+## Per-login authentication requirements
+
+```go
+type LoginOptions struct {
+    ForceAuthn                bool
+    IsPassive                 bool
+    RequestedAuthnContexts    []string
+    Comparison                string
+    RelayState                string
+}
+
+func (sp *ServiceProvider) InitiateLoginWith(
+    ctx context.Context,
+    idpID string,
+    returnURL string,
+    options LoginOptions,
+) (string, error)
+```
+
+`ForceAuthn` asks the identity provider to authenticate again. Kayan enforces
+it on the response by requiring `AuthnInstant` not to predate the request.
+`RequestedAuthnContexts` lists acceptable class references; a response outside
+the list returns `ErrAuthnContextNotSatisfied`.
+
+`Comparison` controls what is sent to the identity provider and defaults to
+`exact`. Response enforcement remains membership in the explicit list because
+there is no portable ordering between proprietary authentication classes.
+`IsPassive` asks the provider not to show UI; inability to comply arrives as a
+SAML status error.
+
+The session store must persist `Session.ForceAuthn` and
+`Session.RequestedAuthnContexts`. Dropping either silently degrades a step-up
+request into ordinary SSO.
+
+## Redirect-binding signatures
+
+```go
+type RedirectSigner interface {
+    SignRedirect(ctx context.Context, build func(sigAlg string) []byte) (sigAlg string, signature []byte, err error)
+}
+
+func NewRSARedirectSigner(key *rsa.PrivateKey, algorithm string) (*RSARedirectSigner, error)
+func WithRedirectSigner(signer RedirectSigner) SPOption
+func VerifyRedirectSignature(rawQuery string, certs []*x509.Certificate) error
+func (sp *ServiceProvider) ProcessRedirectLogoutRequest(ctx context.Context, rawQuery string) (*LogoutInstruction, error)
+```
+
+Redirect signatures are detached signatures over the exact encoded query
+parameters, not enveloped XML signatures. `RedirectSigner` chooses the
+algorithm and signs the corresponding octets in one operation so the declared
+`SigAlg` cannot disagree with the algorithm used.
+
+Pass the untouched raw query to `ProcessRedirectLogoutRequest`; parsing and
+re-encoding it can change the signed bytes. `VerifyRedirectSignature` accepts
+the registered certificates used during key rollover. SHA-1 algorithms are
+refused.
+
+When `Config.SignRequests` is true, `InitiateLogin` and
+`InitiateLoginWith` require a redirect signer and fail with
+`ErrNoRedirectSigner` if none can be resolved. `WithSPSigner` is separate: it
+signs enveloped XML documents such as POST-bound logout responses and metadata.
+
+## Signed metadata
+
+```go
+func (sp *ServiceProvider) SignedMetadata(ctx context.Context, validUntil time.Time) ([]byte, error)
+func (idp *IdentityProvider) SignedMetadata(ctx context.Context, validUntil time.Time) ([]byte, error)
+```
+
+Both methods place an enveloped XML-DSig signature on the
+`EntityDescriptor`. A zero `validUntil` omits expiry; production federations
+should normally set one so a removed signing certificate does not remain
+trusted indefinitely.
+
+The SP method requires `WithSPSigner`. The IdP uses `WithIdPSigner` or the key
+pair supplied in `IdPServerConfig`. Missing configuration returns
+`ErrNoMetadataSigner`; it never falls back to unsigned metadata. Unsigned
+`Metadata` remains available where a federation does not require document
+signing.
+
+## Encrypted name identifiers
+
+```go
+type EncryptedID struct {
+    XMLName xml.Name
+    Raw     []byte
+}
+```
+
+Assertions and logout requests may carry an `EncryptedID`. Kayan decrypts it
+only after signature verification and replaces it with the resulting `NameID`
+for the remaining validation path. Configure `WithDecrypter` on an SP and
+`WithIdPDecrypter` on an IdP.
+
+A message carrying both plaintext and encrypted identifiers returns
+`ErrAmbiguousNameID`. Missing decryption support returns `ErrNoDecrypter`, and
+plaintext that is not a valid, non-empty `NameID` returns
+`ErrEncryptedIDUnreadable`.
+
+## Identity-provider single logout
+
+```go
+type IdPLogoutInstruction struct {
+    RequestID    string
+    SPID         string
+    NameID       string
+    NameIDFormat string
+    SessionIndex string
+}
+
+func (idp *IdentityProvider) ProcessLogoutRequest(ctx context.Context, samlRequest string) (*IdPLogoutInstruction, error)
+func (idp *IdentityProvider) BuildLogoutResponse(ctx context.Context, spID, inResponseTo string, success bool) ([]byte, error)
+func (idp *IdentityProvider) LogoutTargets(exceptSPID string) []*SPRegistration
+func (idp *IdentityProvider) BuildLogoutRequest(ctx context.Context, spID string, subject LogoutSubject) (string, error)
+```
+
+`ProcessLogoutRequest` verifies the request against the registered service
+provider certificate before returning the subject and session to end. Use
+`BuildLogoutResponse` to answer the initiating SP.
+
+For federation-wide logout, call `LogoutTargets` to enumerate registered SPs
+with logout endpoints, excluding the initiator, and build one signed request
+per target. Kayan returns messages and targets; the host application performs
+the HTTP fan-out and decides retry policy. An SP registration without an SLO
+URL is omitted rather than sent an unusable request.
+
 ---
 
 ## Login strategy

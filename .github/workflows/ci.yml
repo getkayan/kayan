@@ -273,4 +273,14 @@ jobs:
       # their code will not build.
       - name: Check documentation samples
         working-directory: tools/docsample
-        run: GOWORK=off go run . ../../docs
+        run: |
+          GOWORK=off go test ./...
+          GOWORK=off go run . ../../docs
+
+      # Hand-written references explain behavior; this generated index proves
+      # that every exported declaration remains discoverable when the API moves.
+      - name: Check exhaustive Go API index
+        working-directory: tools/apiref
+        run: |
+          GOWORK=off go test ./...
+          GOWORK=off go run . -root ../.. -check

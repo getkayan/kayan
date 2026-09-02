@@ -5673,6 +5673,156 @@ produces points at the wrong thing.
 `WithIDGenerator` is for **record identifiers only**. Use `domain.TokenGenerator`
 for anything an attacker must not be able to predict.
 
+### Account-state, MFA, and recovery completion
+
+```go
+type IdentityStateSource interface {
+    IdentityState() string
+}
+
+func MFAIdentityFrom(err error) (any, bool)
+
+type SessionRevoker interface {
+    RevokeAll(ctx context.Context, identityID any) error
+}
+
+func WithRecoverySessionRevoker(r SessionRevoker) RecoveryOption
+```
+
+`LoginManager` checks `IdentityStateSource` after every strategy succeeds. This
+central check prevents a locked, inactive, or pending user from switching to an
+authentication method whose strategy does not know about account state.
+
+When login returns `ErrMFARequired`, `MFAIdentityFrom` retrieves the identity
+that passed the first factor. It remains partially authenticated: do not create
+a session until the MFA challenge succeeds.
+
+`WithRecoverySessionRevoker` makes a successful password reset revoke all of
+the identity's existing sessions. Without it, changing the password does not
+remove an attacker who already holds a valid session.
+
+### Passkeys and authenticator policy
+
+```go
+func PasskeyAuthenticatorSelection() protocol.AuthenticatorSelection
+
+func (s *WebAuthnStrategy) BeginDiscoverableLogin(ctx context.Context) (*protocol.CredentialAssertion, string, error)
+func (s *WebAuthnStrategy) FinishDiscoverableLogin(ctx context.Context, sessionID string, response *protocol.ParsedCredentialAssertionData) (any, error)
+```
+
+Configure registration and user-handle resolution before starting a
+usernameless ceremony:
+
+```go
+selection := flow.PasskeyAuthenticatorSelection()
+strategy, err := flow.NewWebAuthnStrategy(
+    credentialStore,
+    flow.WebAuthnConfig{
+        RPDisplayName:          "Example",
+        RPID:                   "example.com",
+        RPOrigins:              []string{"https://example.com"},
+        AuthenticatorSelection: &selection,
+        Hooks: flow.WebAuthnHooks{
+            DiscoverableUserLoader: loadUserByHandle,
+        },
+    },
+    func() any { return &User{} },
+    ceremonyStore,
+)
+```
+
+`DiscoverableUserLoader` receives the credential ID and asserted user handle.
+It must return the identity whose ID equals that handle. Kayan verifies the
+match and returns `ErrUserHandleMismatch` rather than authenticating a valid
+credential as the wrong identity. Ceremony sessions are single-use even when
+validation fails.
+
+Relevant errors are `ErrNoDiscoverableUserLoader`,
+`ErrUnknownDiscoverableCredential`, and `ErrUserHandleMismatch`. User
+verification is required by default; lowering
+`WebAuthnConfig.DiscoverableUserVerification` changes the ceremony from proving
+the user to proving only possession of the authenticator.
+
+Registration can enforce authenticator provenance:
+
+```go
+type AttestationPolicy interface {
+    AllowAuthenticator(ctx context.Context, info AttestationInfo) error
+}
+
+func RequireTrustedAttestation() AttestationPolicy
+func AllowedAuthenticators(aaguids ...[]byte) (AttestationPolicy, error)
+func RequireDeviceBoundCredential() AttestationPolicy
+func CombineAttestationPolicies(policies ...AttestationPolicy) AttestationPolicy
+```
+
+`RequireTrustedAttestation` rejects `none` and self-attestation.
+`AllowedAuthenticators` restricts registration to named AAGUIDs and refuses an
+empty list or all-zero AAGUID. `RequireDeviceBoundCredential` rejects
+backup-eligible credentials; use it only where policy truly requires a key to
+remain on one device, because it excludes ordinary synchronized passkeys.
+
+Set both `WebAuthnConfig.AttestationPreference` and `AttestationPolicy`.
+Requesting direct attestation without judging it collects identifying material
+and may prompt the user while enforcing no trust decision.
+
+### LDAP failover and complete-result semantics
+
+`LDAPConfig.FailoverAddrs` lists additional directory hosts in order.
+Connection and search faults move to the next host; rejected service-account or
+user binds do not. Retrying a wrong password against every replica would spend
+multiple directory lockout attempts for one login.
+
+```go
+type LDAPSearchRequest struct {
+    BaseDN     string
+    Filter     string
+    Attributes []string
+    SizeLimit  int
+}
+
+const (
+    LDAPServiceAuthSimple   = "simple"
+    LDAPServiceAuthExternal = "external"
+)
+```
+
+`SizeLimit` is an integrity boundary. A directory that stops at the limit must
+return `ErrLDAPResultTruncated` with its partial entries; the caller cannot
+treat them as a complete answer. The strategy returns `ErrLDAPAmbiguousUser`
+when a username matches more than one entry and `ErrLDAPSearchFailed` for an
+outage or rejected search, preserving the difference from
+`ErrLDAPUserNotFound`.
+
+`LDAPServiceAuthExternal` authenticates the service account from the TLS client
+certificate. It never falls back to a password bind. End users still prove
+their password with a simple bind.
+
+### Reading partner JWKS documents
+
+```go
+func ParseJWKS(data []byte) (JWKS, error)
+func (s JWKS) Find(kid string) (JWK, bool)
+func (j JWK) PublicKey() (crypto.PublicKey, error)
+```
+
+`ParseJWKS` reads the JSON shape; `PublicKey` performs key validation. It
+supports RSA, P-256/P-384/P-521 ECDSA, and Ed25519, rejects RSA moduli below
+2048 bits and off-curve EC points, and returns `ErrSymmetricJWK` for `oct` keys.
+An empty `kid` resolves only when the set contains exactly one key, avoiding an
+ambiguous fallback to a retired key during rotation.
+
+### Resolving administrative callers
+
+```go
+func (m *Manager) ResolveCaller(ctx context.Context, userID any) (*Caller, error)
+```
+
+`admin.Manager.ResolveCaller` loads the active user and their current roles,
+then flattens custom role permissions into a `Caller`. Resolve once per request
+and treat every error as denial. A role named `superadmin` does not set
+`IsSuperAdmin`; that bypass remains an explicit application decision.
+
 ---
 
 ## Related

@@ -1,6 +1,6 @@
 # Kayan
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/getkayan/kayan.svg)](https://pkg.go.dev/github.com/getkayan/kayan)
+[![Go Reference](https://pkg.go.dev/badge/github.com/getkayan/kayan/core.svg)](https://pkg.go.dev/github.com/getkayan/kayan/core)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/getkayan/kayan)](https://go.dev/)
 [![Build Status](https://github.com/getkayan/kayan/actions/workflows/ci.yml/badge.svg)](https://github.com/getkayan/kayan/actions/workflows/ci.yml)
 [![Test Status](https://github.com/getkayan/kayan/actions/workflows/test.yml/badge.svg)](https://github.com/getkayan/kayan/actions/workflows/test.yml)
@@ -27,6 +27,13 @@ Modules are published per directory. Import what you need:
 go get github.com/getkayan/kayan/core@v0.3.0
 go get github.com/getkayan/kayan/kayan-gorm@v0.3.0
 ```
+
+See the [complete Go API index](./docs/reference/go-api.md) for every exported
+declaration across all modules, with links to behavioral references and
+pkg.go.dev. Kayan is headless; the [HTTP contract](./docs/reference/http-api.md)
+explains how the reference OpenAPI document and experimental CLI relate to a
+host application.
+
 >
 > The public API will change without a deprecation cycle — see
 > [VERSIONING.md](./VERSIONING.md).

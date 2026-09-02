@@ -836,10 +836,117 @@ PATCH, where `ApplyPatch` walks the in-memory resource and can evaluate them.
 An unsupported operator or an unrecognized expression type is likewise refused
 with `invalidFilter` rather than skipped.
 
+## Stable sorting
+
+```go
+type ListOptions struct {
+    Filter     string
+    StartIndex int
+    Count      int
+    SortBy     string
+    SortOrder  string
+}
+
+const (
+    SortAscending  = "ascending"
+    SortDescending = "descending"
+)
+
+func (m *Manager) ListUsersSorted(ctx context.Context, opts ListOptions) (*ListResponse, error)
+func (m *Manager) ListGroupsSorted(ctx context.Context, opts ListOptions) (*ListResponse, error)
+```
+
+An empty `SortBy` uses the ordinary list path. A requested sort requires the
+optional `SortableScimStorage`; otherwise the manager returns
+`ErrSortUnsupported` instead of sending an unsorted result that looks valid.
+An unmapped attribute returns `ErrInvalidSortAttribute`.
+
+```go
+type SortableScimStorage interface {
+    SupportsSorting() bool
+    ListScimUsersSorted(ctx context.Context, opts ListOptions) ([]*User, int, error)
+    ListScimGroupsSorted(ctx context.Context, opts ListOptions) ([]*Group, int, error)
+}
+```
+
+The GORM adapter resolves `SortBy` through `MapperConfig`; request text never
+becomes a SQL identifier. It adds the primary key as a tiebreaker when the
+selected column is not unique, keeping pagination stable between pages. Plain
+list results are also ordered by ID.
+
+## Resource metadata and ETags
+
+```go
+type MapperConfig struct {
+    FieldMappings  map[string]string
+    TraitMappings  map[string]string
+    MetaMappings   map[string]string
+    ResourceBaseURL string
+}
+
+const (
+    MetaCreated      = "created"
+    MetaLastModified = "lastModified"
+    MetaVersion      = "version"
+)
+```
+
+Map metadata to fields on the application model:
+
+```go
+mapper := scim.NewMapper(func() any { return &User{} }, scim.MapperConfig{
+    FieldMappings: map[string]string{
+        "id":       "ID",
+        "userName": "Email",
+    },
+    MetaMappings: map[string]string{
+        scim.MetaCreated:      "CreatedAt",
+        scim.MetaLastModified: "UpdatedAt",
+        scim.MetaVersion:      "Version",
+    },
+    ResourceBaseURL: "https://api.example.com/scim/v2",
+})
+```
+
+Unmapped timestamps are omitted rather than invented. `ResourceBaseURL` builds
+`meta.location`; Kayan cannot infer it because the library owns no router.
+Versions are valid ETag strings. A content-derived weak ETag is sufficient for
+caching, but not for an atomic `If-Match` write.
+
+## Conditional writes
+
+```go
+type ConditionalScimStorage interface {
+    SupportsConditionalWrites() bool
+    UpdateScimUserIfMatch(ctx context.Context, user *User, ifMatch string) error
+    DeleteScimUserIfMatch(ctx context.Context, id, ifMatch string) error
+    UpdateScimGroupIfMatch(ctx context.Context, group *Group, ifMatch string) error
+    DeleteScimGroupIfMatch(ctx context.Context, id, ifMatch string) error
+}
+
+func (m *Manager) UpdateUserIfMatch(ctx context.Context, id string, user *User, ifMatch string) (*User, error)
+func (m *Manager) DeleteUserIfMatch(ctx context.Context, id, ifMatch string) error
+func (m *Manager) UpdateGroupIfMatch(ctx context.Context, id string, group *Group, ifMatch string) (*Group, error)
+func (m *Manager) DeleteGroupIfMatch(ctx context.Context, id, ifMatch string) error
+```
+
+These methods require a non-empty `If-Match` value and an atomic storage
+implementation. A mismatched version returns `ErrPreconditionFailed`, which the
+host serves as HTTP 412. A backend without compare-and-swap returns
+`ErrConditionalUnsupported`; the manager never falls back to a racy
+read-check-write sequence. The wildcard `*` matches any existing resource.
+
+Use `Manager.ServiceProviderConfig`, not the package-level helper, for discovery:
+it advertises sorting and ETag support from the configured storage's actual
+capabilities. `ResourceTypes`, `Schemas`, and `Schema` provide the remaining
+transport-neutral discovery resources.
+
 ---
 
 ## Known gaps
 
-There is no `/Schemas`, `/ResourceTypes`, or `/ServiceProviderConfig` endpoint,
-and no bulk operations. Value filters such as `emails[type eq "work"]` work in
-PATCH but not in list queries, for the reason given above.
+Kayan returns discovery resources but remains headless: the host maps them to
+`/Schemas`, `/ResourceTypes`, and `/ServiceProviderConfig`. Bulk operations,
+`/Me`, `POST /.search`, attribute projection, and password changes are not
+implemented. Value filters such as `emails[type eq "work"]` work in PATCH but
+not in list queries, for the reason given above.
