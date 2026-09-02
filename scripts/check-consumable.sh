@@ -44,6 +44,19 @@ import (
 	"fmt"
 
 	"github.com/getkayan/kayan/core/domain"
+	_ "github.com/getkayan/kayan/kayan-gorm"
+	_ "github.com/getkayan/kayan/kayan-ldap"
+	_ "github.com/getkayan/kayan/kayan-observability/config"
+	_ "github.com/getkayan/kayan/kayan-observability/logger"
+	_ "github.com/getkayan/kayan/kayan-observability/telemetry"
+	_ "github.com/getkayan/kayan/kayan-oidc-provider/gormstore"
+	_ "github.com/getkayan/kayan/kayan-oidc-provider/oauth2"
+	_ "github.com/getkayan/kayan/kayan-oidc-provider/oidc"
+	_ "github.com/getkayan/kayan/kayan-redis"
+	_ "github.com/getkayan/kayan/kayan-saml"
+	_ "github.com/getkayan/kayan/kayan-scim"
+	_ "github.com/getkayan/kayan/kayan-scim/gormstore"
+	_ "github.com/getkayan/kayan/kayan-testing"
 )
 
 func main() {
@@ -59,16 +72,35 @@ func main() {
 }
 GO
 
-echo "verifying consumers can import core@${version} with no replace directives"
-GOFLAGS=-mod=mod GOWORK=off go get "github.com/getkayan/kayan/core@${version}" >/dev/null 2>&1
+modules=(
+  core
+  kayan-gorm
+  kayan-ldap
+  kayan-observability
+  kayan-oidc-provider
+  kayan-redis
+  kayan-saml
+  kayan-scim
+  kayan-testing
+)
+
+echo "verifying consumers can import every Kayan module at ${version} with no replace directives"
+for module in "${modules[@]}"; do
+  echo "  resolving ${module}@${version}"
+  if ! output="$(GOFLAGS=-mod=mod GOWORK=off go get "github.com/getkayan/kayan/${module}@${version}" 2>&1)"; then
+    echo "ERROR: could not resolve ${module}@${version}:" >&2
+    echo "${output}" >&2
+    exit 1
+  fi
+done
 GOFLAGS=-mod=mod GOWORK=off go mod tidy >/dev/null 2>&1
 
 if ! output="$(GOWORK=off go run . 2>&1)"; then
-  echo "ERROR: a project outside this repository cannot build against core@${version}:" >&2
+  echo "ERROR: a project outside this repository cannot build against Kayan ${version}:" >&2
   echo "${output}" >&2
   echo >&2
   echo "Usually this means a module requires a version that was never tagged." >&2
   exit 1
 fi
 
-echo "core@${version} is consumable"
+echo "every Kayan module at ${version} is consumable"

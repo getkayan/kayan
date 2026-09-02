@@ -57,7 +57,7 @@ jobs:
       #
       # This validates the last release rather than the working tree, because
       # a release is what a consumer receives.
-      - name: Build a throwaway module against the published core
+      - name: Build a throwaway module against every published module
         run: bash scripts/check-consumable.sh
 
   coverage-floors:
