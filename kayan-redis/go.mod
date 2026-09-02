@@ -3,7 +3,7 @@ module github.com/getkayan/kayan/kayan-redis
 go 1.25.5
 
 require (
-	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/getkayan/kayan/core v0.3.0
 	github.com/redis/go-redis/v9 v9.7.3
 )
