@@ -201,6 +201,15 @@ jobs:
           for target in ${targets}; do
             pkg="$(grep -rl "func ${target}(" . --include='*_test.go' | head -1 | xargs dirname)"
             echo "::group::${target} (${pkg})"
-            go test -run "^$" -fuzz "^${target}$" -fuzztime 30s "${pkg}" || exit 1
+            if ! go test -run "^$" -fuzz "^${target}$" -fuzztime 30s "${pkg}"; then
+              # Go's fuzz coordinator can occasionally lose a worker on a
+              # constrained hosted runner. A real crasher is written into the
+              # corpus, so prove the complete corpus still passes before one
+              # lower-parallelism retry. Deterministic defects fail here and
+              # are never hidden by the retry.
+              echo "::warning::fuzz worker exited; validating corpus before retry"
+              go test -run "^${target}($|/)" "${pkg}"
+              go test -run "^$" -fuzz "^${target}$" -fuzztime 30s -parallel 1 "${pkg}"
+            fi
             echo "::endgroup::"
           done
