@@ -385,6 +385,19 @@ func (s *MemoryStore) DeleteToken(_ context.Context, token string) error {
 	return nil
 }
 
+// DeleteIdentityTokens removes every token of one type issued to one identity.
+func (s *MemoryStore) DeleteIdentityTokens(_ context.Context, identityID, tokenType string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for value, t := range s.tokens {
+		if t.IdentityID == identityID && t.Type == tokenType {
+			delete(s.tokens, value)
+		}
+	}
+	return nil
+}
+
 // DeleteExpiredTokens removes every token whose expiry has passed.
 func (s *MemoryStore) DeleteExpiredTokens(context.Context) error {
 	s.mu.Lock()

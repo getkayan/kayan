@@ -190,6 +190,11 @@ func (r *Repository) DeleteToken(ctx context.Context, token string) error {
 	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "token = ?", token).Error
 }
 
+// DeleteIdentityTokens implements domain.IdentityTokenRevoker.
+func (r *Repository) DeleteIdentityTokens(ctx context.Context, identityID, tokenType string) error {
+	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "identity_id = ? AND type = ?", identityID, tokenType).Error
+}
+
 // DeleteExpiredTokens implements domain.TokenStore.
 func (r *Repository) DeleteExpiredTokens(ctx context.Context) error {
 	return r.db.WithContext(ctx).Delete(&gormAuthToken{}, "expires_at < ?", time.Now()).Error

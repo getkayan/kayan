@@ -119,7 +119,7 @@ func TestOTPHonoursTheIdentityFactory(t *testing.T) {
 	store := newMemTokenStore()
 
 	_ = store.SaveToken(ctx, &domain.AuthToken{
-		Token:      "123456",
+		Token:      otpTokenKey("user-1", "123456"),
 		IdentityID: "user-1",
 		Type:       "otp",
 		ExpiresAt:  time.Now().Add(time.Minute),

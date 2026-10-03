@@ -585,6 +585,37 @@ func suiteToken(t *testing.T, newStore func() domain.TokenStore) {
 		}
 	})
 
+	t.Run("identity tokens are revoked by identity and type", func(t *testing.T) {
+		ctx := context.Background()
+		store := newStore()
+		revoker, ok := store.(domain.IdentityTokenRevoker)
+		if !ok {
+			t.Skip("store does not implement domain.IdentityTokenRevoker")
+		}
+		for _, tok := range []*domain.AuthToken{
+			{Token: "a-otp", IdentityID: "u1", Type: "otp"},
+			{Token: "a-magic", IdentityID: "u1", Type: "magic_link"},
+			{Token: "b-otp", IdentityID: "u2", Type: "otp"},
+		} {
+			tok.ExpiresAt = time.Now().Add(time.Hour)
+			if err := store.SaveToken(ctx, tok); err != nil {
+				t.Fatalf("SaveToken: %v", err)
+			}
+		}
+		if err := revoker.DeleteIdentityTokens(ctx, "u1", "otp"); err != nil {
+			t.Fatalf("DeleteIdentityTokens: %v", err)
+		}
+		if _, err := store.ConsumeToken(ctx, "a-otp", "otp"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("revoked token still consumable: %v", err)
+		}
+		if _, err := store.ConsumeToken(ctx, "a-magic", "magic_link"); err != nil {
+			t.Errorf("another type was revoked: %v", err)
+		}
+		if _, err := store.ConsumeToken(ctx, "b-otp", "otp"); err != nil {
+			t.Errorf("another identity's token was revoked: %v", err)
+		}
+	})
+
 	t.Run("save then get", func(t *testing.T) {
 		ctx := context.Background()
 		store := newStore()

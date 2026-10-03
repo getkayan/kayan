@@ -49,6 +49,19 @@ func (m *mockTokenStore) DeleteExpiredTokens(ctx context.Context) error {
 	return nil
 }
 
+// revokingTokenStore is a token store that can also revoke an identity's
+// tokens, the capability OTPStrategy uses to spend a code on a wrong guess.
+type revokingTokenStore struct{ *mockTokenStore }
+
+func (m revokingTokenStore) DeleteIdentityTokens(ctx context.Context, identityID, tokenType string) error {
+	for value, t := range m.tokens {
+		if t.IdentityID == identityID && t.Type == tokenType {
+			delete(m.tokens, value)
+		}
+	}
+	return nil
+}
+
 func TestMagicLinkFlow(t *testing.T) {
 	// 1. Setup
 	repo := &mockRepo{

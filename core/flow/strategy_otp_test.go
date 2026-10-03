@@ -150,8 +150,9 @@ func TestOTPStrategy_Initiate_And_Authenticate(t *testing.T) {
 			if sentCode == "" {
 				t.Fatal("expected code to be sent")
 			}
-			if sentCode != token.Token {
-				t.Errorf("sent code %q != token code %q", sentCode, token.Token)
+			// The store holds a key bound to the identity, never the code.
+			if token.Token == sentCode || token.Token != otpTokenKey(token.IdentityID, sentCode) {
+				t.Errorf("stored token %q is not the identity-bound key for the sent code", token.Token)
 			}
 
 			// Verify code length
@@ -262,16 +263,10 @@ func TestOTPStrategy_GenerateCode(t *testing.T) {
 	}
 }
 
-// TestOTPStrategy_CodeIsBoundToItsIdentifier is the OTP brute-force test.
-//
-// Authenticate looked the code up by value alone -- the identifier argument
-// was accepted and never used. Lockout and rate limiting both key on that
-// identifier, so an attacker who varied it got a fresh counter for every
-// guess while the code was still matched against every live OTP in the
-// store. Six digits against the union of all outstanding codes is a search
-// that gets cheaper as the deployment gets busier.
-//
-// The code must only authenticate the identity it was issued to.
+// A code was once matched against every live OTP in the store: a guess under
+// any identifier -- or none -- searched the union of all outstanding codes,
+// and two identities drawing the same code collided, the second save
+// overwriting the first. A code now lives under a key bound to its identity.
 func TestOTPStrategy_CodeIsBoundToItsIdentifier(t *testing.T) {
 	strategy, sender, _, repo := setupOTPTest(t)
 	ctx := context.Background()
@@ -288,42 +283,91 @@ func TestOTPStrategy_CodeIsBoundToItsIdentifier(t *testing.T) {
 	if _, err := strategy.Initiate(ctx, "victim@example.com"); err != nil {
 		t.Fatalf("Initiate: %v", err)
 	}
-	victimCode := sender.lastCode("victim@example.com")
-	if victimCode == "" {
+	code := sender.lastCode("victim@example.com")
+	if code == "" {
 		t.Fatal("no code was delivered to the victim")
 	}
 
-	// The attacker submits the victim's code under their own identifier -- or
-	// under one that does not exist at all, which is what defeats a lockout
-	// counter keyed on the identifier. Each attempt is checked against a
-	// freshly issued code, because a rejected guess still spends the code:
-	// that is the point, and it is what caps the attacker at one try per
-	// issuance instead of unlimited tries against every live code.
+	// The victim's code, submitted under another identifier or none, matches
+	// nothing -- and spends nothing of the victim's.
 	for _, attacker := range []string{"test@example.com", "attacker@example.com", ""} {
-		if _, err := strategy.Initiate(ctx, "victim@example.com"); err != nil {
-			t.Fatalf("Initiate: %v", err)
-		}
-		code := sender.lastCode("victim@example.com")
-
 		if _, err := strategy.Authenticate(ctx, attacker, code); err == nil {
 			t.Errorf("identifier %q authenticated with an OTP issued to victim@example.com", attacker)
 		}
-
-		// The guess burned the code, so the rightful owner cannot reuse it.
-		if _, err := strategy.Authenticate(ctx, "victim@example.com", code); err == nil {
-			t.Errorf("a code survived a failed attempt by %q and stayed usable", attacker)
-		}
 	}
-
-	// A freshly issued code still works for the account it belongs to.
-	if _, err := strategy.Initiate(ctx, "victim@example.com"); err != nil {
-		t.Fatalf("Initiate: %v", err)
-	}
-	got, err := strategy.Authenticate(ctx, "victim@example.com", sender.lastCode("victim@example.com"))
+	got, err := strategy.Authenticate(ctx, "victim@example.com", code)
 	if err != nil {
-		t.Fatalf("the issuing identifier could not use its own code: %v", err)
+		t.Fatalf("another identifier's attempt spent the victim's code: %v", err)
 	}
 	if got.(*identity.Identity).ID != "user-2" {
 		t.Errorf("authenticated as %q, want user-2", got.(*identity.Identity).ID)
+	}
+}
+
+// Two identities holding the same code hold two tokens: neither overwrites,
+// nor can spend, the other.
+func TestOTPStrategy_SameCodeForTwoIdentities(t *testing.T) {
+	_, _, store, repo := setupOTPTest(t)
+	ctx := context.Background()
+	strategy := NewOTPStrategy(repo, store, newMockOTPSender())
+
+	repo.identities["user-2"] = &identity.Identity{ID: "user-2"}
+	repo.creds["other@example.com:password"] = &identity.Credential{
+		ID: "cred-2", IdentityID: "user-2", Type: "password", Identifier: "other@example.com",
+	}
+	expires := time.Now().Add(time.Minute)
+	for _, id := range []string{"user-1", "user-2"} {
+		if err := store.SaveToken(ctx, &domain.AuthToken{
+			Token: otpTokenKey(id, "123456"), IdentityID: id, Type: "otp", ExpiresAt: expires,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(store.tokens) != 2 {
+		t.Fatalf("store holds %d tokens for two identities' codes, want 2", len(store.tokens))
+	}
+	for _, who := range []string{"test@example.com", "other@example.com"} {
+		if _, err := strategy.Authenticate(ctx, who, "123456"); err != nil {
+			t.Errorf("%s could not use its own code: %v", who, err)
+		}
+	}
+}
+
+// With a store that can revoke, a code allows one try: a wrong guess spends
+// it, and a new code replaces the old one.
+func TestOTPStrategy_WrongGuessSpendsTheCode(t *testing.T) {
+	_, sender, base, repo := setupOTPTest(t)
+	ctx := context.Background()
+	store := revokingTokenStore{base}
+	strategy := NewOTPStrategy(repo, store, sender)
+
+	if _, err := strategy.Initiate(ctx, "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	first := sender.lastCode("test@example.com")
+	if _, err := strategy.Initiate(ctx, "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	second := sender.lastCode("test@example.com")
+	if len(base.tokens) != 1 {
+		t.Fatalf("a new code left %d live codes, want 1", len(base.tokens))
+	}
+	if first != second {
+		if _, err := strategy.Authenticate(ctx, "test@example.com", first); err == nil {
+			t.Fatal("a replaced code still authenticated")
+		}
+	} else {
+		// The rare draw of the same code twice: spend it with a wrong guess.
+		wrong := "000000"
+		if second == wrong {
+			wrong = "000001"
+		}
+		if _, err := strategy.Authenticate(ctx, "test@example.com", wrong); err == nil {
+			t.Fatal("a wrong code authenticated")
+		}
+	}
+	// Either way the outstanding code was spent by the failed attempt.
+	if _, err := strategy.Authenticate(ctx, "test@example.com", second); err == nil {
+		t.Fatal("a code survived a wrong guess and stayed usable")
 	}
 }

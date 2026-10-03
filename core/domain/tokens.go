@@ -24,3 +24,15 @@ type TokenStore interface {
 	DeleteToken(ctx context.Context, token string) error
 	DeleteExpiredTokens(ctx context.Context) error
 }
+
+// IdentityTokenRevoker is an optional TokenStore capability: deleting every
+// token of one type issued to one identity.
+//
+// OTPStrategy uses it to keep a single live code per identity and to spend
+// that code on a wrong guess, which caps an attacker at one try per code
+// issued. A store without it still works, but a wrong guess then costs
+// nothing, so brute force is held back only by whatever rate limiting or
+// lockout wraps the strategy.
+type IdentityTokenRevoker interface {
+	DeleteIdentityTokens(ctx context.Context, identityID, tokenType string) error
+}

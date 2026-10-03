@@ -23,8 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is replaced by `FindUnusedRecoveryCodes`, which returns every unused record.
   A storage error is now reported rather than read as "no codes remaining".
 
+- `OTPStrategy` binds a code to the identity it was issued to. Codes were
+  stored and looked up by the code alone: two identities drawing the same code
+  collided (kayan-gorm and the memory store overwrote the first with the
+  second, so its owner's code stopped working), and a guess under any
+  identifier spent whichever identity held that code. Codes are now stored
+  under `sha256(identityID + "\x00" + code)`, `Authenticate` resolves the
+  identifier before consuming, and only that identity's code can match.
+  Codes issued before upgrading stop working; they expire within the TTL
+  anyway. The `AuthToken` returned by `Initiate` carries the store key, not
+  the code.
+
 ### Added
 
+- `domain.IdentityTokenRevoker`, implemented by kayan-gorm and kayan-testing's
+  `MemoryStore`. With it, `OTPStrategy` keeps one live code per identity and a
+  wrong guess spends the code, allowing one try per code issued.
 - `flow.TOTPReplayGuard`, `flow.WithTOTPReplayGuard` and
   `TOTPStrategy.VerifyAndSpend` for verifying a TOTP second factor with
   replay protection.

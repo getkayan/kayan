@@ -3,6 +3,8 @@ package flow
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"time"
@@ -110,9 +112,31 @@ func NewOTPStrategy(repo IdentityRepository, tokenStore domain.TokenStore, sende
 
 func (s *OTPStrategy) ID() string { return "otp" }
 
+// otpTokenKey is the store key for a code: bound to the identity it was
+// issued to, so two identities drawing the same code hold two different
+// tokens. Keyed by the code alone, the second save overwrote the first (or
+// failed on a unique key), and a guess under any identifier was matched
+// against every identity's outstanding code.
+func otpTokenKey(identityID, code string) string {
+	sum := sha256.Sum256([]byte(identityID + "\x00" + code))
+	return hex.EncodeToString(sum[:])
+}
+
+// revokeOutstanding deletes every live code issued to the identity, when the
+// store can.
+func (s *OTPStrategy) revokeOutstanding(ctx context.Context, identityID string) error {
+	if revoker, ok := s.tokenStore.(domain.IdentityTokenRevoker); ok {
+		return revoker.DeleteIdentityTokens(ctx, identityID, "otp")
+	}
+	return nil
+}
+
 // Initiate generates an OTP code, stores it, and delivers it via the OTPSender.
 // The identifier is typically a phone number or email address.
-// Returns the AuthToken (the caller may use the token ID for flow tracking).
+//
+// Returns the stored AuthToken. Its Token is the store key, not the code: the
+// code exists only in what was delivered. When the store implements
+// domain.IdentityTokenRevoker, a new code replaces any the identity still had.
 func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, error) {
 	if s.sender == nil {
 		return nil, fmt.Errorf("otp: sender not configured")
@@ -130,9 +154,13 @@ func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, err
 		return nil, fmt.Errorf("otp: failed to generate code: %w", err)
 	}
 
-	// 3. Store the code as an AuthToken
+	// 3. Store the code as an AuthToken, keyed to its identity.
+	if err := s.revokeOutstanding(ctx, cred.IdentityID); err != nil {
+		return nil, fmt.Errorf("otp: failed to revoke earlier codes: %w", err)
+	}
+	key := otpTokenKey(cred.IdentityID, code)
 	token := &domain.AuthToken{
-		Token:      code,
+		Token:      key,
 		IdentityID: cred.IdentityID,
 		Type:       "otp",
 		ExpiresAt:  time.Now().Add(s.ttl),
@@ -144,7 +172,7 @@ func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, err
 	// 4. Deliver the code via the sender
 	if err := s.sender.Send(ctx, identifier, code); err != nil {
 		// Clean up the token if delivery fails
-		if deleteErr := s.tokenStore.DeleteToken(ctx, code); deleteErr != nil {
+		if deleteErr := s.tokenStore.DeleteToken(ctx, key); deleteErr != nil {
 			return nil, fmt.Errorf("otp: send failed: %v; delete undelivered code: %w", err, deleteErr)
 		}
 		return nil, fmt.Errorf("otp: failed to send code: %w", err)
@@ -155,32 +183,34 @@ func (s *OTPStrategy) Initiate(ctx context.Context, identifier string) (any, err
 
 // Authenticate verifies the OTP code provided by the user.
 // The identifier is the phone number or email, and the secret is the OTP code.
+//
+// A code only matches the identity it was issued to: it is looked up under a
+// key bound to that identity, so a guess can never reach, or spend, another
+// identity's code. When the store implements domain.IdentityTokenRevoker, a
+// wrong guess spends the identity's outstanding code, so each code issued
+// allows one try. Throttling keyed on the identifier (a LockoutStrategy) then
+// bounds the rest: every identifier guards only its own codes.
 func (s *OTPStrategy) Authenticate(ctx context.Context, identifier, secret string) (any, error) {
-	// 1. A code is only valid for the account it was issued to.
-	//
-	// Consuming by code alone matched the secret against every live OTP in the
-	// store, and throttling could not compensate: lockout and rate limiting
-	// key on the identifier, so an attacker who varied it -- or omitted it --
-	// got a fresh counter for each guess while the search space stayed the
-	// union of all outstanding codes.
-	// Spend the code before anything else can reject the attempt. Every failed
-	// guess must cost the attacker the code it guessed; if an earlier check
-	// short-circuits -- an identifier that does not resolve, say -- the code
-	// survives and the attacker retries against it indefinitely.
-	token, err := s.tokenStore.ConsumeToken(ctx, secret, "otp")
-	if err != nil || token == nil {
-		return nil, fmt.Errorf("otp: invalid or expired code")
-	}
-
-	// 2. Resolve the identifier and require the code to belong to it.
+	// 1. Whose code this would be. One error for every rejection:
+	// distinguishing "no such account" from "wrong code" would make this an
+	// enumeration oracle.
 	cred, err := s.repo.GetCredentialByIdentifier(ctx, identifier, "")
-	if err != nil || cred == nil || token.IdentityID != cred.IdentityID {
-		// One error for every rejection. Distinguishing "no such account" from
-		// "that code is not yours" would turn this into an enumeration oracle.
+	if err != nil || cred == nil || cred.IdentityID == "" {
 		return nil, fmt.Errorf("otp: invalid or expired code")
 	}
 
-	// 4. Find the identity
+	// 2. Spend it, atomically, so two attempts racing on one code cannot both
+	// succeed.
+	token, err := s.tokenStore.ConsumeToken(ctx, otpTokenKey(cred.IdentityID, secret), "otp")
+	if err != nil || token == nil || token.IdentityID != cred.IdentityID {
+		// A wrong guess costs the code it was aimed at.
+		if revokeErr := s.revokeOutstanding(ctx, cred.IdentityID); revokeErr != nil {
+			return nil, fmt.Errorf("otp: invalid or expired code; revoke outstanding code: %w", revokeErr)
+		}
+		return nil, fmt.Errorf("otp: invalid or expired code")
+	}
+
+	// 3. Find the identity
 	ident, err := s.repo.GetIdentity(ctx, s.identityFactory(), token.IdentityID)
 	if err != nil {
 		return nil, fmt.Errorf("otp: identity not found")

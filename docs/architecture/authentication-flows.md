@@ -900,6 +900,12 @@ loginManager.RegisterStrategy(otp)
 recipient — the same enumeration oracle), generates the code, stores it as an
 `AuthToken` with `Type: "otp"`, and delivers it.
 
+The token is stored under `sha256(identityID + "\x00" + code)`, not the code
+itself, so two identities drawing the same code hold two separate tokens, and
+the `AuthToken` that `Initiate` returns carries that key, not the code. When the
+store implements `domain.IdentityTokenRevoker`, `Initiate` first deletes the
+identity's earlier codes: one live code per identity.
+
 **Code generation:**
 
 ```go
@@ -943,7 +949,7 @@ failing users.
 
 ```go
 if err := s.sender.Send(ctx, identifier, code); err != nil {
-    s.tokenStore.DeleteToken(ctx, code)
+    s.tokenStore.DeleteToken(ctx, key)
     return nil, fmt.Errorf("otp: failed to send code: %w", err)
 }
 ```
@@ -954,22 +960,22 @@ and requests another. The cleanup is best-effort; its error is discarded.
 
 ### Authenticate
 
-Identical structure to magic link: `GetToken` by the code value, check
-`Type != "otp"`, check expiry, load the identity, `DeleteToken`.
+`Authenticate` resolves the identifier to its identity first, then consumes
+the token under the identity-bound key with `ConsumeToken`, atomically. Every
+rejection — unknown identifier, wrong code, expired code — returns the same
+error.
 
-Two properties this shape has that are easy to miss. The lookup is **by code
-value, not by recipient** — the `identifier` argument is never used. Two users
-holding the same six-digit code at the same moment is a collision that resolves
-to whichever record the store returns, and a code guessed blindly authenticates
-as whoever it belongs to rather than as the account under attack. With a large
-enough user base and a long enough TTL, guessing *any* valid code becomes far
-easier than guessing a specific one. Bind the check to the recipient if that
-matters: look the credential up yourself and compare `token.IdentityID` before
-trusting the result.
+A code is **bound to the recipient it was issued to**. A guess is only ever
+compared with the codes of the identity named by the identifier, so it cannot
+authenticate as, or spend the code of, anyone else, and a lockout or rate limit
+keyed on the identifier guards exactly the codes it should: varying the
+identifier only moves the attacker to another identity's own counter.
 
-And a successful authentication consumes the token, but a **failed** one does
-not. There is no per-code attempt counter. Rate limiting is the only thing
-bounding guesses.
+A **failed** attempt spends the identity's outstanding code when the store
+implements `domain.IdentityTokenRevoker` (kayan-gorm and kayan-testing's
+`MemoryStore` do): each code issued allows one try. A store without it is still
+correct, but a wrong guess then costs nothing, and rate limiting is the only
+thing bounding guesses.
 
 ---
 
