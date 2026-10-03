@@ -25,6 +25,9 @@ type LoginManager struct {
 	strategyStore    domain.StrategyStore
 	strategyRegistry *StrategyRegistry
 
+	// totpReplay records spent TOTP time steps for VerifyMFA.
+	totpReplay TOTPReplayGuard
+
 	mu         sync.RWMutex
 	strategies map[string]LoginStrategy
 	preHooks   []Hook
@@ -51,6 +54,14 @@ func WithLoginDispatcher(d events.Dispatcher) LoginOption {
 // WithLoginAudit explicitly enables audit persistence and error reporting.
 func WithLoginAudit(store audit.AuditStore, onError AuditErrorHandler) LoginOption {
 	return func(m *LoginManager) { m.auditSink = newAuditSink(store, onError) }
+}
+
+// WithTOTPReplayGuard sets where VerifyMFA records the TOTP time steps it
+// has accepted, so a second factor cannot be presented twice. VerifyMFA
+// refuses to verify a TOTP code without one (ErrTOTPReplayGuardRequired).
+// Any TOTPRepository satisfies it.
+func WithTOTPReplayGuard(g TOTPReplayGuard) LoginOption {
+	return func(m *LoginManager) { m.totpReplay = g }
 }
 
 // WithStrategyStore sets the dynamic strategy configuration store.
@@ -206,8 +217,29 @@ func (m *LoginManager) VerifyMFA(ctx context.Context, ident any, code string) (b
 		return true, nil
 	}
 
+	// Spending the time step is what makes a second factor a second factor:
+	// without it, a code seen once is good for its whole window. No guard,
+	// no verification -- refusing is the only safe answer.
+	m.mu.RLock()
+	guard := m.totpReplay
+	m.mu.RUnlock()
+	if guard == nil {
+		return false, ErrTOTPReplayGuardRequired
+	}
+	fi, ok := ident.(FlowIdentity)
+	if !ok {
+		return false, fmt.Errorf("login: MFA identity must implement FlowIdentity")
+	}
+
 	strategy := &TOTPStrategy{}
-	return strategy.Verify(secret, code), nil
+	switch err := strategy.VerifyAndSpend(ctx, guard, fi.GetID(), secret, code); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrTOTPCodeInvalid):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 func (m *LoginManager) RegisterStrategy(s LoginStrategy) {

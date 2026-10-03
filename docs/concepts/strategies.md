@@ -287,11 +287,13 @@ strategy will happily accept the same six digits twice.
 The failure modes are named: `ErrTOTPCodeInvalid`, `ErrTOTPReplay`,
 `ErrTOTPSecretNotFound`.
 
-`TOTPStrategy.Verify(secret, code string) bool` is a stateless helper —
-`LoginManager.VerifyMFA` uses it. It takes no context and **does not enforce
-replay protection**, because it has no repository to record the counter in. Use
-it for the second factor after a primary authentication, not as a primary
-credential check.
+`TOTPStrategy.Verify(secret, code string) bool` is a stateless helper. It takes
+no context and **does not enforce replay protection**, because it has nothing to
+record the counter in. `TOTPStrategy.VerifyAndSpend(ctx, guard, identityID,
+secret, code)` is the same check with the matched time step recorded through a
+`TOTPReplayGuard`; that is what `LoginManager.VerifyMFA` calls, and it refuses
+with `ErrTOTPReplayGuardRequired` when the manager was built without
+`WithTOTPReplayGuard`. Any `TOTPRepository` is a `TOTPReplayGuard`.
 
 ### WebAuthn — `"webauthn"`
 

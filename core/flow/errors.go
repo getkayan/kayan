@@ -21,6 +21,13 @@ var (
 	// ErrTOTPReplay is returned when the TOTP time-step counter was already used (replay attack).
 	ErrTOTPReplay = errors.New("totp: code already used")
 
+	// ErrTOTPReplayGuardRequired is returned by LoginManager.VerifyMFA when no
+	// TOTPReplayGuard is configured. A TOTP code stays valid for up to 90
+	// seconds; without a record of which time steps were spent, a code seen
+	// once (over a shoulder, through a phishing proxy, in a log line) can be
+	// presented again. VerifyMFA refuses rather than verify without one.
+	ErrTOTPReplayGuardRequired = errors.New("totp: verifying a second factor needs a replay guard (WithTOTPReplayGuard)")
+
 	// ErrTOTPSecretNotFound is returned when no TOTP secret is configured for the identity.
 	ErrTOTPSecretNotFound = errors.New("totp: secret not found")
 

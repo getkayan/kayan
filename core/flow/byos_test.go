@@ -49,7 +49,7 @@ func TestLoginSupportsBYOSIdentity(t *testing.T) {
 	factory := func() any { return &customIdentity{} }
 
 	regMgr := NewRegistrationManager(repo, factory)
-	logMgr := NewLoginManager(repo, factory)
+	logMgr := NewLoginManager(repo, factory, WithTOTPReplayGuard(newSpentSteps()))
 
 	pwStrategy := NewPasswordStrategy(repo, NewBcryptHasher(4), "", factory)
 	pwStrategy.MapFields([]string{"Email"}, "PasswordHash")

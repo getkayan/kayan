@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+// TOTPReplayGuard records spent TOTP time steps, so a code cannot be used
+// twice. MarkTOTPUsed must return an error if the counter was already used
+// for that identity, and must be atomic against concurrent calls: two
+// requests presenting the same code at the same moment must not both
+// succeed. Every TOTPRepository is one.
+type TOTPReplayGuard interface {
+	MarkTOTPUsed(ctx context.Context, identityID any, counter uint64) error
+}
+
 // TOTPRepository is the storage contract for the totp strategy.
 type TOTPRepository interface {
 	// FindIdentityByField looks up an identity by a named field and value.
@@ -83,8 +92,9 @@ func (s *TOTPStrategy) Authenticate(ctx context.Context, identifier, code string
 }
 
 // Verify checks a 6-digit TOTP code against a base32-encoded secret.
-// This is a stateless helper used internally by LoginManager.VerifyMFA.
-// It does not enforce replay protection.
+// It is stateless and does not enforce replay protection: a code it accepts
+// can be accepted again for as long as its window lasts. Use Authenticate, or
+// LoginManager.VerifyMFA with a TOTPReplayGuard, to verify a second factor.
 func (s *TOTPStrategy) Verify(secret string, code string) bool {
 	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
 	if err != nil {
@@ -92,6 +102,25 @@ func (s *TOTPStrategy) Verify(secret string, code string) bool {
 	}
 	_, ok := s.findMatchingCounter(key, code)
 	return ok
+}
+
+// VerifyAndSpend checks a code against a base32-encoded secret and records
+// the matched time step with guard, so the same code is refused next time.
+// It returns ErrTOTPCodeInvalid for a code that matches no window and
+// ErrTOTPReplay for one whose time step was already spent.
+func (s *TOTPStrategy) VerifyAndSpend(ctx context.Context, guard TOTPReplayGuard, identityID any, secret, code string) error {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
+	if err != nil {
+		return ErrTOTPSecretNotFound
+	}
+	counter, ok := s.findMatchingCounter(key, code)
+	if !ok {
+		return ErrTOTPCodeInvalid
+	}
+	if err := guard.MarkTOTPUsed(ctx, identityID, counter); err != nil {
+		return fmt.Errorf("%w: %v", ErrTOTPReplay, err)
+	}
+	return nil
 }
 
 // findMatchingCounter checks the current, previous, and next 30-second windows.

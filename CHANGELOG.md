@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `LoginManager.VerifyMFA` now enforces TOTP replay protection. It verified
+  statelessly, so a second-factor code seen once could complete MFA again for
+  the rest of its 90-second window. It now records the matched time step
+  through a `TOTPReplayGuard` and refuses a reused code with `ErrTOTPReplay`.
+  **Breaking:** build the manager with `flow.WithTOTPReplayGuard(guard)` (any
+  `TOTPRepository` qualifies); without one, `VerifyMFA` refuses every code
+  with `ErrTOTPReplayGuardRequired`.
+
 ### Added
+
+- `flow.TOTPReplayGuard`, `flow.WithTOTPReplayGuard` and
+  `TOTPStrategy.VerifyAndSpend` for verifying a TOTP second factor with
+  replay protection.
 
 - Tenant resource governance with per-tenant and global rate/concurrency
   budgets, fail-closed policy resolution, expiring renewable leases, and

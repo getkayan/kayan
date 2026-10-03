@@ -1150,11 +1150,14 @@ never challenged.
 
 `VerifyMFA` is the second half: pass the identity returned alongside
 `ErrMFARequired` and the code the user supplied. It reads the secret from
-`MFAConfig` and verifies it with a stateless TOTP check. Being stateless, it
-does **not** enforce replay protection — a code is accepted for the whole
-30-second window and can be presented twice. Where replay matters, register a
-`TOTPStrategy` backed by a `TOTPRepository` and authenticate through it instead;
-that path records the matched time-step counter.
+`MFAConfig`, verifies the code, and records the matched time step through the
+`TOTPReplayGuard` given to `WithTOTPReplayGuard`, so the same code is refused
+with `ErrTOTPReplay` if presented again. Without a guard it refuses with
+`ErrTOTPReplayGuardRequired`:
+
+```go
+login := flow.NewLoginManager(repo, factory, flow.WithTOTPReplayGuard(totpRepo))
+```
 
 `InitiateLogin` requires the named strategy to implement `Initiator` and errors
 otherwise. `LinkMethod` requires `Attacher`. `Registry` exposes the
@@ -1522,10 +1525,11 @@ stays valid for the remainder of its window, and a second party can present it.
 The counter is the time step, so a unique index on `(identity_id, counter)` is
 the whole implementation.
 
-`Verify` is the stateless helper `LoginManager.VerifyMFA` calls. It checks the
-code against a secret and nothing else — **no replay protection**. A zero-value
-`TOTPStrategy` is usable for `Verify` alone. Where replay matters, go through
-`Authenticate`.
+`Verify` is a stateless helper. It checks the code against a secret and nothing
+else — **no replay protection**. `VerifyAndSpend(ctx, guard, identityID, secret,
+code)` is the same check that also spends the time step through a
+`TOTPReplayGuard`; `LoginManager.VerifyMFA` uses it. A zero-value `TOTPStrategy`
+is usable for both.
 
 Sentinels:
 

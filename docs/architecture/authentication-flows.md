@@ -1047,8 +1047,11 @@ signatures.
 func (s *TOTPStrategy) Verify(secret string, code string) bool
 ```
 
-Used by `LoginManager.VerifyMFA`. Its doc comment says what it does not do:
-**"It does not enforce replay protection."** And `VerifyMFA` has one more
+Its doc comment says what it does not do: **"It does not enforce replay
+protection."** `LoginManager.VerifyMFA` does not use it: it calls
+`VerifyAndSpend`, which records the matched time step through the
+`TOTPReplayGuard` set with `WithTOTPReplayGuard`, and refuses with
+`ErrTOTPReplayGuardRequired` when there is none. `VerifyMFA` has one more
 behavior worth knowing:
 
 ```go

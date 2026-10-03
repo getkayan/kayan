@@ -264,14 +264,14 @@ initiation path in the decorator layer, not in hooks.
 `LinkMethod(ctx, ident, method, identifier, secret)` resolves the strategy,
 asserts `Attacher`, and calls `Attach`, auditing around it.
 
-`VerifyMFA(ctx, ident, code)` deserves an explicit warning. It asserts
-`MFAIdentity`, returns `true` when MFA is not enabled, and otherwise constructs
-a **zero-value `&TOTPStrategy{}`** and calls its stateless `Verify`. That means
-MFA verification through this method is hardcoded to TOTP and **has no replay
-protection** — the same code works repeatedly within its window. The
-replay-protected path is `TOTPStrategy.Authenticate`, which calls
-`MarkTOTPUsed`. Use the strategy directly for second-factor verification if
-replay matters to you, which it should.
+`VerifyMFA(ctx, ident, code)` asserts `MFAIdentity`, returns `true` when MFA
+is not enabled, and otherwise verifies the code with
+`TOTPStrategy.VerifyAndSpend`, recording the matched time step through the
+`TOTPReplayGuard` passed to `WithTOTPReplayGuard`. A code it has accepted is
+refused with `ErrTOTPReplay` for the rest of its window. With no guard
+configured it refuses every code with `ErrTOTPReplayGuardRequired`: it once
+verified statelessly, which let the same six digits complete a second factor
+any number of times within 90 seconds. It is hardcoded to TOTP.
 
 ### Dynamic strategies
 
