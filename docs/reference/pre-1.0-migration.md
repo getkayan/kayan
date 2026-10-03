@@ -25,6 +25,14 @@ and HTTP dependencies in `core`. The reviewed API snapshots in
   longer comparable with `==`. A `SessionStore` implementation persisting the
   new field is what makes `ForceAuthn` and `RequestedAuthnContext` enforceable:
   a store that drops it silently turns a step-up back into an ordinary login.
+- `flow.RecoveryCodeRepository.FindUnusedRecoveryCode` is replaced by
+  `FindUnusedRecoveryCodes`, returning every unused record. The strategy
+  compared the presented code with one record only, so the user's other
+  valid codes were refused. Return all unused codes (an empty slice when none
+  remain); a returned error is now reported, not read as "none remaining".
+- `LoginManager.VerifyMFA` needs `WithTOTPReplayGuard`; without one it refuses
+  every TOTP code with `ErrTOTPReplayGuardRequired`, rather than accept a code
+  it cannot stop being presented again.
 - `domain.TokenStore` requires atomic `ConsumeToken`; adapters must prevent two
   callers from successfully consuming the same transient credential.
 - `session.SSOStore` uses atomic create/join/leave/deactivate operations rather

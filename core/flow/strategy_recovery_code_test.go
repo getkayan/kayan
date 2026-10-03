@@ -48,14 +48,11 @@ func (r *mockRecoveryRepo) FindIdentityByField(ctx context.Context, field, value
 	return nil, errors.New("not found")
 }
 
-func (r *mockRecoveryRepo) FindUnusedRecoveryCode(ctx context.Context, identityID any) (*RecoveryCodeRecord, error) {
+func (r *mockRecoveryRepo) FindUnusedRecoveryCodes(ctx context.Context, identityID any) ([]*RecoveryCodeRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	id := fmt.Sprintf("%v", identityID)
-	if codes, ok := r.codes[id]; ok && len(codes) > 0 {
-		return codes[0], nil
-	}
-	return nil, ErrNoRecoveryCodesRemaining
+	return append([]*RecoveryCodeRecord(nil), r.codes[id]...), nil
 }
 
 func (r *mockRecoveryRepo) MarkRecoveryCodeUsed(ctx context.Context, identityID any, codeID string) error {
@@ -178,6 +175,58 @@ func TestRecoveryCodeStrategy_SingleUse(t *testing.T) {
 	_, err := s.Authenticate(context.Background(), "user@example.com", code)
 	if !errors.Is(err, ErrNoRecoveryCodesRemaining) {
 		t.Errorf("second use error = %v, want ErrNoRecoveryCodesRemaining", err)
+	}
+}
+
+// A user holds a set of codes and may present any of them. Each must work
+// once, in any order -- not only whichever record the store lists first.
+func TestRecoveryCodeStrategy_AnyCodeOfTheSet(t *testing.T) {
+	hasher := NewBcryptHasher(4)
+	codes, hashes, err := GenerateRecoveryCodes(hasher, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newMockRecoveryRepo()
+	ident := &identity.Identity{ID: uuid.NewString()}
+	repo.addIdentity("Email", "user@example.com", ident)
+	for i, h := range hashes {
+		repo.addCode(ident.ID, fmt.Sprintf("code-%d", i), h)
+	}
+	s := NewRecoveryCodeStrategy(repo, hasher, func() any { return &identity.Identity{} }, "Email")
+	ctx := context.Background()
+
+	// The last one first, then the first, then the middle one.
+	for _, i := range []int{2, 0, 1} {
+		if _, err := s.Authenticate(ctx, "user@example.com", codes[i]); err != nil {
+			t.Fatalf("code %d of the set refused: %v", i, err)
+		}
+	}
+	// Each was spent: presenting one again is refused.
+	if _, err := s.Authenticate(ctx, "user@example.com", codes[2]); !errors.Is(err, ErrNoRecoveryCodesRemaining) {
+		t.Fatalf("a spent code: err = %v; want ErrNoRecoveryCodesRemaining", err)
+	}
+}
+
+// A code already used is refused while others remain.
+func TestRecoveryCodeStrategy_SpentCodeRefusedWhileOthersRemain(t *testing.T) {
+	hasher := NewBcryptHasher(4)
+	codes, hashes, err := GenerateRecoveryCodes(hasher, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newMockRecoveryRepo()
+	ident := &identity.Identity{ID: uuid.NewString()}
+	repo.addIdentity("Email", "user@example.com", ident)
+	for i, h := range hashes {
+		repo.addCode(ident.ID, fmt.Sprintf("code-%d", i), h)
+	}
+	s := NewRecoveryCodeStrategy(repo, hasher, func() any { return &identity.Identity{} }, "Email")
+	ctx := context.Background()
+	if _, err := s.Authenticate(ctx, "user@example.com", codes[1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Authenticate(ctx, "user@example.com", codes[1]); !errors.Is(err, ErrRecoveryCodeInvalid) {
+		t.Fatalf("spent code with another left: err = %v; want ErrRecoveryCodeInvalid", err)
 	}
 }
 

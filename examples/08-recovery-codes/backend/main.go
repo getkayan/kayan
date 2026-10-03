@@ -91,17 +91,18 @@ func (r *memRepo) FindIdentityByField(_ context.Context, field, value string, fa
 	return nil, errors.New("identity not found")
 }
 
-// FindUnusedRecoveryCode returns the first unused recovery code for an identity.
-func (r *memRepo) FindUnusedRecoveryCode(_ context.Context, identityID any) (*flow.RecoveryCodeRecord, error) {
+// FindUnusedRecoveryCodes returns every unused recovery code for an identity.
+func (r *memRepo) FindUnusedRecoveryCodes(_ context.Context, identityID any) ([]*flow.RecoveryCodeRecord, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	id := fmt.Sprintf("%v", identityID)
+	var unused []*flow.RecoveryCodeRecord
 	for _, rec := range r.recoveryCodes[id] {
 		if rec != nil {
-			return rec, nil
+			unused = append(unused, rec)
 		}
 	}
-	return nil, flow.ErrNoRecoveryCodesRemaining
+	return unused, nil
 }
 
 // MarkRecoveryCodeUsed removes the code so it cannot be used again.

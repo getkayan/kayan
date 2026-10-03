@@ -293,7 +293,7 @@ Sentinel errors:
 ```
 Strategy ID : "recovery_code"
 Interfaces  : LoginStrategy only
-Storage     : FindIdentityByField, FindUnusedRecoveryCode(ctx, identityID, hashedCode),
+Storage     : FindIdentityByField, FindUnusedRecoveryCodes(ctx, identityID),
               MarkRecoveryCodeUsed(ctx, identityID, codeID)
 Multi-step  : No — the recovery code is the "secret" argument
 Security    : codes are generated as crypto/rand hex strings,
@@ -307,8 +307,16 @@ Implementation outline:
 ```go
 func (s *RecoveryCodeStrategy) Authenticate(ctx context.Context, identifier, code string) (any, error) {
     identity, err := s.repo.FindIdentityByField(ctx, s.identifierField, identifier, s.factory)
-    codeRecord, err := s.repo.FindUnusedRecoveryCode(ctx, getID(identity))
-    if err := s.hasher.Compare(codeRecord.Hash, code); err != nil {
+    records, err := s.repo.FindUnusedRecoveryCodes(ctx, getID(identity))
+    // Any unused code of the set, not only the first record.
+    var codeRecord *RecoveryCodeRecord
+    for _, r := range records {
+        if s.hasher.Compare(code, r.Hash) {
+            codeRecord = r
+            break
+        }
+    }
+    if codeRecord == nil {
         return nil, ErrRecoveryCodeInvalid
     }
     if err := s.repo.MarkRecoveryCodeUsed(ctx, getID(identity), codeRecord.ID); err != nil {

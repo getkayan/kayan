@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 
 	"github.com/getkayan/kayan/core/domain"
@@ -12,9 +11,10 @@ import (
 type RecoveryCodeRepository interface {
 	// FindIdentityByField looks up an identity by a named field and value.
 	FindIdentityByField(ctx context.Context, field, value string, factory func() any) (any, error)
-	// FindUnusedRecoveryCode returns the first unused recovery code record for the identity.
-	// Returns ErrNoRecoveryCodesRemaining if none exist.
-	FindUnusedRecoveryCode(ctx context.Context, identityID any) (*RecoveryCodeRecord, error)
+	// FindUnusedRecoveryCodes returns every unused recovery code record for
+	// the identity, or an empty slice when none remain. All of them, not the
+	// first: the user may present any code they were given.
+	FindUnusedRecoveryCodes(ctx context.Context, identityID any) ([]*RecoveryCodeRecord, error)
 	// MarkRecoveryCodeUsed marks the code record as used so it cannot be reused.
 	MarkRecoveryCodeUsed(ctx context.Context, identityID any, codeID string) error
 }
@@ -62,16 +62,25 @@ func (s *RecoveryCodeStrategy) Authenticate(ctx context.Context, identifier, cod
 		return nil, fmt.Errorf("flow: recovery_code: identity does not implement FlowIdentity")
 	}
 
-	record, err := s.repo.FindUnusedRecoveryCode(ctx, fi.GetID())
+	records, err := s.repo.FindUnusedRecoveryCodes(ctx, fi.GetID())
 	if err != nil {
+		return nil, fmt.Errorf("flow: recovery_code: read codes: %w", err)
+	}
+	if len(records) == 0 {
 		return nil, ErrNoRecoveryCodesRemaining
 	}
 
-	// Compare via hasher (bcrypt). Use constant-time compare on the dummy result
-	// so the branch timing is the same regardless of whether the hash matches.
-	if !s.hasher.Compare(code, record.Hash) {
-		// Constant-time dummy compare to avoid timing oracle
-		subtle.ConstantTimeCompare([]byte(record.Hash), []byte(record.Hash)) //nolint:staticcheck
+	// Against every unused code: the user holds a set and may present any of
+	// them. Comparing only one record refused every other valid code, and
+	// which one was compared depended on the store's ordering.
+	var record *RecoveryCodeRecord
+	for _, candidate := range records {
+		if candidate != nil && s.hasher.Compare(code, candidate.Hash) {
+			record = candidate
+			break
+		}
+	}
+	if record == nil {
 		return nil, ErrRecoveryCodeInvalid
 	}
 

@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Breaking:** build the manager with `flow.WithTOTPReplayGuard(guard)` (any
   `TOTPRepository` qualifies); without one, `VerifyMFA` refuses every code
   with `ErrTOTPReplayGuardRequired`.
+- `RecoveryCodeStrategy` accepts any of the user's unused recovery codes. It
+  compared the presented code with a single record from the store, so every
+  other valid code was refused, and which one worked depended on the store's
+  ordering. **Breaking:** `RecoveryCodeRepository.FindUnusedRecoveryCode`
+  is replaced by `FindUnusedRecoveryCodes`, which returns every unused record.
+  A storage error is now reported rather than read as "no codes remaining".
 
 ### Added
 

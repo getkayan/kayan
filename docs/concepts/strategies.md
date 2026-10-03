@@ -390,7 +390,8 @@ use.
 ```go
 type RecoveryCodeRepository interface {
     FindIdentityByField(ctx context.Context, field, value string, factory func() any) (any, error)
-    FindUnusedRecoveryCode(ctx context.Context, identityID any) (*RecoveryCodeRecord, error)
+    // Every unused code, not the first: the user may present any of them.
+    FindUnusedRecoveryCodes(ctx context.Context, identityID any) ([]*RecoveryCodeRecord, error)
     MarkRecoveryCodeUsed(ctx context.Context, identityID any, codeID string) error
 }
 ```
