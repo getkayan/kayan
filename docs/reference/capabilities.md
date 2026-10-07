@@ -71,11 +71,23 @@ knowledge only the deployment has, and a library that guessed at the ordering
 would let assertions through that the deployment considers weaker. List every
 acceptable reference.
 
-## Deferred beyond 1.0
+## Planned for 1.x
 
-The first stable release does not include OAuth device authorization, token
-exchange, DPoP, dynamic client registration, request objects (RFC 9101), or
-SCIM bulk.
+The first stable release does not include these. They are planned as additive
+1.x features, in this order, each landing with conformance or interoperability
+evidence rather than as an unproven surface:
+
+1. OAuth 2.0 device authorization grant (RFC 8628)
+2. Token exchange (RFC 8693)
+3. Dynamic client registration (RFC 7591 / 7592)
+4. DPoP (RFC 9449)
+5. SCIM bulk operations
+6. Request objects passed by value (RFC 9101)
+
+Until a feature lands it is refused, not ignored: a `request` parameter is
+answered with `request_not_supported`, and discovery does not advertise any of
+them. Request objects passed by reference (`request_uri` as a URL) are not
+planned; see below.
 
 Pushed authorization requests are implemented. `request_uri` accepts only the
 `urn:ietf:params:oauth:request_uri:` form; a URL there is the RFC 9101
