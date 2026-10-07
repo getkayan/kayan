@@ -290,6 +290,10 @@ type Status struct {
 // StatusCode represents the status code.
 type StatusCode struct {
 	Value string `xml:"Value,attr"`
+
+	// StatusCode is the optional second-level code that refines a failure,
+	// such as NoPassive under Responder (SAML 2.0 Core section 3.2.2.2).
+	StatusCode *StatusCode `xml:"urn:oasis:names:tc:SAML:2.0:protocol StatusCode,omitempty"`
 }
 
 // Assertion represents a SAML assertion (simplified).
@@ -941,6 +945,9 @@ func (sp *ServiceProvider) ProcessResponse(ctx context.Context, samlResponse, re
 	}
 
 	if envelope.Status.StatusCode.Value != StatusSuccess {
+		if second := envelope.Status.StatusCode.StatusCode; second != nil {
+			return nil, fmt.Errorf("saml: response status %s (%s)", envelope.Status.StatusCode.Value, second.Value)
+		}
 		return nil, fmt.Errorf("saml: response status %s", envelope.Status.StatusCode.Value)
 	}
 

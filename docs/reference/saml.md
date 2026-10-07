@@ -762,6 +762,7 @@ func (idp *IdentityProvider) SetHooks(hooks IdPHooks)
 func (idp *IdentityProvider) ParseRedirectAuthnRequest(ctx context.Context, rawQuery string) (*SSORequest, error)
 func (idp *IdentityProvider) ParsePostAuthnRequest(ctx context.Context, form url.Values) (*SSORequest, error)
 func (idp *IdentityProvider) BuildResponse(ctx context.Context, req *SSORequest, ident any) ([]byte, error)
+func (idp *IdentityProvider) BuildErrorResponse(ctx context.Context, req *SSORequest, reason string) ([]byte, error)
 func (idp *IdentityProvider) PostBindingForm(acsURL string, response []byte, relayState string) ([]byte, error)
 ```
 
@@ -796,6 +797,12 @@ The parsers refuse:
 Pass the raw query to `ParseRedirectAuthnRequest`, not `url.Values`: the
 redirect binding signs the encoded octets as sent. `BuildResponse` refuses a
 nil identity, or one whose NameID resolves empty, with `ErrNoSubject`.
+
+When you do not authenticate the user, answer anyway: `BuildErrorResponse`
+returns a signed response with no assertion and a `Responder` status refined by
+`StatusNoPassive`, `StatusAuthnFailed`, `StatusNoAuthnContext`, or
+`StatusRequestDenied`. A passive request (`req.Request.IsPassive`) with no
+existing session must get `StatusNoPassive` rather than a login page.
 
 ### IdPServerConfig
 

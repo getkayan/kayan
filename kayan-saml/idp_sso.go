@@ -307,3 +307,68 @@ func envelopedSignaturePresent(raw []byte) (bool, error) {
 	}
 	return hasSignature(root), nil
 }
+
+// Second-level status codes an identity provider answers an AuthnRequest with
+// when it does not authenticate the user (SAML 2.0 Core section 3.2.2.2).
+const (
+	// StatusNoPassive: the request set IsPassive and the user could not be
+	// authenticated without taking visible control of the interface.
+	StatusNoPassive = "urn:oasis:names:tc:SAML:2.0:status:NoPassive"
+
+	// StatusAuthnFailed: the user could not be authenticated.
+	StatusAuthnFailed = "urn:oasis:names:tc:SAML:2.0:status:AuthnFailed"
+
+	// StatusNoAuthnContext: none of the requested authentication contexts
+	// can be satisfied.
+	StatusNoAuthnContext = "urn:oasis:names:tc:SAML:2.0:status:NoAuthnContext"
+
+	// StatusRequestDenied: the identity provider chose not to respond, for
+	// example because the user may not use this service provider.
+	StatusRequestDenied = "urn:oasis:names:tc:SAML:2.0:status:RequestDenied"
+)
+
+// BuildErrorResponse produces the signed response that tells a service
+// provider its request was not satisfied, without an assertion.
+//
+// It is how a caller honours IsPassive: a passive request with no existing
+// session must be answered with [StatusNoPassive], not with a login page. An
+// unanswered request leaves the service provider waiting on a user who is
+// never coming back. Deliver it with [IdentityProvider.PostBindingForm], as
+// for a success.
+//
+// reason must be one of the Status* second-level codes above. Anything else
+// is refused, so a caller cannot emit a status a service provider would read
+// as success.
+func (idp *IdentityProvider) BuildErrorResponse(ctx context.Context, req *SSORequest, reason string) ([]byte, error) {
+	if req == nil || req.SP == nil {
+		return nil, errors.New("saml: BuildErrorResponse needs a request from ParseRedirectAuthnRequest or ParsePostAuthnRequest")
+	}
+	switch reason {
+	case StatusNoPassive, StatusAuthnFailed, StatusNoAuthnContext, StatusRequestDenied:
+	default:
+		return nil, fmt.Errorf("saml: %q is not a failure status for an AuthnRequest", reason)
+	}
+	// An unsigned failure is one a correct service provider discards, leaving
+	// it waiting exactly as if nothing had been sent.
+	if idp.signer == nil {
+		return nil, ErrNoSigner
+	}
+
+	response := Response{
+		ID:           "_" + generateID(),
+		InResponseTo: req.Request.ID,
+		Version:      "2.0",
+		IssueInstant: idp.now(),
+		Destination:  req.SP.ACSUrl,
+		Issuer:       Issuer{Value: idp.config.EntityID},
+		Status: Status{StatusCode: StatusCode{
+			Value:      StatusResponder,
+			StatusCode: &StatusCode{Value: reason},
+		}},
+	}
+	raw, err := xml.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("saml: marshal response: %w", err)
+	}
+	return idp.signer.Sign(ctx, raw)
+}

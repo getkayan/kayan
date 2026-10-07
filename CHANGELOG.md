@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `saml.IdentityProvider.BuildErrorResponse` answers an AuthnRequest with a
+  signed failure and no assertion (`StatusNoPassive`, `StatusAuthnFailed`,
+  `StatusNoAuthnContext`, `StatusRequestDenied`), so a passive request with no
+  session can be honoured instead of left unanswered. `StatusCode` gained an
+  optional nested `StatusCode`, and the service provider reports the
+  second-level code when a response fails.
 - `domain.IdentityTokenRevoker`, implemented by kayan-gorm and kayan-testing's
   `MemoryStore`. With it, `OTPStrategy` keeps one live code per identity and a
   wrong guess spends the code, allowing one try per code issued.

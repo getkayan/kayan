@@ -341,3 +341,52 @@ func TestMetadataAdvertisesSignedAuthnRequests(t *testing.T) {
 		t.Errorf("metadata does not advertise WantAuthnRequestsSigned")
 	}
 }
+
+// TestPassiveRequestCanBeRefusedWithNoPassive. A passive request with no
+// session has to be answered, with a signed failure and no assertion.
+func TestPassiveRequestCanBeRefusedWithNoPassive(t *testing.T) {
+	f := newSSOFixture(t)
+	passive := validAuthnRequest()
+	passive.IsPassive = true
+	req, err := f.idp.ParseRedirectAuthnRequest(context.Background(), redirectQuery(t, passive, f.spKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := f.idp.BuildErrorResponse(context.Background(), req, StatusNoPassive)
+	if err != nil {
+		t.Fatalf("BuildErrorResponse: %v", err)
+	}
+	if !strings.Contains(string(raw), "Signature") {
+		t.Error("failure response is not signed")
+	}
+	var resp Response
+	if err := xml.Unmarshal(raw, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Assertion != nil {
+		t.Error("failure response carries an assertion")
+	}
+	code := resp.Status.StatusCode
+	if code.Value != StatusResponder || code.StatusCode == nil || code.StatusCode.Value != StatusNoPassive {
+		t.Errorf("status = %+v, want Responder/NoPassive", code)
+	}
+	if resp.InResponseTo != ssoRequestID || resp.Destination != ssoSPACS {
+		t.Errorf("InResponseTo=%q Destination=%q", resp.InResponseTo, resp.Destination)
+	}
+}
+
+// TestErrorResponseRefusesSuccess. The failure builder must not be usable to
+// emit a status a service provider reads as success.
+func TestErrorResponseRefusesSuccess(t *testing.T) {
+	f := newSSOFixture(t)
+	req, err := f.idp.ParseRedirectAuthnRequest(context.Background(), redirectQuery(t, validAuthnRequest(), f.spKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range []string{StatusSuccess, "", "urn:example:custom"} {
+		if _, err := f.idp.BuildErrorResponse(context.Background(), req, reason); err == nil {
+			t.Errorf("reason %q was accepted", reason)
+		}
+	}
+}
