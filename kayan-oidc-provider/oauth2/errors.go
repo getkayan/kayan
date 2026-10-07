@@ -81,6 +81,11 @@ var (
 	// ErrTemporarilyUnavailable: the server is overloaded or under maintenance.
 	ErrTemporarilyUnavailable = &Error{Code: "temporarily_unavailable", status: http.StatusServiceUnavailable}
 
+	// ErrRequestNotSupported: the request carries a request object (the
+	// "request" parameter, OpenID Connect Core section 6.1, RFC 9101), which
+	// this provider does not support.
+	ErrRequestNotSupported = &Error{Code: "request_not_supported", status: http.StatusBadRequest}
+
 	// ErrInvalidToken: the access token is expired, revoked, or malformed
 	// (RFC 6750 section 3.1).
 	ErrInvalidToken = &Error{Code: "invalid_token", status: http.StatusUnauthorized}

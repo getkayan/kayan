@@ -362,3 +362,25 @@ func TestRedirectURIOmittedWithOneRegistered(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInvalidRequest when several URIs are registered", err)
 	}
 }
+
+// TestRequestObjectIsRefused. A client sending a signed request object
+// alongside query parameters expects the signed values to win. Ignoring the
+// object would silently run the request on the unsigned copies, so it must be
+// refused with request_not_supported.
+func TestRequestObjectIsRefused(t *testing.T) {
+	ctx := context.Background()
+	provider, _ := newSecureProvider(t)
+
+	for _, object := range []string{"eyJhbGciOiJub25lIn0.eyJzY29wZSI6Im9wZW5pZCJ9.", ""} {
+		values := authorizeValues()
+		values.Set("request", object)
+
+		req, err := provider.ParseAuthorizeRequest(ctx, values)
+		if !errors.Is(err, ErrRequestNotSupported) {
+			t.Fatalf("request=%q: err = %v, want request_not_supported", object, err)
+		}
+		if req != nil {
+			t.Errorf("request=%q: a request was returned alongside the error", object)
+		}
+	}
+}

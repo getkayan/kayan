@@ -66,6 +66,16 @@ func (p *Provider) ParseAuthorizeRequest(ctx context.Context, values url.Values)
 // itself, and a pushed request carries no request_uri -- so enabling the
 // requirement would refuse every attempt to satisfy it.
 func (p *Provider) parseAuthorizeParameters(ctx context.Context, values url.Values) (*AuthorizeRequest, error) {
+	// Request objects are not supported, so one must be refused rather than
+	// ignored. A client that sends parameters both on the URL and inside a
+	// signed request object relies on the signed values taking precedence
+	// (OpenID Connect Core section 6.3.3); ignoring the object would run the
+	// request on the unsigned copies instead, which anyone in the redirect
+	// path can rewrite.
+	if _, ok := values["request"]; ok {
+		return nil, ErrRequestNotSupported.WithDescription("request objects are not supported")
+	}
+
 	clientID := values.Get("client_id")
 	if clientID == "" {
 		return nil, ErrInvalidRequest.WithDescription("client_id is required")

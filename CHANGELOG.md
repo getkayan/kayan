@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The OAuth 2.0 authorization endpoint and the pushed authorization request
+  endpoint refuse the `request` parameter with `request_not_supported`
+  (`oauth2.ErrRequestNotSupported`). Request objects are not implemented, and
+  the parameter was silently ignored: a client sending parameters both on the
+  URL and in a signed request object had its request run on the unsigned
+  copies, which anyone in the redirect path can rewrite.
 - `LoginManager.VerifyMFA` now enforces TOTP replay protection. It verified
   statelessly, so a second-factor code seen once could complete MFA again for
   the rest of its 90-second window. It now records the matched time step

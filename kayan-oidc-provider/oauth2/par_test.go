@@ -272,6 +272,24 @@ func TestPushRejectsANestedRequestURI(t *testing.T) {
 	}
 }
 
+// TestPushRefusesARequestObject. A request object lodged at the PAR endpoint
+// would be stored with the unsigned parameters and later redeemed without the
+// object's values ever being applied.
+func TestPushRefusesARequestObject(t *testing.T) {
+	f := newPARFixture(t)
+
+	values := authorizeValues()
+	values.Set("request", "eyJhbGciOiJub25lIn0.eyJzY29wZSI6Im9wZW5pZCJ9.")
+
+	request, err := f.provider.PushAuthorizationRequest(context.Background(), values, basicAuth())
+	if !errors.Is(err, ErrRequestNotSupported) {
+		t.Fatalf("err = %v, want request_not_supported", err)
+	}
+	if request != nil {
+		t.Error("a request_uri was returned alongside the error")
+	}
+}
+
 // TestPushedRequestDropsClientCredentials. A stored request that kept the
 // secret would persist it, and re-present it at redemption where nothing
 // authenticates.
