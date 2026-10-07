@@ -82,11 +82,18 @@ func newAssertionFixture(t testing.TB, opts ...ProviderOption) *assertionFixture
 func (f *assertionFixture) sign(t testing.TB, overrides jwt.MapClaims) string {
 	t.Helper()
 	now := time.Now()
+	// The jti is random, not derived from the clock. Windows timer resolution
+	// is coarse enough that two assertions signed back to back read the same
+	// nanosecond timestamp, and the second was then refused as a replay.
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatalf("generate jti: %v", err)
+	}
 	claims := jwt.MapClaims{
 		"iss": assertionClient,
 		"sub": assertionClient,
 		"aud": assertionIssuer,
-		"jti": "jti-" + now.Format(time.RFC3339Nano),
+		"jti": "jti-" + base64.RawURLEncoding.EncodeToString(nonce),
 		"exp": now.Add(2 * time.Minute).Unix(),
 		"iat": now.Unix(),
 	}
