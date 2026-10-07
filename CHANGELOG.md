@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `scim.Manager` never returns a user's password, and refuses to filter or sort
+  on it. Every read and write returned whatever storage held, so a deployment
+  mapping `password` to its hash column served the bcrypt hash on every
+  `GET /Users`, and create and update echoed the plaintext from the request.
+  Redaction alone left an oracle: `filter=password sw "$2a$10$A"` recovers the
+  hash a character at a time through `totalResults`, and `sortBy=password`
+  leaks its ordering. Both are now refused with `ErrAttributeNotQueryable`.
 - `oauth2.Provider.Introspect` no longer accepts ID tokens as access tokens.
   Both are signed with the same keys and carry iss, sub, aud, exp, and iat, so
   any relying party holding a user's ID token could present it as a bearer

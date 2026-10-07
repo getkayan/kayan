@@ -36,7 +36,7 @@ func (m *Manager) CreateUser(ctx context.Context, user *User) (*User, error) {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	return user, nil
+	return redactUser(user), nil
 }
 
 func (m *Manager) GetUser(ctx context.Context, id string) (*User, error) {
@@ -44,7 +44,7 @@ func (m *Manager) GetUser(ctx context.Context, id string) (*User, error) {
 	if err != nil {
 		return nil, NewError("404", "", "User not found")
 	}
-	return user, nil
+	return redactUser(user), nil
 }
 
 func (m *Manager) UpdateUser(ctx context.Context, id string, user *User) (*User, error) {
@@ -52,7 +52,7 @@ func (m *Manager) UpdateUser(ctx context.Context, id string, user *User) (*User,
 	if err := m.storage.UpdateScimUser(ctx, user); err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
-	return user, nil
+	return redactUser(user), nil
 }
 
 func (m *Manager) DeleteUser(ctx context.Context, id string) error {
@@ -69,6 +69,9 @@ func (m *Manager) ListUsers(ctx context.Context, filter string, startIndex, coun
 	if count < 0 {
 		count = 100 // Default limit
 	}
+	if err := checkQueryable(filter, ""); err != nil {
+		return nil, err
+	}
 
 	resources, total, err := m.storage.ListScimUsers(ctx, filter, startIndex, count)
 	if err != nil {
@@ -80,11 +83,7 @@ func (m *Manager) ListUsers(ctx context.Context, filter string, startIndex, coun
 		TotalResults: total,
 		ItemsPerPage: len(resources),
 		StartIndex:   startIndex,
-		Resources:    make([]any, len(resources)),
-	}
-
-	for i, r := range resources {
-		resp.Resources[i] = r
+		Resources:    redactUsers(resources),
 	}
 
 	return resp, nil

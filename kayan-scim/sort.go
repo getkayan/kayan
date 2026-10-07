@@ -105,6 +105,9 @@ func (m *Manager) SupportsSorting() bool {
 // against storage that cannot sort returns [ErrSortUnsupported].
 func (m *Manager) ListUsersSorted(ctx context.Context, opts ListOptions) (*ListResponse, error) {
 	opts = normalizeListOptions(opts)
+	if err := checkQueryable(opts.Filter, opts.SortBy); err != nil {
+		return nil, err
+	}
 
 	if opts.SortBy == "" {
 		return m.ListUsers(ctx, opts.Filter, opts.StartIndex, opts.Count)
@@ -118,7 +121,7 @@ func (m *Manager) ListUsersSorted(ctx context.Context, opts ListOptions) (*ListR
 	if err != nil {
 		return nil, err
 	}
-	return listResponse(anySlice(resources), total, opts.StartIndex), nil
+	return listResponse(redactUsers(resources), total, opts.StartIndex), nil
 }
 
 // ListGroupsSorted lists groups with sorting and paging.

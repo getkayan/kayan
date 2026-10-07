@@ -192,10 +192,15 @@ silently ignored — a caller must not believe it changed a membership that in
 fact stayed put.
 
 `Password` is write-only in SCIM's model: it may arrive on a create or a PATCH,
-and must never be returned. Your handler is responsible for clearing it before
-serializing a response, and for hashing it before it reaches storage. `Manager`
-does not hash it for you, because password hashing belongs to `domain.Hasher` in
-your application's configuration.
+and must never be returned. `Manager` clears it from every user it returns --
+create, get, update, and both list paths -- on a copy, so what storage holds is
+untouched. It also refuses a `filter` or `sortBy` that names `password`, in any
+case, URN-qualified, or nested, with `ErrAttributeNotQueryable` (serve it as 400
+`invalidFilter`): a storage that maps the attribute would otherwise answer
+`password sw "<prefix>"` through `totalResults` and give the stored hash away a
+character at a time. Hashing it before it reaches storage is your job; `Manager`
+does not hash, because password hashing belongs to `domain.Hasher` in your
+application's configuration.
 
 `ExtensionSchema` is tagged `json:"-"` and holds decoded schema extensions, such
 as the enterprise user extension carrying `manager` and `department`.
