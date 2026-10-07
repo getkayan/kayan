@@ -33,6 +33,14 @@ and HTTP dependencies in `core`. The reviewed API snapshots in
 - `LoginManager.VerifyMFA` needs `WithTOTPReplayGuard`; without one it refuses
   every TOTP code with `ErrTOTPReplayGuardRequired`, rather than accept a code
   it cannot stop being presented again.
+- `saml.IdentityProvider.HandleSSORequest` and the `IdPHooks.AuthenticateUser`
+  hook are removed. The handler wrote to an `http.ResponseWriter`, which broke
+  the headless contract, and with no `AuthenticateUser` hook it issued an
+  assertion without authenticating anyone. Use `ParseRedirectAuthnRequest` or
+  `ParsePostAuthnRequest`, authenticate the user yourself, then
+  `BuildResponse` and `PostBindingForm`. AuthnRequests must now be signed by
+  the registered `Certificate`; set `SPRegistration.AllowUnsignedAuthnRequests`
+  for a service provider that cannot sign them.
 - `domain.TokenStore` requires atomic `ConsumeToken`; adapters must prevent two
   callers from successfully consuming the same transient credential.
 - `session.SSOStore` uses atomic create/join/leave/deactivate operations rather

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"net/http"
 	"sync"
 	"time"
 
@@ -61,8 +60,18 @@ type SPRegistration struct {
 	// SLOUrl is the SP's Single Logout URL (optional).
 	SLOUrl string
 
-	// Certificate is the SP's public certificate (optional, for signed requests).
+	// Certificate verifies the SP's signed AuthnRequests and logout messages.
 	Certificate *x509.Certificate
+
+	// AllowUnsignedAuthnRequests accepts AuthnRequests from this SP that
+	// carry no signature.
+	//
+	// This gives up authentication of the request itself: anyone can send an
+	// AuthnRequest naming this SP, with whatever ForceAuthn, IsPassive,
+	// requested authentication context, and request ID they choose. The
+	// response still goes only to ACSUrl. Enable it only for an SP that cannot
+	// sign its requests. A signature that is present is verified regardless.
+	AllowUnsignedAuthnRequests bool
 
 	// NameIDFormat specifies the format for the user identifier.
 	NameIDFormat string
@@ -81,19 +90,17 @@ type SPRegistration struct {
 
 // IdPHooks provides extension points for IdP operations.
 type IdPHooks struct {
-	// BeforeSSO is called before processing an SSO request.
+	// BeforeSSO is called once an AuthnRequest has been validated. Returning
+	// an error refuses the request.
 	BeforeSSO func(ctx context.Context, spID string, authnRequest *AuthnRequest) error
 
-	// AfterSSO is called after successful SSO.
+	// AfterSSO is called after a response has been built. userID is the
+	// NameID the assertion names.
 	AfterSSO func(ctx context.Context, spID string, userID string)
 
 	// BeforeAssertion is called before generating an assertion.
 	// Modify attributes or return error to cancel.
 	BeforeAssertion func(ctx context.Context, sp *SPRegistration, attrs map[string][]string) error
-
-	// AuthenticateUser is called to authenticate the user.
-	// If nil, the IdP assumes user is already authenticated via session.
-	AuthenticateUser func(ctx context.Context, r *http.Request) (any, error)
 
 	// GetUserAttributes extracts attributes from a user identity.
 	GetUserAttributes func(ctx context.Context, ident any, sp *SPRegistration) (map[string][]string, error)
@@ -216,109 +223,14 @@ func (idp *IdentityProvider) GetSP(id string) (*SPRegistration, error) {
 	return sp, nil
 }
 
-// HandleSSORequest processes an incoming SSO request from an SP.
-// This is the main entry point for SP-initiated SSO.
-func (idp *IdentityProvider) HandleSSORequest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// Parse the AuthnRequest
-	samlRequest := r.URL.Query().Get("SAMLRequest")
-	relayState := r.URL.Query().Get("RelayState")
-
-	if samlRequest == "" {
-		// Check POST binding
-		if r.Method == "POST" {
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "Invalid form", http.StatusBadRequest)
-				return
-			}
-			samlRequest = r.FormValue("SAMLRequest")
-			relayState = r.FormValue("RelayState")
-		}
-	}
-
-	if samlRequest == "" {
-		http.Error(w, "Missing SAMLRequest", http.StatusBadRequest)
-		return
-	}
-	if len(samlRequest) > 1<<20 {
-		http.Error(w, "SAMLRequest too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	// Decode and parse request
-	decoded, err := base64.StdEncoding.DecodeString(samlRequest)
-	if err != nil {
-		http.Error(w, "Invalid SAMLRequest encoding", http.StatusBadRequest)
-		return
-	}
-
-	var authnRequest AuthnRequest
-	// #nosec G709 -- AuthnRequest is the deliberately narrow wire schema;
-	// decoded input is size-limited above and validated before it is trusted.
-	if err := xml.Unmarshal(decoded, &authnRequest); err != nil {
-		http.Error(w, "Invalid SAMLRequest XML", http.StatusBadRequest)
-		return
-	}
-
-	// Find the SP
-	sp, err := idp.GetSP(authnRequest.Issuer.Value)
-	if err != nil {
-		http.Error(w, "Unknown Service Provider", http.StatusBadRequest)
-		return
-	}
-
-	// Before hook
-	if idp.hooks.BeforeSSO != nil {
-		if err := idp.hooks.BeforeSSO(ctx, sp.ID, &authnRequest); err != nil {
-			http.Error(w, err.Error(), http.StatusForbidden)
-			return
-		}
-	}
-
-	// Authenticate user
-	var ident any
-	if idp.hooks.AuthenticateUser != nil {
-		ident, err = idp.hooks.AuthenticateUser(ctx, r)
-		if err != nil {
-			// Redirect to login page with return URL
-			// This is application-specific
-			http.Error(w, "Authentication required", http.StatusUnauthorized)
-			return
-		}
-	}
-
-	// Generate SAML response
-	response, err := idp.generateResponse(ctx, sp, ident, authnRequest.ID)
-	if err != nil {
-		if idp.hooks.OnError != nil {
-			idp.hooks.OnError(ctx, err, sp.ID)
-		}
-		http.Error(w, "Failed to generate response", http.StatusInternalServerError)
-		return
-	}
-
-	// Send response via POST binding
-	form, err := idp.PostBindingForm(sp.ACSUrl, response, relayState)
-	if err != nil {
-		if idp.hooks.OnError != nil {
-			idp.hooks.OnError(ctx, err, sp.ID)
-		}
-		http.Error(w, "Failed to generate response", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(form)
-}
-
 // generateResponse creates a SAML response with assertion.
 func (idp *IdentityProvider) generateResponse(
 	ctx context.Context,
 	sp *SPRegistration,
 	ident any,
 	inResponseTo string,
-) ([]byte, error) {
-	now := time.Now().UTC()
+) ([]byte, string, error) {
+	now := idp.now()
 
 	// Get NameID
 	var nameID string
@@ -326,7 +238,7 @@ func (idp *IdentityProvider) generateResponse(
 		var err error
 		nameID, err = idp.hooks.GetNameID(ctx, ident, sp)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	} else {
 		// Default: use identity ID
@@ -335,13 +247,17 @@ func (idp *IdentityProvider) generateResponse(
 		}
 	}
 
+	if nameID == "" {
+		return nil, "", ErrNoSubject
+	}
+
 	// Get attributes
 	attrs := make(map[string][]string)
 	if idp.hooks.GetUserAttributes != nil {
 		var err error
 		attrs, err = idp.hooks.GetUserAttributes(ctx, ident, sp)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	} else {
 		// Default attribute extraction
@@ -353,7 +269,7 @@ func (idp *IdentityProvider) generateResponse(
 	// Before assertion hook
 	if idp.hooks.BeforeAssertion != nil {
 		if err := idp.hooks.BeforeAssertion(ctx, sp, attrs); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 
@@ -419,19 +335,19 @@ func (idp *IdentityProvider) generateResponse(
 
 	raw, err := xml.Marshal(response)
 	if err != nil {
-		return nil, fmt.Errorf("saml: marshal response: %w", err)
+		return nil, "", fmt.Errorf("saml: marshal response: %w", err)
 	}
 
 	// An unsigned assertion authenticates nobody: the service provider has no
 	// way to tell it came from here rather than from whoever posted it.
 	if idp.signer == nil {
-		return nil, ErrNoSigner
+		return nil, "", ErrNoSigner
 	}
 	signed, err := idp.signer.Sign(ctx, raw)
 	if err != nil {
-		return nil, fmt.Errorf("saml: sign response: %w", err)
+		return nil, "", fmt.Errorf("saml: sign response: %w", err)
 	}
-	return signed, nil
+	return signed, nameID, nil
 }
 
 // postBindingTemplate renders the auto-submitting form for the HTTP-POST

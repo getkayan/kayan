@@ -190,6 +190,9 @@ func (idp *IdentityProvider) GetMetadata() ([]byte, error) {
 func (idp *IdentityProvider) metadataDocument(validUntil time.Time) (idpMetadata, error) {
 	descriptor := idpSSODescriptor{
 		ProtocolSupportEnumeration: ProtocolSAML2,
+		// AuthnRequests must be signed unless a registration opts out with
+		// AllowUnsignedAuthnRequests, so that is what metadata advertises.
+		WantAuthnRequestsSigned: true,
 		SingleSignOnServices: []indexedEndpoint{
 			{Binding: BindingHTTPRedirect, Location: idp.config.SSOUrl},
 			{Binding: BindingHTTPPost, Location: idp.config.SSOUrl},

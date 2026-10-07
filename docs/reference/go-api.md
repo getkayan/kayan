@@ -1957,16 +1957,19 @@ Package saml provides SAML 2.0 Service Provider functionality for Kayan IAM.
 - [`type Hooks`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#Hooks) - Hooks provides extension points for SAML flow customization.
 - [`type IDPSSODescriptor`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IDPSSODescriptor)
 - [`type IdPConfig`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdPConfig) - IdPConfig represents an external Identity Provider configuration.
+- [`type SSORequest`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#SSORequest) - SSORequest is a validated, service-provider-initiated authentication request.
 - [`type IdPHooks`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdPHooks) - IdPHooks provides extension points for IdP operations.
 - [`type IdPLogoutInstruction`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdPLogoutInstruction) - IdPLogoutInstruction is a verified logout request from a service provider.
 - [`type IdPOption`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdPOption) - IdPOption configures an [IdentityProvider].
 - [`type IdPServerConfig`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdPServerConfig) - IdPServerConfig holds configuration for Kayan acting as a SAML IdP.
 - [`type IdentityProvider`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider) - IdentityProvider represents Kayan acting as a SAML IdP.
 - [`method IdentityProvider.BuildLogoutRequest`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.BuildLogoutRequest) - BuildLogoutRequest produces a signed LogoutRequest for one service provider, and the redirect URL to send it on.
+- [`method IdentityProvider.BuildResponse`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.BuildResponse) - BuildResponse produces the signed SAML response to a validated request, for the identity the caller has authenticated.
 - [`method IdentityProvider.BuildLogoutResponse`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.BuildLogoutResponse) - BuildLogoutResponse produces the signed answer owed to a service provider once its logout request has been carried out.
 - [`method IdentityProvider.GetMetadata`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.GetMetadata) - GetMetadata returns this identity provider's SAML metadata document.
 - [`method IdentityProvider.GetSP`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.GetSP) - GetSP retrieves a registered SP by ID or EntityID.
-- [`method IdentityProvider.HandleSSORequest`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.HandleSSORequest) - HandleSSORequest processes an incoming SSO request from an SP.
+- [`method IdentityProvider.ParsePostAuthnRequest`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.ParsePostAuthnRequest) - ParsePostAuthnRequest validates an AuthnRequest received over the HTTP-POST binding.
+- [`method IdentityProvider.ParseRedirectAuthnRequest`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.ParseRedirectAuthnRequest) - ParseRedirectAuthnRequest validates an AuthnRequest received over the HTTP-Redirect binding.
 - [`method IdentityProvider.LogoutTargets`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.LogoutTargets) - LogoutTargets lists the registered service providers that can be sent a logout request, excluding the one named.
 - [`method IdentityProvider.PostBindingForm`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.PostBindingForm) - PostBindingForm renders the HTML form that delivers a SAML response to the service provider over the HTTP-POST binding.
 - [`method IdentityProvider.ProcessLogoutRequest`](https://pkg.go.dev/github.com/getkayan/kayan/kayan-saml#IdentityProvider.ProcessLogoutRequest) - ProcessLogoutRequest verifies a service provider's LogoutRequest and reports whose sessions to end.

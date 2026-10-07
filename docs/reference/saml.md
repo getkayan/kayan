@@ -758,15 +758,44 @@ func (idp *IdentityProvider) RegisterSP(sp *SPRegistration)
 func (idp *IdentityProvider) GetSP(id string) (*SPRegistration, error)
 func (idp *IdentityProvider) GetMetadata() ([]byte, error)
 func (idp *IdentityProvider) SetHooks(hooks IdPHooks)
-func (idp *IdentityProvider) HandleSSORequest(w http.ResponseWriter, r *http.Request)
+
+func (idp *IdentityProvider) ParseRedirectAuthnRequest(ctx context.Context, rawQuery string) (*SSORequest, error)
+func (idp *IdentityProvider) ParsePostAuthnRequest(ctx context.Context, form url.Values) (*SSORequest, error)
+func (idp *IdentityProvider) BuildResponse(ctx context.Context, req *SSORequest, ident any) ([]byte, error)
+func (idp *IdentityProvider) PostBindingForm(acsURL string, response []byte, relayState string) ([]byte, error)
 ```
 
-`HandleSSORequest` processes an incoming SSO request from a service provider and
-is the main entry point for SP-initiated SSO. It is the one method in this module
-that writes to an `http.ResponseWriter`, which makes it an exception to the
-headless rule rather than an example of it. Prefer composing `ParseRedirectBinding`,
-your own authentication check, and `PostBindingForm` when you want the transport
-to stay yours.
+SP-initiated SSO is three calls, with your own login in the middle. Kayan
+validates the request and builds the response; you own the transport and the
+sign-in:
+
+```go
+req, err := idp.ParseRedirectAuthnRequest(ctx, r.URL.RawQuery) // or ParsePostAuthnRequest(ctx, r.PostForm)
+if err != nil { /* render an error page; never redirect */ }
+
+user := yourSession(r) // authenticate however you like; honour req.Request.ForceAuthn and IsPassive
+
+response, err := idp.BuildResponse(ctx, req, user)
+form, err := idp.PostBindingForm(req.SP.ACSUrl, response, req.RelayState)
+w.Header().Set("Content-Type", "text/html; charset=utf-8")
+w.Write(form)
+```
+
+The parsers refuse:
+
+- an unsigned AuthnRequest, with `ErrAuthnRequestNotSigned`, unless the
+  registration sets `AllowUnsignedAuthnRequests`. A signature that is present
+  is verified either way, against the registered `Certificate` only;
+- a repeated binding parameter, so the message parsed is always the message
+  whose signature was checked;
+- a `Destination` other than `SSOUrl`, or a signed request with none
+  (SAML Bindings 3.4.5.2 / 3.5.5.2);
+- an `AssertionConsumerServiceURL` other than the registered `ACSUrl`, and any
+  `ProtocolBinding` other than HTTP-POST.
+
+Pass the raw query to `ParseRedirectAuthnRequest`, not `url.Values`: the
+redirect binding signs the encoded octets as sent. `BuildResponse` refuses a
+nil identity, or one whose NameID resolves empty, with `ErrNoSubject`.
 
 ### IdPServerConfig
 
@@ -834,8 +863,12 @@ type SPRegistration struct {
     // SLOUrl is the SP's Single Logout URL (optional).
     SLOUrl string
 
-    // Certificate is the SP's public certificate (optional, for signed requests).
+    // Certificate verifies the SP's signed AuthnRequests and logout messages.
     Certificate *x509.Certificate
+
+    // AllowUnsignedAuthnRequests accepts AuthnRequests from this SP that
+    // carry no signature. A signature that is present is verified regardless.
+    AllowUnsignedAuthnRequests bool
 
     // NameIDFormat specifies the format for the user identifier.
     NameIDFormat string
@@ -1173,7 +1206,6 @@ type IdPHooks struct {
 
     BeforeAssertion func(ctx context.Context, sp *SPRegistration, attrs map[string][]string) error
 
-    AuthenticateUser  func(ctx context.Context, r *http.Request) (any, error)
     GetUserAttributes func(ctx context.Context, ident any, sp *SPRegistration) (map[string][]string, error)
     GetNameID         func(ctx context.Context, ident any, sp *SPRegistration) (string, error)
 
@@ -1181,8 +1213,8 @@ type IdPHooks struct {
 }
 ```
 
-`AuthenticateUser` is called to authenticate the user. If nil, the identity
-provider assumes the user is already authenticated via session. `GetNameID` and
+`BeforeSSO` runs once an AuthnRequest has been validated; an error refuses it.
+`AfterSSO` runs once a response is built, with the NameID it names. `GetNameID` and
 `GetUserAttributes` are the BYOS seam on the issuing side: Kayan cannot know
 which field of your model is the subject identifier a given service provider
 expects.

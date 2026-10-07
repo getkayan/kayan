@@ -2,12 +2,7 @@ package saml
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/xml"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"strings"
 	"testing"
 	"time"
 )
@@ -59,89 +54,6 @@ func TestRegisterSP(t *testing.T) {
 	}
 }
 
-func TestHandleSSORequest_ValidPOST(t *testing.T) {
-	signer, _ := testSigner(t)
-	config := IdPServerConfig{
-		EntityID: "http://idp.example.com",
-	}
-	idp := NewIdentityProvider(config, nil, nil, WithIdPSigner(signer))
-
-	sp := &SPRegistration{
-		ID:       "sp1",
-		EntityID: "http://sp.example.com",
-		ACSUrl:   "http://sp.example.com/acs",
-	}
-	idp.RegisterSP(sp)
-
-	// Mock hooks to bypass auth and attribute logic
-	idp.SetHooks(IdPHooks{
-		AuthenticateUser: func(ctx context.Context, r *http.Request) (any, error) {
-			return &mockUser{ID: "user1", Traits: []byte(`{"email":"user@example.com"}`)}, nil
-		},
-	})
-
-	// Create valid AuthnRequest
-	req := &AuthnRequest{
-		ID:           "_12345",
-		Version:      "2.0",
-		IssueInstant: time.Now(),
-		Issuer:       Issuer{Value: "http://sp.example.com"},
-	}
-	reqBytes, _ := xml.Marshal(req)
-	reqEncoded := base64.StdEncoding.EncodeToString(reqBytes)
-
-	// Create HTTP request.
-	//
-	// The value is URL-encoded rather than concatenated. Standard base64 uses
-	// '+', which form decoding reads as a space -- so roughly one run in
-	// twelve produced a corrupted SAMLRequest and a spurious failure, varying
-	// with the IssueInstant baked into each encoding.
-	form := url.Values{"SAMLRequest": {reqEncoded}}
-	body := strings.NewReader(form.Encode())
-	r := httptest.NewRequest("POST", "/sso", body)
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w := httptest.NewRecorder()
-
-	idp.HandleSSORequest(w, r)
-
-	resp := w.Result()
-	if resp.StatusCode != 200 {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
-
-	// Check for HTML response with SAMLResponse
-	respBody := w.Body.String()
-	if !strings.Contains(respBody, "SAMLResponse") {
-		t.Error("Response does not contain SAMLResponse input")
-	}
-	if !strings.Contains(respBody, sp.ACSUrl) {
-		t.Errorf("Response does not target ACS URL: %s", sp.ACSUrl)
-	}
-}
-
-func TestHandleSSORequest_UnknownSP(t *testing.T) {
-	signer, _ := testSigner(t)
-	config := IdPServerConfig{
-		EntityID: "http://idp.example.com",
-	}
-	idp := NewIdentityProvider(config, nil, nil, WithIdPSigner(signer))
-
-	req := &AuthnRequest{
-		Issuer: Issuer{Value: "http://unknown-sp.com"},
-	}
-	reqBytes, _ := xml.Marshal(req)
-	reqEncoded := base64.StdEncoding.EncodeToString(reqBytes)
-
-	r := httptest.NewRequest("GET", "/sso?SAMLRequest="+reqEncoded, nil)
-	w := httptest.NewRecorder()
-
-	idp.HandleSSORequest(w, r)
-
-	if w.Result().StatusCode != http.StatusBadRequest {
-		t.Errorf("Expected status 400 for unknown SP, got %d", w.Result().StatusCode)
-	}
-}
-
 func TestGenerateResponse(t *testing.T) {
 	signer, _ := testSigner(t)
 	config := IdPServerConfig{
@@ -164,7 +76,7 @@ func TestGenerateResponse(t *testing.T) {
 
 	user := &mockUser{ID: "user1", Traits: []byte(`{"email":"test@example.com"}`)}
 
-	respBytes, err := idp.generateResponse(context.Background(), sp, user, "req123")
+	respBytes, _, err := idp.generateResponse(context.Background(), sp, user, "req123")
 	if err != nil {
 		t.Fatalf("generateResponse failed: %v", err)
 	}

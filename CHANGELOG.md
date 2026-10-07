@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The SAML identity provider validates AuthnRequests, and requires them to be
+  signed. `HandleSSORequest` decoded the request, ignored any signature, and
+  never checked `Destination`, `AssertionConsumerServiceURL`, or
+  `ProtocolBinding`; with no `AuthenticateUser` hook it issued a signed
+  assertion without authenticating anyone, and an identity with no ID produced
+  an assertion with an empty NameID. Redirect-bound requests were base64-decoded
+  without being inflated, so the HTTP-Redirect binding the metadata advertised
+  did not work. **Breaking:** `HandleSSORequest` and `IdPHooks.AuthenticateUser`
+  are replaced by `ParseRedirectAuthnRequest`, `ParsePostAuthnRequest`, and
+  `BuildResponse`, which leave transport and sign-in to the caller. Unsigned
+  requests are refused with `ErrAuthnRequestNotSigned` unless the registration
+  sets `AllowUnsignedAuthnRequests`; an empty subject is refused with
+  `ErrNoSubject`. Metadata now advertises `WantAuthnRequestsSigned="true"`.
 - The OAuth 2.0 authorization endpoint and the pushed authorization request
   endpoint refuse the `request` parameter with `request_not_supported`
   (`oauth2.ErrRequestNotSupported`). Request objects are not implemented, and
