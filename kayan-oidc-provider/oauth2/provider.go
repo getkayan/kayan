@@ -594,6 +594,16 @@ func (p *Provider) verifyPKCE(challenge, method, verifier string) bool {
 	}
 }
 
+// AccessTokenType is the JOSE "typ" header carried by every access token this
+// provider issues (RFC 9068 section 2.1).
+//
+// Access tokens and ID tokens are signed with the same keys, and an ID token
+// carries every claim an access token does -- iss, sub, aud, exp, iat. The
+// header is what tells them apart: without it, any relying party holding a
+// user's ID token could present it as a bearer token and have it introspect
+// as active.
+const AccessTokenType = "at+jwt"
+
 // GenerateAccessToken generates a signed JWT access token for a user.
 func (p *Provider) GenerateAccessToken(clientID string, identityID string, scopes []string) (string, error) {
 	now := p.clock.Now()
@@ -614,12 +624,13 @@ func (p *Provider) GenerateAccessToken(clientID string, identityID string, scope
 	// a single token, with nothing failing on this side to say why.
 	if p.keyProvider != nil {
 		signer := keys.NewJWTSigner(p.keyProvider)
-		return signer.Sign(context.Background(), claims, nil)
+		return signer.Sign(context.Background(), claims, map[string]any{"typ": AccessTokenType})
 	}
 
 	// Fall back to the single key the provider was constructed with.
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = p.keyID
+	token.Header["typ"] = AccessTokenType
 
 	return token.SignedString(p.signingKey)
 }
@@ -736,6 +747,13 @@ func (p *Provider) authenticateWith(ctx context.Context, creds clientCreds, gran
 }
 
 // Introspect validates a token and returns its metadata.
+//
+// Only an access token issued by this provider is active: it must carry the
+// [AccessTokenType] header and this provider's issuer. Any other JWT signed
+// with the same keys -- an ID token above all -- is inactive.
+//
+// A revocation store that cannot answer is reported as an error, never read
+// as "not revoked": a store outage must not reactivate revoked tokens.
 func (p *Provider) Introspect(ctx context.Context, tokenString string) (*IntrospectionResponse, error) {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		// Resolve by kid so a token signed before a rotation still verifies.
@@ -766,19 +784,28 @@ func (p *Provider) Introspect(ctx context.Context, tokenString string) (*Introsp
 	if err != nil || !token.Valid {
 		return &IntrospectionResponse{Active: false}, nil
 	}
+	if !isAccessTokenType(token.Header["typ"]) {
+		return &IntrospectionResponse{Active: false}, nil
+	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return &IntrospectionResponse{Active: false}, nil
 	}
 
-	// Check revocation
 	if p.revocationStore != nil {
-		if jti, ok := claimString(claims, "jti"); ok {
-			revoked, err := p.revocationStore.IsRevoked(ctx, jti)
-			if err == nil && revoked {
-				return &IntrospectionResponse{Active: false}, nil
-			}
+		// A token with no jti cannot be looked up, so it cannot be shown not
+		// to be revoked.
+		jti, ok := claimString(claims, "jti")
+		if !ok {
+			return &IntrospectionResponse{Active: false}, nil
+		}
+		revoked, err := p.revocationStore.IsRevoked(ctx, jti)
+		if err != nil {
+			return nil, ErrServerError.WithDescription("revocation status unavailable").WithCause(err)
+		}
+		if revoked {
+			return &IntrospectionResponse{Active: false}, nil
 		}
 	}
 
@@ -791,7 +818,7 @@ func (p *Provider) Introspect(ctx context.Context, tokenString string) (*Introsp
 		return &IntrospectionResponse{Active: false}, nil
 	}
 	iss, ok := claimString(claims, "iss")
-	if !ok {
+	if !ok || iss != p.issuer {
 		return &IntrospectionResponse{Active: false}, nil
 	}
 	exp, ok := claimInt64(claims, "exp")
@@ -1038,4 +1065,16 @@ func (p *Provider) JWKS(ctx context.Context) (keys.JWKS, error) {
 		return keys.JWKS{}, ErrServerError.WithCause(err)
 	}
 	return set, nil
+}
+
+// isAccessTokenType reports whether a JOSE typ header names an access token.
+// RFC 9068 permits the media-type form, and media types compare
+// case-insensitively.
+func isAccessTokenType(typ any) bool {
+	value, ok := typ.(string)
+	if !ok {
+		return false
+	}
+	value = strings.ToLower(value)
+	return value == AccessTokenType || value == "application/"+AccessTokenType
 }

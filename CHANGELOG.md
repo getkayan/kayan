@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `oauth2.Provider.Introspect` no longer accepts ID tokens as access tokens.
+  Both are signed with the same keys and carry iss, sub, aud, exp, and iat, so
+  any relying party holding a user's ID token could present it as a bearer
+  token -- at UserInfo, or to a resource server that introspects -- and have it
+  accepted as that user. Access tokens now carry `typ: at+jwt` (RFC 9068) and
+  `Introspect` requires it, along with this provider's issuer. A revocation
+  store error was read as "not revoked", reactivating revoked tokens while the
+  store was down; it is now returned as `server_error`. **Breaking:** access
+  tokens issued before the upgrade carry no `typ` and introspect as inactive
+  (they expire within the hour), and `Introspect` can now return an error.
 - The SAML identity provider validates AuthnRequests, and requires them to be
   signed. `HandleSSORequest` decoded the request, ignored any signature, and
   never checked `Destination`, `AssertionConsumerServiceURL`, or

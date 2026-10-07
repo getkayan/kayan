@@ -627,6 +627,13 @@ Validates a token and returns its metadata, per RFC 7662. `Active` is the field
 that matters; the rest is populated only for an active token, because the
 metadata of an inactive one tells a caller about tokens they do not hold.
 
+Only this provider's access tokens are active. Each carries the JOSE header
+`typ: at+jwt` (`oauth2.AccessTokenType`, RFC 9068) and this provider's issuer,
+and `Introspect` requires both. ID tokens are signed with the same keys and
+carry the same claims, so without the header check an ID token would pass as a
+bearer token. If the revocation store cannot answer, `Introspect` returns
+`server_error` rather than reporting the token active.
+
 Introspection is an authenticated endpoint in the specification. Kayan does not
 enforce that for you — it has no router — so the caller must authenticate the
 resource server before calling `Introspect`.
