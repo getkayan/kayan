@@ -187,7 +187,15 @@ func (c *Client) AllowsGrantType(grant string) bool
 func (c *Client) IsPublic() bool
 ```
 
-`AllowsRedirectURI` compares exactly, for the reason above. `AllowsGrantType`
+`AllowsRedirectURI` compares exactly, for the reason above, with one exception
+from RFC 8252 section 7.3 for native apps such as CLIs: a registered
+`http://127.0.0.1/...` or `http://[::1]/...` URI matches the same URI with any
+port, because the app listens on whatever port the operating system assigns.
+Only the port may differ; scheme, host, path, and query are compared byte for
+byte, and the code is redeemable only with the exact URI it was issued for.
+`localhost` gets no exception -- register the IP literal. Combined with the
+PKCE that public clients must use, this gives a CLI browser sign-in with no
+code for a user to type. `AllowsGrantType`
 reports whether this client may use the given grant, treating an empty
 `GrantTypes` as unrestricted. `IsPublic` reports whether the client
 authenticates with no secret.

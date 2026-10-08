@@ -95,6 +95,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OAuth 2.0 loopback redirects for native apps (RFC 8252 section 7.3). A
+  client registering `http://127.0.0.1/callback` or `http://[::1]/callback` may
+  redirect to that URI on any port, so a CLI can listen on an ephemeral port
+  and sign in through the browser with PKCE. Only the port may vary; the code
+  is bound to the exact URI it was issued for, and `localhost` keeps exact
+  matching.
 - `saml.IdentityProvider.BuildErrorResponse` answers an AuthnRequest with a
   signed failure and no assertion (`StatusNoPassive`, `StatusAuthnFailed`,
   `StatusNoAuthnContext`, `StatusRequestDenied`), so a passive request with no

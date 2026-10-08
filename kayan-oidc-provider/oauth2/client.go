@@ -3,6 +3,8 @@ package oauth2
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -93,13 +95,85 @@ func (c *Client) IsPublic() bool {
 // The comparison is exact. Prefix matching would let
 // https://good.example.com.attacker.test through, and any form of wildcard
 // matching has the same failure mode.
+//
+// The one exception is RFC 8252 section 7.3: a registered loopback IP
+// redirect URI -- http://127.0.0.1/... or http://[::1]/... -- matches the same
+// URI with any port. A native app such as a CLI listens on whatever port the
+// operating system gives it, so the port cannot be known at registration.
+// Everything except the port must still match byte for byte. "localhost" gets
+// no exception: it resolves through the hosts file and DNS, where the
+// literals do not (RFC 8252 section 8.3).
 func (c *Client) AllowsRedirectURI(uri string) bool {
 	for _, allowed := range c.RedirectURIs {
 		if allowed == uri {
 			return true
 		}
 	}
+
+	host, _, rest, ok := splitLoopbackURI(uri)
+	if !ok {
+		return false
+	}
+	for _, allowed := range c.RedirectURIs {
+		allowedHost, _, allowedRest, ok := splitLoopbackURI(allowed)
+		if ok && allowedHost == host && allowedRest == rest {
+			return true
+		}
+	}
 	return false
+}
+
+// splitLoopbackURI splits an http loopback-literal URI into its host, port,
+// and everything after the port.
+//
+// It works on the string rather than a parsed URL on purpose. A parser
+// normalises -- case, percent-encoding, dot segments -- and every
+// normalisation is a way for two different strings to compare equal. Here the
+// only part allowed to differ is a run of port digits; the rest is compared
+// exactly as sent.
+func splitLoopbackURI(uri string) (host, port, rest string, ok bool) {
+	const scheme = "http://"
+	if !strings.HasPrefix(uri, scheme) {
+		return "", "", "", false
+	}
+	r := uri[len(scheme):]
+	switch {
+	case strings.HasPrefix(r, "127.0.0.1"):
+		host, r = "127.0.0.1", r[len("127.0.0.1"):]
+	case strings.HasPrefix(r, "[::1]"):
+		host, r = "[::1]", r[len("[::1]"):]
+	default:
+		return "", "", "", false
+	}
+
+	if strings.HasPrefix(r, ":") {
+		end := 1
+		for end < len(r) && r[end] >= '0' && r[end] <= '9' {
+			end++
+		}
+		port = r[1:end]
+		number, err := strconv.Atoi(port)
+		if len(port) == 0 || len(port) > 5 || err != nil || number < 1 || number > 65535 {
+			return "", "", "", false
+		}
+		r = r[end:]
+	}
+
+	// What follows the authority must start a path or a query. Anything else
+	// means the host did not end where it appeared to: 127.0.0.1.attacker.test,
+	// 127.0.0.10, 127.0.0.1@attacker.test.
+	if r != "" && r[0] != '/' && r[0] != '?' {
+		return "", "", "", false
+	}
+	// A fragment is never allowed in a redirect URI (RFC 6749 section 3.1.2),
+	// and a backslash is read as a path separator by some clients and not
+	// others.
+	for _, ch := range r {
+		if ch == '#' || ch == '\\' || ch <= ' ' || ch == 0x7f {
+			return "", "", "", false
+		}
+	}
+	return host, port, r, true
 }
 
 // AllowsGrantType reports whether this client may use the given grant.
