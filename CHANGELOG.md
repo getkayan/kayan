@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `kayan-ldap` StartTLS works against real directories. go-ldap's StartTLS
+  passes the TLS config to `tls.Client`, which does not derive `ServerName`
+  from the address, so every StartTLS handshake failed with "either ServerName
+  or InsecureSkipVerify must be specified". It failed closed, but the obvious
+  workarounds were the danger: `WithInsecureSkipVerify`, which hands every
+  service and user password to anyone who can answer for the address, or one
+  `ServerName` in the shared config, which pins a single hostname across every
+  failover host. Each dial now verifies the host actually dialed, on a cloned
+  config.
 - WebAuthn attestation policies now verify what they claimed to.
   `RequireTrustedAttestation` refused the formats `none` and `self`, but the
   WebAuthn library reports the statement format (`packed`, `tpm`, ...), never

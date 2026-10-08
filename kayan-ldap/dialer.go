@@ -140,6 +140,27 @@ func NewDialer(opts ...DialerOption) *Dialer {
 	return d
 }
 
+// tlsConfigFor returns the TLS configuration for one dial, naming the host
+// being dialed when the caller set no ServerName.
+//
+// go-ldap's StartTLS hands the config to tls.Client, which -- unlike the
+// tls.Dial behind ldaps:// -- does not derive ServerName from the address.
+// Without this every StartTLS handshake failed, leaving operators to reach
+// for InsecureSkipVerify, or to set one ServerName in the shared config,
+// which pins a single hostname across every failover host. The config is
+// cloned so one dial's name never leaks into the next.
+func (d *Dialer) tlsConfigFor(addr string) *tls.Config {
+	cfg := d.tlsConfig.Clone()
+	if cfg.ServerName == "" && !cfg.InsecureSkipVerify {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			host = addr
+		}
+		cfg.ServerName = host
+	}
+	return cfg
+}
+
 // DialTLS implements [flow.LDAPDialer].
 //
 // The returned connection is closed when ctx is cancelled, so a caller that
@@ -149,9 +170,11 @@ func (d *Dialer) DialTLS(ctx context.Context, addr string) (flow.LDAPConn, error
 		return nil, errors.New("ldapstore: empty address")
 	}
 
+	tlsConfig := d.tlsConfigFor(addr)
+
 	scheme := "ldaps://"
 	dialOpts := []ldap.DialOpt{
-		ldap.DialWithTLSConfig(d.tlsConfig),
+		ldap.DialWithTLSConfig(tlsConfig),
 		ldap.DialWithDialer(&net.Dialer{Timeout: d.timeout}),
 	}
 	if d.startTLS {
@@ -175,7 +198,7 @@ func (d *Dialer) DialTLS(ctx context.Context, addr string) (flow.LDAPConn, error
 		// the service account's password, and then the end user's, on the wire
 		// in the clear -- so a failed upgrade closes the connection rather
 		// than returning one that looks usable.
-		if err := conn.StartTLS(d.tlsConfig); err != nil {
+		if err := conn.StartTLS(tlsConfig); err != nil {
 			_ = conn.Close()
 			return nil, fmt.Errorf("ldapstore: StartTLS upgrade to %s failed: %w", addr, err)
 		}
