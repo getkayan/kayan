@@ -70,9 +70,12 @@ type Discovery struct {
 	// advertise RFC 9126 support. Both are omitted when the endpoint is not
 	// served, since a client that reads the endpoint and pushes to it would
 	// receive a 404 mid-flow.
-	PushedAuthorizationRequestEndpoint string   `json:"pushed_authorization_request_endpoint,omitempty"`
-	RequirePushedAuthorizationRequests bool     `json:"require_pushed_authorization_requests,omitempty"`
-	ClaimsSupported                    []string `json:"claims_supported"`
+	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
+	RequirePushedAuthorizationRequests bool   `json:"require_pushed_authorization_requests,omitempty"`
+
+	// DeviceAuthorizationEndpoint is the RFC 8628 endpoint (RFC 8414 metadata).
+	DeviceAuthorizationEndpoint string   `json:"device_authorization_endpoint,omitempty"`
+	ClaimsSupported             []string `json:"claims_supported"`
 }
 
 type Server struct {
@@ -88,6 +91,19 @@ type Server struct {
 	allowPlainCodeChallenge bool
 	authMethods             ClientAuthMethodSource
 	par                     PushedRequestSource
+	device                  DeviceAuthorizationSource
+}
+
+// DeviceAuthorizationSource reports whether a provider serves the device
+// authorization grant. [oauth2.Provider] implements it.
+type DeviceAuthorizationSource interface {
+	SupportsDeviceAuthorization() bool
+}
+
+// WithDeviceAuthorizationSupport lets discovery advertise the RFC 8628
+// endpoint and grant according to what the provider actually serves.
+func WithDeviceAuthorizationSupport(src DeviceAuthorizationSource) ServerOption {
+	return func(s *Server) { s.device = src }
 }
 
 // PushedRequestSource reports whether a provider serves pushed authorization

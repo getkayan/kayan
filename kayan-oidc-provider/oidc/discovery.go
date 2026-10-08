@@ -25,6 +25,10 @@ type Endpoints struct {
 	// PushedAuthorizationRequest is the RFC 9126 endpoint. It is advertised
 	// only when the provider can serve it; see [WithPushedRequestSupport].
 	PushedAuthorizationRequest string
+
+	// DeviceAuthorization is the RFC 8628 endpoint. It is advertised only
+	// when the provider serves the grant; see [WithDeviceAuthorizationSupport].
+	DeviceAuthorization string
 }
 
 // DiscoveryOptions describes what a deployment supports.
@@ -89,6 +93,36 @@ func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Dis
 			"advertised (pass WithPushedRequestSupport)")
 	}
 
+	// Same reasoning as PAR, both ways: an endpoint configured without the
+	// provider cannot be advertised, and a grant list naming the device grant
+	// for a provider that refuses it would send clients into a flow that
+	// fails at the first poll.
+	deviceSupported := s.device != nil && s.device.SupportsDeviceAuthorization()
+	if opts.Endpoints.DeviceAuthorization != "" && !deviceSupported {
+		return Discovery{}, fmt.Errorf("oidc: a device authorization endpoint is configured but " +
+			"the provider does not serve the device grant, so it cannot be advertised " +
+			"(enable oauth2.WithDeviceAuthorization and pass WithDeviceAuthorizationSupport)")
+	}
+	for _, grant := range opts.GrantTypes {
+		if grant == oauth2.GrantDeviceCode && !deviceSupported {
+			return Discovery{}, fmt.Errorf("oidc: GrantTypes lists the device code grant, " +
+				"which the provider does not serve")
+		}
+	}
+	if deviceSupported && opts.Endpoints.DeviceAuthorization == "" {
+		return Discovery{}, fmt.Errorf("oidc: the provider serves the device grant but no " +
+			"device authorization endpoint is configured, so clients cannot start it")
+	}
+
+	defaultGrants := []string{
+		oauth2.GrantAuthorizationCode,
+		oauth2.GrantRefreshToken,
+		oauth2.GrantClientCredentials,
+	}
+	if deviceSupported {
+		defaultGrants = append(defaultGrants, oauth2.GrantDeviceCode)
+	}
+
 	doc := Discovery{
 		Issuer:                s.issuer,
 		AuthorizationEndpoint: opts.Endpoints.Authorization,
@@ -103,18 +137,17 @@ func (s *Server) BuildDiscovery(ctx context.Context, opts DiscoveryOptions) (Dis
 		ResponseTypesSupported: []string{oauth2.ResponseTypeCode},
 		SubjectTypesSupported:  []string{"public"},
 
-		ScopesSupported: defaultTo(opts.Scopes, []string{"openid", "profile", "email"}),
-		ClaimsSupported: defaultTo(opts.Claims, []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "acr", "amr"}),
-		GrantTypesSupported: defaultTo(opts.GrantTypes, []string{
-			oauth2.GrantAuthorizationCode,
-			oauth2.GrantRefreshToken,
-			oauth2.GrantClientCredentials,
-		}),
+		ScopesSupported:     defaultTo(opts.Scopes, []string{"openid", "profile", "email"}),
+		ClaimsSupported:     defaultTo(opts.Claims, []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "acr", "amr"}),
+		GrantTypesSupported: defaultTo(opts.GrantTypes, defaultGrants),
 
 		TokenEndpointAuthMethodsSupported:  s.tokenEndpointAuthMethods(),
 		ACRValuesSupported:                 opts.ACRValues,
 		PushedAuthorizationRequestEndpoint: s.pushedAuthorizationEndpoint(opts),
 		RequirePushedAuthorizationRequests: s.par != nil && s.par.RequiresPushedRequests(),
+	}
+	if deviceSupported {
+		doc.DeviceAuthorizationEndpoint = opts.Endpoints.DeviceAuthorization
 	}
 
 	// Advertise the algorithms the configured keys actually sign with.
