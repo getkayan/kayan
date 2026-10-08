@@ -183,6 +183,9 @@ type TokenRequest struct {
 
 	// Client credentials grant.
 	Scopes []string
+
+	// Device authorization grant.
+	DeviceCode string
 }
 
 // ParseTokenRequest validates a token request and authenticates the client.
@@ -233,6 +236,18 @@ func (p *Provider) ParseTokenRequest(ctx context.Context, values url.Values, aut
 		req.Scopes = splitSpace(values.Get("scope"))
 		if err := checkScopes(client, req.Scopes); err != nil {
 			return nil, err
+		}
+
+	case GrantDeviceCode:
+		if !p.SupportsDeviceAuthorization() {
+			return nil, ErrUnsupportedGrantType.WithDescriptionf("unsupported grant type %q", grantType)
+		}
+		if !explicitlyAllowsGrant(client, GrantDeviceCode) {
+			return nil, ErrUnauthorizedClient.WithDescription("client may not use the device authorization grant")
+		}
+		req.DeviceCode = values.Get("device_code")
+		if req.DeviceCode == "" {
+			return nil, ErrInvalidRequest.WithDescription("device_code is required")
 		}
 
 	default:

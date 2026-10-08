@@ -77,7 +77,8 @@ The first stable release does not include these. They are planned as additive
 1.x features, in this order, each landing with conformance or interoperability
 evidence rather than as an unproven surface:
 
-1. OAuth 2.0 device authorization grant (RFC 8628)
+1. OAuth 2.0 device authorization grant (RFC 8628) -- implemented, experimental;
+   conformance evidence pending
 2. Token exchange (RFC 8693)
 3. Dynamic client registration (RFC 7591 / 7592)
 4. DPoP (RFC 9449)

@@ -48,6 +48,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -86,6 +87,11 @@ type Provider struct {
 	clientKeys           ClientKeyResolver
 	tokenEndpointURL     string
 	maxAssertionLifetime time.Duration
+
+	// Device authorization grant (RFC 8628).
+	deviceStore  DeviceAuthorizationStore
+	deviceConfig DeviceAuthorizationConfig
+	deviceRandom io.Reader // nil means crypto/rand; set by tests
 }
 
 // WithKeyProvider supplies the signing keys used for tokens and published in

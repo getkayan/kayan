@@ -1269,12 +1269,68 @@ validating redirect targets.
 
 ---
 
+## Device authorization grant (RFC 8628)
+
+For devices that cannot open a browser or take typing comfortably -- TVs, and
+CLIs over SSH. A CLI on a desktop should prefer the authorization code grant
+with a loopback redirect (see `AllowsRedirectURI`): it involves no code a user
+can be tricked into typing.
+
+```go
+provider := oauth2.NewProvider(..., oauth2.WithDeviceAuthorization(store, oauth2.DeviceAuthorizationConfig{
+    VerificationURI: "https://id.example.com/device",
+    Limiter:         sharedRateLimiter, // flow.RateLimiter shape; required
+}))
+
+// Device authorization endpoint (POST, client authentication as at /token):
+resp, err := provider.RequestDeviceAuthorization(ctx, r.PostForm, r.Header.Get("Authorization"))
+
+// Verification page, user signed in:
+v, err := provider.VerifyUserCode(ctx, typedCode, user.ID) // show v.Client and v.Scopes
+err = provider.ApproveDeviceAuthorization(ctx, v.Handle, user.ID, authInfo)  // or Deny
+
+// Token endpoint:
+req, err := provider.ParseTokenRequest(ctx, r.PostForm, r.Header.Get("Authorization"))
+tokens, err := provider.DeviceToken(ctx, req) // authorization_pending, slow_down, expired_token, access_denied
+```
+
+What the library enforces:
+
+- **Explicit opt-in per client.** `GrantDeviceCode` must be listed in
+  `Client.GrantTypes`; an empty list, which means unrestricted for every other
+  grant, does not count. Otherwise enabling the grant lets an attacker start a
+  phishing flow under any existing first-party client.
+- **Brute-force bounds on the user code.** `VerifyUserCode` counts every
+  attempt against a per-identity and a deployment-wide limit before touching
+  the store, and a limiter error fails closed. Limiter keys are prefixed
+  `kayan:oauth2:device:` and carry the tenant. Approving or denying takes the
+  single-use handle `VerifyUserCode` issued, bound to that identity, never the
+  user code -- so the approve handler cannot become an unlimited guessing
+  oracle.
+- **Unbiased, sized codes.** Codes are drawn by rejection sampling; a
+  `UserCodeFormat` under `MinUserCodeEntropyBits` (30) panics at configuration.
+- **Atomic, client-bound polling.** `slow_down` raises the interval by 5s and
+  persists it; a device code presented by another client is `invalid_grant`
+  and does not touch the real client's polling state; redemption is single
+  use.
+- **Tenant scoping.** A code requested in one tenant is not found from another.
+- **Refresh only when allowed.** A refresh token is issued only if the client
+  also lists `refresh_token`.
+
+`verification_uri_complete` is off by default: a link with the code embedded
+is exactly what device-code phishing mails a victim (RFC 8628 section 5.4).
+Show `v.Client`'s name on the verification page -- naming the application is
+the main defence against that attack. Issuance at the device authorization
+endpoint is not rate limited by Kayan, because it accepts public clients;
+limit it by source address in front of the provider. `MemoryDeviceAuthorizationStore`
+is single-process.
+
 ## Known gaps
 
-The provider implements `authorization_code`, `refresh_token`, and
-`client_credentials`. `private_key_jwt` and pushed authorization requests are
-implemented and advertised only when their required stores are configured.
-There is no device code grant, token exchange, DPoP, RFC 9101 request object, or
-dynamic client registration. Client registration is your application's, which
+The provider implements `authorization_code`, `refresh_token`,
+`client_credentials`, and the device authorization grant. `private_key_jwt`
+and pushed authorization requests are implemented and advertised only when
+their required stores are configured. There is no token exchange, DPoP, RFC
+9101 request object, or dynamic client registration. Client registration is your application's, which
 also means client-secret hashing at registration must use the same
 `domain.Hasher` the provider verifies with.

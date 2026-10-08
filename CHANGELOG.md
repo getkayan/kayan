@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OAuth 2.0 device authorization grant (RFC 8628): `WithDeviceAuthorization`,
+  `RequestDeviceAuthorization`, `VerifyUserCode`,
+  `ApproveDeviceAuthorization` / `DenyDeviceAuthorization`, `DeviceToken`, and
+  `MemoryDeviceAuthorizationStore`. Clients must list the grant explicitly;
+  user-code attempts are bounded per identity and per deployment with a
+  required limiter that fails closed; approval takes a single-use handle
+  rather than the user code; polling and `slow_down` are atomic and bound to
+  the client; codes are tenant-scoped.
 - OAuth 2.0 loopback redirects for native apps (RFC 8252 section 7.3). A
   client registering `http://127.0.0.1/callback` or `http://[::1]/callback` may
   redirect to that URI on any port, so a CLI can listen on an ephemeral port

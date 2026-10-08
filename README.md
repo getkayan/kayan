@@ -44,13 +44,14 @@ host application.
 >   does not walk the relation graph, so it can omit access that `Check` allows.
 >   `Check` is the authoritative answer.
 > - **OAuth 2.0** (`kayan-oidc-provider`) — `authorization_code`,
->   `refresh_token`, and `client_credentials`. Client authentication covers
+>   `refresh_token`, `client_credentials`, and the device authorization grant
+>   (RFC 8628, experimental). Client authentication covers
 >   `client_secret_basic`, `client_secret_post`, `none`, and `private_key_jwt`
 >   (single-use `jti` required, so it needs a `ClientAssertionStore`). No
 >   `client_secret_jwt` -- it needs the secret in recoverable form and Kayan
 >   stores only a hash. Pushed authorization requests (RFC 9126) are supported
->   and can be required. No device code, token exchange, DPoP, request objects
->   (RFC 9101), or dynamic client registration.
+>   and can be required. No token exchange, DPoP, request objects (RFC 9101), or
+>   dynamic client registration.
 > - **WebAuthn** (`core/flow`) — attestation statements are verified by the
 >   WebAuthn library, and Kayan verifies their certificate chains against
 >   roots you supply per authenticator model (`WebAuthnConfig.AttestationRoots`).
