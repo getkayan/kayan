@@ -1061,8 +1061,13 @@ func NewOAuth2Repository(db *gorm.DB) *OAuth2Repository
 ```
 
 `OAuth2Repository` implements `ClientStore`, `AuthCodeStore`,
-`RefreshTokenStore`, `RefreshTokenFamilyStore`, and `oidc.ClientLister`, so one
-value satisfies all three constructor parameters:
+`RefreshTokenStore`, `RefreshTokenFamilyStore`, `DeviceAuthorizationStore`, and
+`oidc.ClientLister`, so one value satisfies all three constructor parameters
+and `WithDeviceAuthorization`. Device authorizations live in
+`oauth2_device_authorizations`; every transition is a guarded `UPDATE` or
+`DELETE` whose `RowsAffected` decides a race between replicas, and the unique
+index on `user_code` makes code collisions atomic. Call
+`DeleteExpiredDeviceAuthorizations` periodically.
 
 ```go
 repo := gormstore.NewOAuth2Repository(db)

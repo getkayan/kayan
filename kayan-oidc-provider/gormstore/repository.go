@@ -310,5 +310,6 @@ func (r *OAuth2Repository) AutoMigrate() error {
 		&gormClient{},
 		&gormAuthCode{},
 		&gormRefreshToken{},
+		&gormDeviceAuthorization{},
 	)
 }
