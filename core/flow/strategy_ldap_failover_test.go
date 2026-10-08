@@ -196,3 +196,38 @@ func TestLDAPNoAddressConfiguredSaysSo(t *testing.T) {
 		t.Errorf("dialled %v with no address configured", dialer.dialed)
 	}
 }
+
+// cancellingDialer fails every dial and cancels the login on the first one,
+// as a client disconnecting mid-login does.
+type cancellingDialer struct {
+	cancel context.CancelFunc
+	dialed []string
+}
+
+func (d *cancellingDialer) DialTLS(_ context.Context, addr string) (LDAPConn, error) {
+	d.dialed = append(d.dialed, addr)
+	d.cancel()
+	return nil, errors.New("connection timed out")
+}
+
+// TestLDAPFailoverStopsWhenTheLoginIsAbandoned. go-ldap's dial ignores ctx,
+// so without a check between hosts an abandoned login dials every replica,
+// each up to its full timeout.
+func TestLDAPFailoverStopsWhenTheLoginIsAbandoned(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dialer := &cancellingDialer{cancel: cancel}
+
+	config := defaultLDAPConfig()
+	config.Addr = "replica-a:636"
+	config.FailoverAddrs = []string{"replica-b:636", "replica-c:636"}
+	strategy := NewLDAPStrategy(dialer, config, func() any { return &identity.Identity{} })
+
+	_, err := strategy.Authenticate(ctx, "alice", "password")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if len(dialer.dialed) != 1 {
+		t.Errorf("dialled %v after the login was abandoned, want only the first host", dialer.dialed)
+	}
+}

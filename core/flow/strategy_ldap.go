@@ -244,6 +244,13 @@ func (s *LDAPStrategy) lookup(ctx context.Context, username string) (LDAPConn, [
 	lastKind := ErrLDAPConnectionFailed
 
 	for _, addr := range s.addresses() {
+		// The dial underneath may not honour ctx (go-ldap's does not), so an
+		// abandoned login would otherwise walk every replica in turn, each up
+		// to its full timeout, for a caller that has already gone.
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err.Error())
+			return nil, nil, fmt.Errorf("%w: %w (%s)", ErrLDAPConnectionFailed, err, strings.Join(failures, "; "))
+		}
 		conn, err := s.dialer.DialTLS(ctx, addr)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", addr, err))
