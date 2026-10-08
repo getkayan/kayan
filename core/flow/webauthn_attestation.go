@@ -3,30 +3,56 @@ package flow
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
-// Attestation formats an authenticator may report (WebAuthn Level 2, section 8).
+// AttestationNone is the statement format of an authenticator that vouched
+// for nothing (WebAuthn Level 2, section 8.7). It is what a browser returns
+// when the relying party asked for no attestation, and also what some platform
+// authenticators return regardless.
+const AttestationNone = "none"
+
+// Attestation types (WebAuthn Level 2, section 6.5.3).
+//
+// Deprecated: these name attestation types, but [AttestationInfo.Format]
+// carries the statement format ("packed", "tpm", "none", ...), which is what
+// the WebAuthn library reports. No registration ever produces these values, so
+// a policy comparing Format against them never matches. Use
+// [AttestationInfo.ChainVerified] to tell an attested device from one that
+// vouched only for itself.
 const (
-	// AttestationNone means the authenticator vouched for nothing. It is what
-	// a browser returns when the relying party asked for no attestation, and
-	// also what some platform authenticators return regardless.
-	AttestationNone = "none"
-
-	// AttestationSelf means the credential's own key signed the attestation.
-	// It proves the key exists and nothing about what holds it.
-	AttestationSelf = "self"
-
-	// AttestationBasic and AttestationAttCA are the forms that chain to a
-	// manufacturer root, which is the only kind that says anything about which
-	// device the credential lives on.
+	AttestationSelf  = "self"
 	AttestationBasic = "basic"
 	AttestationAttCA = "attca"
 )
+
+// AttestationRoots supplies trusted root certificates per authenticator model.
+//
+// Keying by AAGUID is the point: a root that vouches for one vendor's devices
+// must not vouch for another's AAGUID, or one vendor's leaked or test CA would
+// let any authenticator claim to be any model.
+//
+// Kayan makes no outbound requests, so the source is the deployment's: a
+// hardware inventory, or the FIDO Metadata Service fetched and verified by the
+// host. Return no roots, not an error, for a model the deployment does not
+// recognise.
+type AttestationRoots interface {
+	RootsFor(ctx context.Context, aaguid []byte) ([]*x509.Certificate, error)
+}
+
+// AttestationRootsFunc adapts a function to [AttestationRoots].
+type AttestationRootsFunc func(ctx context.Context, aaguid []byte) ([]*x509.Certificate, error)
+
+// RootsFor implements [AttestationRoots].
+func (f AttestationRootsFunc) RootsFor(ctx context.Context, aaguid []byte) ([]*x509.Certificate, error) {
+	return f(ctx, aaguid)
+}
 
 // Errors reported when an authenticator fails the deployment's attestation
 // policy.
@@ -48,20 +74,29 @@ var (
 
 // AttestationInfo describes a newly created credential, for a policy to judge.
 type AttestationInfo struct {
-	// Format is the attestation type the authenticator reported, as verified
-	// by the WebAuthn library: [AttestationNone], [AttestationSelf],
-	// [AttestationBasic], [AttestationAttCA], and so on.
+	// Format is the attestation statement format the authenticator used:
+	// "packed", "tpm", "android-key", "apple", "fido-u2f", [AttestationNone].
 	//
-	// The statement's own signature has already been checked by the time a
-	// policy sees this. What is left is the trust decision -- whether this
-	// deployment accepts that authenticator -- which is the deployment's,
-	// because it depends on a hardware inventory this library has no view of.
+	// It is not the attestation type. "packed" covers both a statement signed
+	// by a manufacturer certificate and one the credential signed for itself,
+	// so Format alone never says whether the device was attested.
 	Format string
 
-	// AAGUID identifies the authenticator model. It is all zeroes for
-	// attestation formats that vouch for nothing, and for platform
-	// authenticators that decline to identify themselves.
+	// AAGUID identifies the authenticator model, as the authenticator claims.
+	// It is covered by the attestation signature but proves nothing unless
+	// ChainVerified is true: an unattested or self-attested authenticator can
+	// report any AAGUID it likes.
 	AAGUID []byte
+
+	// TrustPath is the statement's certificate chain (x5c), leaf first, whose
+	// leaf the WebAuthn library verified the statement signature against.
+	// Empty for "none" and for self attestation.
+	TrustPath []*x509.Certificate
+
+	// ChainVerified reports that TrustPath chains to a root that
+	// [WebAuthnConfig.AttestationRoots] supplied for this AAGUID, at the time
+	// of registration. It is false whenever no roots are configured.
+	ChainVerified bool
 
 	// CredentialID is the credential being registered.
 	CredentialID []byte
@@ -102,21 +137,23 @@ func (f AttestationPolicyFunc) AllowAuthenticator(ctx context.Context, info Atte
 	return f(ctx, info)
 }
 
-// RequireTrustedAttestation refuses a registration whose attestation vouches
-// for nothing.
+// RequireTrustedAttestation refuses a registration whose attestation does not
+// chain to a trusted root for its model.
 //
-// "none" says the authenticator asserted nothing; "self" says the credential's
-// own key signed for itself, which proves the key exists and nothing about
-// what holds it. Only a statement chaining to a manufacturer root identifies
-// the device, and that is the whole reason to ask for attestation.
+// "none" asserts nothing; self attestation proves the key exists and nothing
+// about what holds it; and a certificate chain proves nothing until it reaches
+// a root the deployment trusts, because anyone can mint a CA. Only
+// [AttestationInfo.ChainVerified] identifies the device, so this requires it --
+// which means [WebAuthnConfig.AttestationRoots] must be configured, or every
+// registration is refused.
 //
 // It says nothing about which models are acceptable -- compose it with
 // [AllowedAuthenticators] for that.
 func RequireTrustedAttestation() AttestationPolicy {
 	return AttestationPolicyFunc(func(_ context.Context, info AttestationInfo) error {
-		switch info.Format {
-		case "", AttestationNone, AttestationSelf:
-			return fmt.Errorf("%w: format %q", ErrAttestationMissing, info.Format)
+		if !info.ChainVerified {
+			return fmt.Errorf("%w: format %q does not chain to a trusted root for this model",
+				ErrAttestationMissing, info.Format)
 		}
 		return nil
 	})
@@ -132,6 +169,12 @@ func RequireTrustedAttestation() AttestationPolicy {
 // The all-zero AAGUID is refused as an entry. It is what an authenticator
 // reports when it vouches for nothing, so an allowlist containing it accepts
 // every unattested credential while reading like a hardware allowlist.
+//
+// An AAGUID is only believed when [AttestationInfo.ChainVerified] is true. An
+// unattested authenticator chooses its own AAGUID, so an allowlist that
+// trusted it unverified would admit any software authenticator claiming to be
+// a listed model. Configure [WebAuthnConfig.AttestationRoots], or every
+// registration is refused.
 func AllowedAuthenticators(aaguids ...[]byte) (AttestationPolicy, error) {
 	if len(aaguids) == 0 {
 		return nil, errors.New("webauthn: an authenticator allowlist must name at least one model")
@@ -148,6 +191,10 @@ func AllowedAuthenticators(aaguids ...[]byte) (AttestationPolicy, error) {
 	}
 
 	return AttestationPolicyFunc(func(_ context.Context, info AttestationInfo) error {
+		if !info.ChainVerified {
+			return fmt.Errorf("%w: AAGUID %s is not backed by a verified attestation chain",
+				ErrAuthenticatorNotAllowed, hex.EncodeToString(info.AAGUID))
+		}
 		for _, aaguid := range allowed {
 			if bytes.Equal(aaguid, info.AAGUID) {
 				return nil
@@ -198,18 +245,101 @@ func CombineAttestationPolicies(policies ...AttestationPolicy) AttestationPolicy
 // It is a named method so it can be exercised without a real authenticator:
 // reaching it through FinishRegistration needs a genuine credential-creation
 // response, and a check nobody can test is a check nobody knows is running.
-func (s *WebAuthnStrategy) applyAttestationPolicy(ctx context.Context, credential *webauthn.Credential) error {
+func (s *WebAuthnStrategy) applyAttestationPolicy(ctx context.Context, credential *webauthn.Credential, statement map[string]any) error {
 	policy := s.config.AttestationPolicy
 	if policy == nil {
 		return nil
 	}
-	return policy.AllowAuthenticator(ctx, AttestationInfo{
+
+	info := AttestationInfo{
 		Format:         credential.AttestationType,
 		AAGUID:         credential.Authenticator.AAGUID,
 		CredentialID:   credential.ID,
 		BackupEligible: credential.Flags.BackupEligible,
 		BackupState:    credential.Flags.BackupState,
+	}
+
+	trustPath, err := attestationTrustPath(statement)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrAttestationMissing, err)
+	}
+	info.TrustPath = trustPath
+
+	if len(trustPath) > 0 && s.config.AttestationRoots != nil {
+		verified, err := verifyAttestationChain(ctx, s.config.AttestationRoots, info.AAGUID, trustPath, s.clock.Now())
+		if err != nil {
+			// A roots source that cannot answer is not a "no": report it
+			// rather than let the policy judge an unverified chain.
+			return err
+		}
+		info.ChainVerified = verified
+	}
+
+	return policy.AllowAuthenticator(ctx, info)
+}
+
+// attestationTrustPath parses the x5c chain from an attestation statement.
+//
+// The statement is the one the WebAuthn library verified: its signature was
+// checked against x5c[0], and authData -- which carries the AAGUID -- is part
+// of what that signature covers.
+func attestationTrustPath(statement map[string]any) ([]*x509.Certificate, error) {
+	raw, ok := statement["x5c"]
+	if !ok {
+		return nil, nil
+	}
+	entries, ok := raw.([]any)
+	if !ok {
+		return nil, errors.New("attestation x5c is not an array")
+	}
+	chain := make([]*x509.Certificate, 0, len(entries))
+	for i, entry := range entries {
+		der, ok := entry.([]byte)
+		if !ok {
+			return nil, fmt.Errorf("attestation x5c[%d] is not a certificate", i)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, fmt.Errorf("attestation x5c[%d]: %w", i, err)
+		}
+		chain = append(chain, cert)
+	}
+	return chain, nil
+}
+
+// verifyAttestationChain reports whether chain leads from its leaf to a root
+// supplied for aaguid.
+//
+// Attestation certificates carry no TLS key usage, so any extended key usage
+// is accepted; what is being established is who issued the leaf, not what it
+// may be used for.
+func verifyAttestationChain(ctx context.Context, source AttestationRoots, aaguid []byte, chain []*x509.Certificate, now time.Time) (bool, error) {
+	if isZeroAAGUID(aaguid) {
+		return false, nil
+	}
+	roots, err := source.RootsFor(ctx, aaguid)
+	if err != nil {
+		return false, fmt.Errorf("webauthn: attestation roots for AAGUID %s: %w", hex.EncodeToString(aaguid), err)
+	}
+	if len(roots) == 0 {
+		return false, nil
+	}
+
+	pool := x509.NewCertPool()
+	for _, root := range roots {
+		pool.AddCert(root)
+	}
+	intermediates := x509.NewCertPool()
+	for _, cert := range chain[1:] {
+		intermediates.AddCert(cert)
+	}
+	_, err = chain[0].Verify(x509.VerifyOptions{
+		Roots:         pool,
+		Intermediates: intermediates,
+		CurrentTime:   now,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	})
+	return err == nil, nil
 }
 
 // isZeroAAGUID reports whether an AAGUID identifies nothing.

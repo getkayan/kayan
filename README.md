@@ -52,10 +52,12 @@ host application.
 >   and can be required. No device code, token exchange, DPoP, request objects
 >   (RFC 9101), or dynamic client registration.
 > - **WebAuthn** (`core/flow`) — attestation statements are verified by the
->   WebAuthn library, but deciding which authenticator models to trust needs a
->   hardware inventory or the FIDO Metadata Service. Kayan makes no outbound
->   requests, so that decision is an `AttestationPolicy` you supply; there is no
->   bundled metadata blob.
+>   WebAuthn library, and Kayan verifies their certificate chains against
+>   roots you supply per authenticator model (`WebAuthnConfig.AttestationRoots`).
+>   Kayan makes no outbound requests, so those roots come from your hardware
+>   inventory or a FIDO Metadata Service blob your host fetches and verifies;
+>   there is no bundled metadata. Android SafetyNet statements carry their
+>   chain inside a JWS and are never reported chain-verified.
 > - **SCIM** (`kayan-scim`) — no bulk operations. Sorting and ETag concurrency
 >   need storage implementing `SortableScimStorage` and
 >   `ConditionalScimStorage`; without them `sortBy` and `If-Match` are refused

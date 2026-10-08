@@ -102,6 +102,17 @@ type WebAuthnConfig struct {
 	// authenticator provenance.
 	AttestationPolicy AttestationPolicy
 
+	// AttestationRoots supplies the trusted root certificates for each
+	// authenticator model. When set, an attestation statement's certificate
+	// chain is verified against the roots for the credential's AAGUID, at the
+	// strategy's clock, and [AttestationInfo.ChainVerified] reports the result.
+	//
+	// Without it no chain is verified, and [RequireTrustedAttestation] and
+	// [AllowedAuthenticators] refuse every registration: an AAGUID or a
+	// certificate that chains to nothing proves nothing, because any software
+	// authenticator can mint its own CA and claim any model.
+	AttestationRoots AttestationRoots
+
 	// DiscoverableUserVerification overrides the user-verification
 	// requirement for usernameless login. Empty means required.
 	//
@@ -464,7 +475,7 @@ func (s *WebAuthnStrategy) FinishRegistration(
 	// Judged before anything is stored. A credential that fails the policy
 	// must leave no trace: a stored-then-rejected credential is one a later
 	// login path can still find.
-	if err := s.applyAttestationPolicy(ctx, credential); err != nil {
+	if err := s.applyAttestationPolicy(ctx, credential, response.Response.AttestationObject.AttStatement); err != nil {
 		return nil, err
 	}
 

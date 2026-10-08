@@ -486,7 +486,7 @@ Package flow provides authentication flows and strategies for Kayan IAM.
 - [`type AttestationPolicy`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#AttestationPolicy) - AttestationPolicy decides whether a newly registered authenticator is acceptable.
 - [`type AttestationPolicyFunc`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#AttestationPolicyFunc) - AttestationPolicyFunc adapts a function to [AttestationPolicy].
 - [`method AttestationPolicyFunc.AllowAuthenticator`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#AttestationPolicyFunc.AllowAuthenticator) - AllowAuthenticator implements [AttestationPolicy].
-- [`const AttestationSelf`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#AttestationSelf) - AttestationSelf means the credential's own key signed the attestation.
+- [`const AttestationSelf`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#AttestationSelf) - Deprecated: attestation types; no registration produces these values.
 - [`type AuditErrorHandler`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#AuditErrorHandler) - AuditErrorHandler receives persistence failures from an explicitly configured audit store.
 - [`type BcryptHasher`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#BcryptHasher) - BcryptHasher hashes secrets with bcrypt.
 - [`func CombineAttestationPolicies`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#CombineAttestationPolicies) - CombineAttestationPolicies requires every policy to accept.
@@ -711,7 +711,7 @@ Package flow provides authentication flows and strategies for Kayan IAM.
 - [`type RegistrationStrategy`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#RegistrationStrategy) - RegistrationStrategy defines how an identity is created for a specific method.
 - [`type RegistrationStrategyFactory`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#RegistrationStrategyFactory) - RegistrationStrategyFactory is a function that creates a RegistrationStrategy from a config.
 - [`func RequireDeviceBoundCredential`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#RequireDeviceBoundCredential) - RequireDeviceBoundCredential refuses a credential that may be synchronised to other devices.
-- [`func RequireTrustedAttestation`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#RequireTrustedAttestation) - RequireTrustedAttestation refuses a registration whose attestation vouches for nothing.
+- [`func RequireTrustedAttestation`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#RequireTrustedAttestation) - RequireTrustedAttestation refuses a registration whose attestation does not chain to a trusted root for its model.
 - [`type SessionRevoker`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#SessionRevoker) - SessionRevoker ends every session belonging to an identity.
 - [`type StepUpLevel`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#StepUpLevel) - StepUpLevel represents the authentication assurance level required for an action.
 - [`const StepUpMFA`](https://pkg.go.dev/github.com/getkayan/kayan/core/flow#StepUpMFA) - StepUpMFA requires the user to have completed MFA verification.

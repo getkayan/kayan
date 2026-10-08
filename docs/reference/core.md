@@ -5825,15 +5825,36 @@ func RequireTrustedAttestation() AttestationPolicy
 func AllowedAuthenticators(aaguids ...[]byte) (AttestationPolicy, error)
 func RequireDeviceBoundCredential() AttestationPolicy
 func CombineAttestationPolicies(policies ...AttestationPolicy) AttestationPolicy
+
+type AttestationRoots interface {
+    RootsFor(ctx context.Context, aaguid []byte) ([]*x509.Certificate, error)
+}
 ```
 
-`RequireTrustedAttestation` rejects `none` and self-attestation.
-`AllowedAuthenticators` restricts registration to named AAGUIDs and refuses an
-empty list or all-zero AAGUID. `RequireDeviceBoundCredential` rejects
-backup-eligible credentials; use it only where policy truly requires a key to
-remain on one device, because it excludes ordinary synchronized passkeys.
+An attestation statement's signature is checked by the WebAuthn library, but a
+signature proves only that the statement matches its own certificate. Anyone
+can mint a CA, issue a leaf that looks like a manufacturer's, and claim any
+AAGUID. What identifies the device is the certificate chain reaching a root
+the deployment trusts for that model, and Kayan makes no outbound requests, so
+the roots are yours: set `WebAuthnConfig.AttestationRoots`, from a hardware
+inventory or from the FIDO Metadata Service fetched and verified by your host.
+Roots are looked up per AAGUID, so one vendor's root never vouches for another
+vendor's model. The chain is verified at the strategy's clock and reported as
+`AttestationInfo.ChainVerified`.
 
-Set both `WebAuthnConfig.AttestationPreference` and `AttestationPolicy`.
+`RequireTrustedAttestation` requires `ChainVerified`. `AllowedAuthenticators`
+restricts registration to named AAGUIDs, believes an AAGUID only when
+`ChainVerified` is true, and refuses an empty list or the all-zero AAGUID. Both
+refuse every registration when no `AttestationRoots` are configured -- an
+unverified allowlist is decorative. `AttestationInfo.Format` is the statement
+format (`packed`, `tpm`, `none`, ...), not the attestation type: packed self
+attestation and a manufacturer-signed statement share the format `packed`.
+`RequireDeviceBoundCredential` rejects backup-eligible credentials; use it only
+where policy truly requires a key to remain on one device, because it excludes
+ordinary synchronized passkeys.
+
+Set `WebAuthnConfig.AttestationPreference`, `AttestationPolicy`, and
+`AttestationRoots` together.
 Requesting direct attestation without judging it collects identifying material
 and may prompt the user while enforcing no trust decision.
 

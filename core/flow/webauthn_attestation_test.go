@@ -21,31 +21,24 @@ var (
 // TestRequireTrustedAttestationRefusesWhatVouchesForNothing is the check that
 // makes requesting attestation mean anything.
 //
-// "none" says the authenticator asserted nothing. "self" says the credential's
-// own key signed for itself, which proves the key exists and nothing about
-// what holds it. A deployment that asks for attestation and accepts either has
-// a consent prompt, a certificate chain in its database, and no more assurance
-// than one that asked for nothing.
+// The WebAuthn library reports the statement format, never the attestation
+// type: packed self-attestation arrives as "packed", exactly like a statement
+// signed by a manufacturer. Only a verified chain distinguishes them, so every
+// real format is refused until ChainVerified is set.
 func TestRequireTrustedAttestationRefusesWhatVouchesForNothing(t *testing.T) {
 	policy := RequireTrustedAttestation()
 
-	for _, format := range []string{"", AttestationNone, AttestationSelf} {
+	for _, format := range []string{"", AttestationNone, "packed", "tpm", "android-key", "apple", "fido-u2f"} {
 		err := policy.AllowAuthenticator(context.Background(),
 			AttestationInfo{Format: format, AAGUID: yubikeyAAGUID})
-		if err == nil {
-			t.Errorf("attestation format %q was accepted as trusted", format)
-			continue
-		}
 		if !errors.Is(err, ErrAttestationMissing) {
-			t.Errorf("format %q: error = %v, want ErrAttestationMissing", format, err)
+			t.Errorf("format %q without a verified chain: error = %v, want ErrAttestationMissing", format, err)
 		}
 	}
 
-	for _, format := range []string{AttestationBasic, AttestationAttCA} {
-		if err := policy.AllowAuthenticator(context.Background(),
-			AttestationInfo{Format: format, AAGUID: yubikeyAAGUID}); err != nil {
-			t.Errorf("format %q was refused: %v", format, err)
-		}
+	if err := policy.AllowAuthenticator(context.Background(),
+		AttestationInfo{Format: "packed", AAGUID: yubikeyAAGUID, ChainVerified: true}); err != nil {
+		t.Errorf("a verified chain was refused: %v", err)
 	}
 }
 
@@ -85,12 +78,12 @@ func TestAllowlistMatchesByModel(t *testing.T) {
 	}
 
 	if err := policy.AllowAuthenticator(context.Background(),
-		AttestationInfo{Format: AttestationBasic, AAGUID: yubikeyAAGUID}); err != nil {
+		AttestationInfo{Format: "packed", AAGUID: yubikeyAAGUID, ChainVerified: true}); err != nil {
 		t.Errorf("an allowlisted model was refused: %v", err)
 	}
 
 	err = policy.AllowAuthenticator(context.Background(),
-		AttestationInfo{Format: AttestationBasic, AAGUID: unknownAAGUID})
+		AttestationInfo{Format: "packed", AAGUID: unknownAAGUID, ChainVerified: true})
 	if !errors.Is(err, ErrAuthenticatorNotAllowed) {
 		t.Errorf("error = %v, want ErrAuthenticatorNotAllowed", err)
 	}
@@ -101,6 +94,23 @@ func TestAllowlistMatchesByModel(t *testing.T) {
 		AttestationInfo{Format: AttestationNone, AAGUID: zeroAAGUID})
 	if !errors.Is(err, ErrAuthenticatorNotAllowed) {
 		t.Errorf("an unattested credential matched a hardware allowlist: %v", err)
+	}
+}
+
+// TestAllowlistIgnoresAnUnverifiedAAGUID. An unattested or self-attested
+// authenticator chooses its own AAGUID. A software authenticator claiming a
+// listed model must not pass on the claim alone.
+func TestAllowlistIgnoresAnUnverifiedAAGUID(t *testing.T) {
+	policy, err := AllowedAuthenticators(yubikeyAAGUID)
+	if err != nil {
+		t.Fatalf("AllowedAuthenticators: %v", err)
+	}
+	for _, format := range []string{AttestationNone, "packed"} {
+		err := policy.AllowAuthenticator(context.Background(),
+			AttestationInfo{Format: format, AAGUID: yubikeyAAGUID})
+		if !errors.Is(err, ErrAuthenticatorNotAllowed) {
+			t.Errorf("format %q claiming an allowlisted AAGUID: error = %v, want ErrAuthenticatorNotAllowed", format, err)
+		}
 	}
 }
 
@@ -119,7 +129,7 @@ func TestAllowlistCopiesItsInput(t *testing.T) {
 	copy(buffer, unknownAAGUID)
 
 	if err := policy.AllowAuthenticator(context.Background(),
-		AttestationInfo{Format: AttestationBasic, AAGUID: yubikeyAAGUID}); err != nil {
+		AttestationInfo{Format: "packed", AAGUID: yubikeyAAGUID, ChainVerified: true}); err != nil {
 		t.Errorf("the allowlist changed when the caller reused its buffer: %v", err)
 	}
 }
@@ -131,12 +141,12 @@ func TestRequireDeviceBoundCredential(t *testing.T) {
 	policy := RequireDeviceBoundCredential()
 
 	if err := policy.AllowAuthenticator(context.Background(),
-		AttestationInfo{Format: AttestationBasic, BackupEligible: false}); err != nil {
+		AttestationInfo{Format: "packed", BackupEligible: false}); err != nil {
 		t.Errorf("a device-bound credential was refused: %v", err)
 	}
 
 	err := policy.AllowAuthenticator(context.Background(),
-		AttestationInfo{Format: AttestationBasic, BackupEligible: true})
+		AttestationInfo{Format: "packed", BackupEligible: true})
 	if !errors.Is(err, ErrAuthenticatorNotAllowed) {
 		t.Errorf("error = %v, want a backup-eligible credential refused", err)
 	}
@@ -161,14 +171,14 @@ func TestCombinedPoliciesReportTheFirstRefusal(t *testing.T) {
 
 	// Fails the second: attested, wrong model.
 	err = policy.AllowAuthenticator(context.Background(),
-		AttestationInfo{Format: AttestationBasic, AAGUID: unknownAAGUID})
+		AttestationInfo{Format: "packed", AAGUID: unknownAAGUID, ChainVerified: true})
 	if !errors.Is(err, ErrAuthenticatorNotAllowed) {
 		t.Errorf("error = %v, want ErrAuthenticatorNotAllowed", err)
 	}
 
 	// Passes both.
 	if err := policy.AllowAuthenticator(context.Background(),
-		AttestationInfo{Format: AttestationBasic, AAGUID: yubikeyAAGUID}); err != nil {
+		AttestationInfo{Format: "packed", AAGUID: yubikeyAAGUID, ChainVerified: true}); err != nil {
 		t.Errorf("a credential satisfying every policy was refused: %v", err)
 	}
 }
@@ -215,7 +225,7 @@ func TestFinishRegistrationConsultsThePolicy(t *testing.T) {
 		Flags:           webauthn.CredentialFlags{BackupEligible: true},
 	}
 
-	err := strategy.applyAttestationPolicy(context.Background(), credential)
+	err := strategy.applyAttestationPolicy(context.Background(), credential, nil)
 	if !consulted {
 		t.Fatal("the configured attestation policy was never consulted")
 	}
@@ -230,7 +240,7 @@ func TestNoPolicyLetsRegistrationThrough(t *testing.T) {
 
 	if err := strategy.applyAttestationPolicy(context.Background(), &webauthn.Credential{
 		AttestationType: AttestationNone,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Errorf("an unconfigured strategy refused a credential: %v", err)
 	}
 }

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- WebAuthn attestation policies now verify what they claimed to.
+  `RequireTrustedAttestation` refused the formats `none` and `self`, but the
+  WebAuthn library reports the statement format (`packed`, `tpm`, ...), never
+  the attestation type, so packed self-attestation passed as trusted.
+  No certificate chain was verified against any root, so a software
+  authenticator could mint its own CA, claim a listed AAGUID, and pass
+  `AllowedAuthenticators` -- which also accepted a client-chosen AAGUID under
+  format `none`. Kayan now verifies the x5c chain against roots supplied per
+  AAGUID through the new `WebAuthnConfig.AttestationRoots`, at the strategy's
+  clock, and reports it as `AttestationInfo.ChainVerified`; both policies
+  require it. **Breaking:** with either policy configured and no
+  `AttestationRoots`, every registration is refused -- the policy was not
+  enforcing anything before. `AttestationSelf`, `AttestationBasic`, and
+  `AttestationAttCA` are deprecated; no registration ever produced them.
 - `scim.Manager` never returns a user's password, and refuses to filter or sort
   on it. Every read and write returned whatever storage held, so a deployment
   mapping `password` to its hash column served the bcrypt hash on every
